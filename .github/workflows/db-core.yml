@@ -34,8 +34,11 @@ jobs:
       - name: Run pgTAP database tests
         run: supabase test db
 
-      - name: Run Gate A concurrency test
+      - name: Run Gate A scheduling concurrency test
         run: bash scripts/test-concurrency.sh
+
+      - name: Run package balance concurrency test
+        run: bash scripts/test-package-concurrency.sh
 
       - name: Stop local Supabase
         if: always()
