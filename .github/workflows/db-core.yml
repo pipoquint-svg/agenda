@@ -15,6 +15,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Test Google Edge helpers
+        run: deno test --allow-env supabase/functions/_shared/google_test.ts
+
+      - name: Type-check Edge Functions
+        run: |
+          deno check supabase/functions/google-oauth/index.ts
+          deno check supabase/functions/google-sync/index.ts
+          deno check supabase/functions/google-webhook/index.ts
+          deno check supabase/functions/google-watch/index.ts
+          deno check supabase/functions/integration-worker/index.ts
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
