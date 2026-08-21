@@ -1,4 +1,5 @@
 import { functionsBaseUrl, publicApiKey } from './supabase'
+import { trackDemandLead } from './tracking'
 
 export type DemandConfig = {
   brands: string[]
@@ -71,6 +72,10 @@ export async function getDemandConfig(): Promise<DemandConfig> {
 
 export async function submitDemand(body: Record<string, unknown>): Promise<void> {
   await request('demand-capture', { method: 'POST', body: JSON.stringify(body) })
+  const brand = typeof body.brand === 'string' ? body.brand : ''
+  const serviceId = typeof body.service_id === 'string' ? body.service_id : ''
+  const campaign = typeof body.campaign === 'string' ? body.campaign : null
+  if (brand && serviceId) trackDemandLead({ brand, serviceId, campaign })
 }
 
 function filterParams(filters: DemandFilters): URLSearchParams {
