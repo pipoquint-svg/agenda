@@ -2,6 +2,13 @@ alter table public.operation_settings
   add column hour_package_surcharge_percent numeric(5,2) not null default 15
     check (hour_package_surcharge_percent >= 0 and hour_package_surcharge_percent <= 100);
 
+alter table public.extras
+  add column hour_package_covers_price boolean not null default false;
+
+alter table public.appointments
+  add column hour_package_discount_amount numeric(12,2) not null default 0
+    check (hour_package_discount_amount >= 0);
+
 create table public.customer_hour_packages (
   id uuid primary key default gen_random_uuid(),
   customer_id uuid not null references public.customers(id) on delete restrict,
@@ -68,6 +75,10 @@ create unique index hour_package_usages_checkout_hold_uq
   on public.hour_package_usages (package_id, checkout_hold_id)
   where checkout_hold_id is not null;
 
+create unique index hour_package_usages_active_checkout_hold_uq
+  on public.hour_package_usages (checkout_hold_id)
+  where checkout_hold_id is not null and status = 'HELD';
+
 create index hour_package_usages_package_status_idx
   on public.hour_package_usages (package_id, status);
 
@@ -119,7 +130,7 @@ declare
   v_inside_standard_hours boolean;
 begin
   if p_end_at <= p_start_at then
-    raise exception 'invalid package period';
+    raise exception using errcode = 'P0001', message = 'INVALID_PACKAGE_PERIOD';
   end if;
 
   select timezone, hour_package_surcharge_percent
@@ -156,3 +167,191 @@ begin
   return 0;
 end;
 $$;
+
+create or replace function public.reserve_hour_package_usage(
+  p_package_id uuid,
+  p_checkout_hold_id uuid,
+  p_customer_id uuid
+)
+returns table (
+  usage_id uuid,
+  base_seconds bigint,
+  surcharge_percent numeric(5,2),
+  surcharge_seconds bigint,
+  charged_seconds bigint,
+  available_after_seconds bigint
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hold public.checkout_holds%rowtype;
+  v_package public.customer_hour_packages%rowtype;
+  v_existing public.hour_package_usages%rowtype;
+  v_base_seconds bigint;
+  v_surcharge_percent numeric(5,2);
+  v_surcharge_seconds bigint;
+  v_charged_seconds bigint;
+  v_available bigint;
+  v_usage_id uuid;
+begin
+  select * into v_hold
+  from public.checkout_holds
+  where id = p_checkout_hold_id
+  for update;
+
+  if not found or v_hold.status <> 'ACTIVE' or v_hold.expires_at <= now() then
+    raise exception using errcode = 'P0001', message = 'CHECKOUT_HOLD_EXPIRED';
+  end if;
+
+  select * into v_package
+  from public.customer_hour_packages
+  where id = p_package_id
+  for update;
+
+  if not found or v_package.customer_id <> p_customer_id then
+    raise exception using errcode = 'P0001', message = 'HOUR_PACKAGE_NOT_ELIGIBLE';
+  end if;
+
+  if v_package.status <> 'ACTIVE' then
+    raise exception using errcode = 'P0001', message = 'HOUR_PACKAGE_NOT_ELIGIBLE';
+  end if;
+
+  if v_hold.requested_start_at < v_package.valid_from
+     or v_hold.requested_start_at >= v_package.expires_at then
+    raise exception using errcode = 'P0001', message = 'HOUR_PACKAGE_EXPIRED';
+  end if;
+
+  if not exists (
+    select 1
+    from public.hour_package_services ps
+    where ps.package_id = v_package.id
+      and ps.service_id = v_hold.service_id
+  ) then
+    raise exception using errcode = 'P0001', message = 'HOUR_PACKAGE_NOT_ELIGIBLE';
+  end if;
+
+  select * into v_existing
+  from public.hour_package_usages u
+  where u.checkout_hold_id = v_hold.id
+    and u.status = 'HELD'
+  limit 1;
+
+  if found then
+    if v_existing.package_id <> v_package.id then
+      raise exception using errcode = 'P0001', message = 'CHECKOUT_HOLD_ALREADY_HAS_PACKAGE';
+    end if;
+
+    return query
+      select
+        v_existing.id,
+        v_existing.base_seconds,
+        v_existing.surcharge_percent,
+        v_existing.surcharge_seconds,
+        v_existing.charged_seconds,
+        public.hour_package_available_seconds(v_package.id);
+    return;
+  end if;
+
+  v_base_seconds := extract(epoch from (v_hold.requested_end_at - v_hold.requested_start_at))::bigint;
+  v_surcharge_percent := public.hour_package_surcharge_percent_for_period(
+    v_hold.service_employee_id,
+    v_hold.requested_start_at,
+    v_hold.requested_end_at
+  );
+  v_surcharge_seconds := round(v_base_seconds::numeric * v_surcharge_percent / 100)::bigint;
+  v_charged_seconds := v_base_seconds + v_surcharge_seconds;
+  v_available := public.hour_package_available_seconds(v_package.id);
+
+  if v_available < v_charged_seconds then
+    raise exception using errcode = 'P0001', message = 'HOUR_PACKAGE_INSUFFICIENT_BALANCE';
+  end if;
+
+  insert into public.hour_package_usages (
+    package_id,
+    checkout_hold_id,
+    status,
+    base_seconds,
+    surcharge_percent,
+    surcharge_seconds,
+    reason
+  ) values (
+    v_package.id,
+    v_hold.id,
+    'HELD',
+    v_base_seconds,
+    v_surcharge_percent,
+    v_surcharge_seconds,
+    'Checkout hold package reservation'
+  )
+  returning id into v_usage_id;
+
+  return query
+    select
+      v_usage_id,
+      v_base_seconds,
+      v_surcharge_percent,
+      v_surcharge_seconds,
+      v_charged_seconds,
+      public.hour_package_available_seconds(v_package.id);
+end;
+$$;
+
+create or replace function public.release_hour_package_usage(
+  p_checkout_hold_id uuid,
+  p_reason text default 'Checkout hold released'
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer;
+begin
+  update public.hour_package_usages
+  set status = 'RELEASED',
+      reason = coalesce(p_reason, reason),
+      released_at = now(),
+      updated_at = now()
+  where checkout_hold_id = p_checkout_hold_id
+    and status = 'HELD';
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+create or replace function public.consume_hour_package_usage(
+  p_checkout_hold_id uuid,
+  p_appointment_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_usage_id uuid;
+begin
+  update public.hour_package_usages
+  set status = 'CONSUMED',
+      appointment_id = p_appointment_id,
+      consumed_at = now(),
+      updated_at = now()
+  where checkout_hold_id = p_checkout_hold_id
+    and status = 'HELD'
+  returning id into v_usage_id;
+
+  return v_usage_id;
+end;
+$$;
+
+revoke all on function public.reserve_hour_package_usage(uuid, uuid, uuid) from public, anon, authenticated;
+revoke all on function public.release_hour_package_usage(uuid, text) from public, anon, authenticated;
+revoke all on function public.consume_hour_package_usage(uuid, uuid) from public, anon, authenticated;
+
+grant execute on function public.reserve_hour_package_usage(uuid, uuid, uuid) to service_role;
+grant execute on function public.release_hour_package_usage(uuid, text) to service_role;
+grant execute on function public.consume_hour_package_usage(uuid, uuid) to service_role;
