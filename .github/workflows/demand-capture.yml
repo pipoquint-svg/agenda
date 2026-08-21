@@ -1,0 +1,58 @@
+name: Demand Capture
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  demand-capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Test demand capture validation
+        run: deno test supabase/functions/_shared/demand-capture_test.ts
+
+      - name: Type-check demand capture functions
+        run: |
+          deno check supabase/functions/demand-capture/index.ts
+          deno check supabase/functions/demand-capture-admin/index.ts
+
+      - name: Enforce public editorial rule
+        run: |
+          if grep -R -n -E '—|–' \
+            web/src/DemandCaptureForm.tsx \
+            supabase/functions/demand-capture \
+            supabase/functions/_shared/demand-capture.ts; then
+            echo "Typographic dash found in public demand capture content"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install --package-lock-only && npm ci
+
+      - name: Type-check web
+        working-directory: web
+        run: npm run check
+
+      - name: Build web
+        working-directory: web
+        run: npm run build
