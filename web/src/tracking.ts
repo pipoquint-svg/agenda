@@ -14,8 +14,14 @@ export type AttributionSnapshot = {
   gclid: string | null
 }
 
-type TrackingParams = Record<string, string | number | boolean | null | undefined>
+type TrackingParams = Record<string, unknown>
 type QueuedEvent = () => void
+type MetaFn = ((...args: unknown[]) => void) & {
+  queue: unknown[][]
+  callMethod?: (...args: unknown[]) => void
+  loaded?: boolean
+  version?: string
+}
 
 const CONSENT_KEY = 'bs_tracking_consent_v1'
 const VISITOR_KEY = 'bs_tracking_visitor_v1'
@@ -124,7 +130,7 @@ function loadMeta() {
   const fbq = function (...args: unknown[]) {
     if (fbq.callMethod) fbq.callMethod(...args)
     else fbq.queue.push(args)
-  } as Window['fbq'] & { queue: unknown[][]; callMethod?: (...args: unknown[]) => void; loaded?: boolean; version?: string }
+  } as MetaFn
   fbq.queue = []
   fbq.loaded = true
   fbq.version = '2.0'
@@ -156,8 +162,8 @@ function dispatch(send: QueuedEvent): void {
   send()
 }
 
-function clean(params: TrackingParams): Record<string, string | number | boolean> {
-  return Object.fromEntries(Object.entries(params).filter(([, value]) => value !== null && value !== undefined)) as Record<string, string | number | boolean>
+function clean(params: TrackingParams): TrackingParams {
+  return Object.fromEntries(Object.entries(params).filter(([, value]) => value !== null && value !== undefined))
 }
 
 function once(eventId: string): boolean {
@@ -186,6 +192,7 @@ function meta(name: string, params: TrackingParams, eventId?: string, custom = f
 
 export function trackPublicPage(input: { pageType: 'BOOKING' | 'DEMAND'; brand: string; pageSlug?: string }): void {
   const eventId = `page:${input.pageType}:${input.pageSlug ?? input.brand}:${window.location.pathname}`
+  if (!once(eventId)) return
   dispatch(() => {
     ga('page_view', {
       page_title: document.title,
@@ -200,12 +207,14 @@ export function trackPublicPage(input: { pageType: 'BOOKING' | 'DEMAND'; brand: 
 }
 
 export function trackServiceSelected(input: { brand: string; serviceId: string; serviceName: string; value: number }): void {
+  const eventId = `service:${input.serviceId}:view`
+  if (!once(eventId)) return
   dispatch(() => {
     ga('view_item', {
       currency: 'BRL', value: input.value,
       items: [{ item_id: input.serviceId, item_name: input.serviceName, item_brand: input.brand, price: input.value, quantity: 1 }],
-    } as unknown as TrackingParams)
-    meta('ViewContent', { content_ids: input.serviceId, content_name: input.serviceName, content_type: 'service', value: input.value, currency: 'BRL' })
+    })
+    meta('ViewContent', { content_ids: [input.serviceId], content_name: input.serviceName, content_type: 'service', value: input.value, currency: 'BRL' }, eventId)
   })
 }
 
@@ -223,8 +232,8 @@ export function trackHoldCreated(input: { holdId: string; brand: string; service
     ga('begin_checkout', {
       currency: 'BRL', value: input.value, bs_brand: input.brand, bs_people_count: input.people,
       items: [{ item_id: input.serviceId, item_name: input.serviceName, item_brand: input.brand, price: input.value, quantity: 1 }],
-    } as unknown as TrackingParams)
-    meta('InitiateCheckout', { content_ids: input.serviceId, content_name: input.serviceName, content_type: 'service', value: input.value, currency: 'BRL', num_items: 1 }, eventId)
+    })
+    meta('InitiateCheckout', { content_ids: [input.serviceId], content_name: input.serviceName, content_type: 'service', value: input.value, currency: 'BRL', num_items: 1 }, eventId)
   })
 }
 
@@ -247,8 +256,15 @@ export function trackAppointmentCreated(input: { appointmentId: string; publicCo
   })
 }
 
-export function trackPaymentInfo(input: { appointmentId: string; method: 'PIX' | 'CARD'; value: number; paymentKind: 'MINIMUM' | 'FULL' }): void {
-  const eventId = `appointment:${input.appointmentId}:payment:${input.method}:${input.paymentKind}`
+export function trackPaymentInfo(input: {
+  appointmentId: string
+  method: 'PIX' | 'CARD'
+  value: number
+  paymentKind: 'MINIMUM' | 'FULL'
+  attemptId?: string
+}): void {
+  const eventId = `appointment:${input.appointmentId}:payment:${input.attemptId ?? `${input.method}:${input.paymentKind}`}`
+  if (!once(eventId)) return
   dispatch(() => {
     ga('add_payment_info', { currency: 'BRL', value: input.value, payment_type: input.method, payment_kind: input.paymentKind })
     meta('AddPaymentInfo', { currency: 'BRL', value: input.value, payment_method: input.method }, eventId)
@@ -272,7 +288,7 @@ export function trackAppointmentConfirmed(input: {
       payment_type: input.paymentMethod,
       cash_collected: input.cashCollected ?? 0,
       items: [{ item_id: input.appointmentId, item_name: input.serviceName, price: input.commercialValue, quantity: 1 }],
-    } as unknown as TrackingParams)
+    })
     meta('Schedule', { content_name: input.serviceName, currency: 'BRL', value: input.commercialValue }, `appointment:${input.appointmentId}:schedule`)
     meta('Purchase', { content_name: input.serviceName, currency: 'BRL', value: input.commercialValue }, purchaseId)
   })
@@ -290,11 +306,6 @@ declare global {
   interface Window {
     dataLayer?: unknown[][]
     gtag?: (...args: unknown[]) => void
-    fbq?: ((...args: unknown[]) => void) & {
-      queue?: unknown[][]
-      callMethod?: (...args: unknown[]) => void
-      loaded?: boolean
-      version?: string
-    }
+    fbq?: MetaFn
   }
 }
