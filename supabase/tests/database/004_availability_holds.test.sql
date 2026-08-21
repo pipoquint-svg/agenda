@@ -148,7 +148,8 @@ select throws_ok(
 );
 
 update public.checkout_holds
-set expires_at = now() - interval '1 second'
+set created_at = now() - interval '2 minutes',
+    expires_at = now() - interval '1 minute'
 where id = ((select payload->>'checkout_hold_id' from created_hold))::uuid;
 
 select public.expire_due_checkout_holds();
