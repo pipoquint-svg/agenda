@@ -72,7 +72,7 @@ function enforceRateLimit(req: Request): void {
     ipBuckets.set(ip, { count: 1, resetAt: now + 10 * 60 * 1000 })
     return
   }
-  if (current.count >= 30) throw new Error('RATE_LIMITED')
+  if (current.count >= 60) throw new Error('RATE_LIMITED')
   current.count += 1
 }
 
@@ -90,19 +90,17 @@ function providerErrorSnapshot(status: number, raw: unknown): Record<string, unk
   }
 }
 
-async function mercadoPagoCreatePayment(body: Record<string, unknown>, idempotencyKey: string): Promise<{ status: number; data: Record<string, unknown> }> {
+async function mercadoPagoRequest(url: string, init: RequestInit): Promise<{ status: number; data: Record<string, unknown> }> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
-    const res = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
+    const res = await fetch(url, {
+      ...init,
       headers: {
         authorization: `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
-        'content-type': 'application/json',
         accept: 'application/json',
-        'x-idempotency-key': idempotencyKey,
+        ...(init.headers ?? {}),
       },
-      body: JSON.stringify(body),
       signal: controller.signal,
     })
     const data = await res.json().catch(() => ({})) as Record<string, unknown>
@@ -110,6 +108,18 @@ async function mercadoPagoCreatePayment(body: Record<string, unknown>, idempoten
   } finally {
     clearTimeout(timer)
   }
+}
+
+async function mercadoPagoCreatePayment(body: Record<string, unknown>, idempotencyKey: string) {
+  return mercadoPagoRequest('https://api.mercadopago.com/v1/payments', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey },
+    body: JSON.stringify(body),
+  })
+}
+
+async function mercadoPagoGetPayment(paymentId: string) {
+  return mercadoPagoRequest(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { method: 'GET' })
 }
 
 async function loadContext(token: string): Promise<PaymentContext> {
@@ -159,15 +169,48 @@ Deno.serve(async (req) => {
     }
 
     if (req.method !== 'POST') return response({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
-
     const input = await req.json()
+    const context = await loadContext(token)
+
+    if (input?.action === 'SYNC') {
+      const providerPaymentId = typeof input?.provider_payment_id === 'string' ? input.provider_payment_id.trim() : ''
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(providerPaymentId)) throw new Error('PROVIDER_PAYMENT_ID_INVALID')
+
+      const { data: transaction, error: transactionError } = await client
+        .from('payment_transactions')
+        .select('id')
+        .eq('appointment_id', context.appointment_id)
+        .eq('provider', 'MERCADO_PAGO')
+        .eq('transaction_type', 'CHARGE')
+        .eq('provider_payment_id', providerPaymentId)
+        .maybeSingle()
+      if (transactionError) throw new Error(`PAYMENT_LOOKUP_FAILED:${transactionError.message}`)
+      if (!transaction?.id) throw new Error('PAYMENT_NOT_FOUND')
+
+      const provider = await mercadoPagoGetPayment(providerPaymentId)
+      if (provider.status < 200 || provider.status >= 300) throw new Error(`MERCADO_PAGO_LOOKUP_FAILED:${provider.status}`)
+      const snapshot = sanitizeMercadoPagoPayment(provider.data)
+      if (!snapshot.id || snapshot.id !== providerPaymentId) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
+      const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
+
+      const { data: applied, error: applyError } = await client.rpc('apply_provider_payment_status', {
+        p_transaction_id: transaction.id,
+        p_provider_payment_id: snapshot.id,
+        p_normalized_status: normalized,
+        p_event_key: `poll:${snapshot.id}:${snapshot.status ?? 'unknown'}`,
+        p_payload_json: snapshot,
+        p_paid_at: snapshot.date_approved,
+      })
+      if (applyError) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${applyError.message}`)
+      return response({ provider: snapshot, state: applied })
+    }
+
     const paymentKind = input?.payment_kind === 'FULL' ? 'FULL' : input?.payment_kind === 'MINIMUM' ? 'MINIMUM' : ''
     const method = input?.method === 'PIX' ? 'PIX' : input?.method === 'CARD' ? 'CARD' : ''
     const requestKey = typeof input?.request_key === 'string' ? input.request_key.trim() : ''
     if (!paymentKind) throw new Error('INVALID_PAYMENT_KIND')
     if (!method) throw new Error('PUBLIC_PAYMENT_METHOD_NOT_ALLOWED')
 
-    const context = await loadContext(token)
     const { data: intentData, error: intentError } = await client.rpc('service_create_payment_intent_by_token', {
       p_access_token: token,
       p_payment_kind: paymentKind,
@@ -185,10 +228,7 @@ Deno.serve(async (req) => {
       transaction_amount: cashAmount,
       description: `BlackSheep Agenda - ${context.service_name}`.slice(0, 200),
       external_reference: intent.transaction_id,
-      payer: {
-        email: context.payer.email,
-        identification,
-      },
+      payer: { email: context.payer.email, identification },
     }
 
     const notificationUrl = Deno.env.get('MERCADO_PAGO_WEBHOOK_URL')?.trim()
@@ -254,7 +294,7 @@ Deno.serve(async (req) => {
     }, normalized === 'APPROVED' ? 200 : 201)
   } catch (error) {
     const code = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
-    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|RATE_LIMITED|MISSING_ENV)/)?.[1] ?? code.split(':')[0]
+    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|MISSING_ENV)/)?.[1] ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'PAYMENT_HOLD_EXPIRED' ? 409
       : publicCode.startsWith('MISSING_ENV') ? 503
