@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(9);
+select plan(12);
 
 select ok(to_regclass('public.customer_hour_packages') is not null, 'customer_hour_packages exists');
 select ok(to_regclass('public.hour_package_services') is not null, 'hour_package_services exists');
@@ -102,18 +102,38 @@ insert into public.checkout_holds (
   now() + interval '10 minutes'
 );
 
-insert into public.hour_package_usages (
-  package_id, checkout_hold_id, status, base_seconds, surcharge_percent, surcharge_seconds
-) values (
-  '00000000-0000-0000-0000-000000000501',
-  '00000000-0000-0000-0000-000000000601',
-  'HELD', 7200, 15, 1080
+select is(
+  (
+    select r.charged_seconds
+    from public.reserve_hour_package_usage(
+      '00000000-0000-0000-0000-000000000501',
+      '00000000-0000-0000-0000-000000000601',
+      '00000000-0000-0000-0000-000000000301'
+    ) r
+  ),
+  8280::bigint,
+  '2h weekend booking reserves 2h18 from package'
 );
 
 select is(
   public.hour_package_available_seconds('00000000-0000-0000-0000-000000000501'),
   135720::bigint,
   'held package usage immediately reduces available balance by 2h18'
+);
+
+select is(
+  public.release_hour_package_usage(
+    '00000000-0000-0000-0000-000000000601',
+    'test release'
+  ),
+  1,
+  'release returns one released usage'
+);
+
+select is(
+  public.hour_package_available_seconds('00000000-0000-0000-0000-000000000501'),
+  144000::bigint,
+  'released hold restores package balance'
 );
 
 select * from finish();
