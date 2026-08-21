@@ -19,11 +19,12 @@ export type MercadoPagoPaymentSnapshot = {
   } | null
 }
 
-function hexToBytes(hex: string): Uint8Array {
+function hexToArrayBuffer(hex: string): ArrayBuffer {
   if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) throw new Error('MERCADO_PAGO_SIGNATURE_INVALID')
-  const out = new Uint8Array(hex.length / 2)
+  const buffer = new ArrayBuffer(hex.length / 2)
+  const out = new Uint8Array(buffer)
   for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  return out
+  return buffer
 }
 
 export function parseMercadoPagoSignature(value: string): { ts: string; v1: string } {
@@ -59,7 +60,7 @@ export async function verifyMercadoPagoWebhookSignature(input: {
     false,
     ['verify'],
   )
-  return crypto.subtle.verify('HMAC', key, hexToBytes(parsed.v1), encoder.encode(manifest))
+  return crypto.subtle.verify('HMAC', key, hexToArrayBuffer(parsed.v1), encoder.encode(manifest))
 }
 
 export function normalizeMercadoPagoPaymentStatus(status: string | null | undefined): MercadoPagoNormalizedStatus {
