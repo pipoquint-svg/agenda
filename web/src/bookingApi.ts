@@ -1,4 +1,13 @@
 import { functionsBaseUrl, publicApiKey, supabase } from './supabase'
+import {
+  attributionForBackend,
+  trackAppointmentConfirmed,
+  trackAppointmentCreated,
+  trackCustomerDetailsCompleted,
+  trackFunnelStep,
+  trackHoldCreated,
+  trackServiceSelected,
+} from './tracking'
 
 export type BookingEmployee = {
   service_employee_id: string
@@ -163,6 +172,22 @@ export type ServiceAnswer = {
   value: string | number | boolean | null
 }
 
+type QuoteFingerprint = { extras: string; people: number }
+
+const bookingPageCache = new Map<string, BookingPageData>()
+const checkoutContextCache = new Map<string, CheckoutContext>()
+const quoteFingerprintCache = new Map<string, QuoteFingerprint>()
+
+function numeric(value: number | string | undefined): number {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function pageAndService(pageSlug: string, serviceId: string): { page: BookingPageData | null; service: BookingService | null } {
+  const page = bookingPageCache.get(pageSlug) ?? null
+  return { page, service: page?.services.find((item) => item.id === serviceId) ?? null }
+}
+
 function unwrapRpc<T>(data: unknown, error: { message: string } | null): T {
   if (error) throw new Error(error.message)
   return data as T
@@ -170,7 +195,9 @@ function unwrapRpc<T>(data: unknown, error: { message: string } | null): T {
 
 export async function loadBookingPage(slug: string): Promise<BookingPageData | null> {
   const { data, error } = await supabase.rpc('public_get_booking_page', { p_slug: slug })
-  return unwrapRpc<BookingPageData | null>(data, error)
+  const result = unwrapRpc<BookingPageData | null>(data, error)
+  if (result) bookingPageCache.set(slug, result)
+  return result
 }
 
 export async function quoteBooking(input: {
@@ -187,7 +214,43 @@ export async function quoteBooking(input: {
     p_extra_selections: input.extras,
     p_people_count: input.peopleCount,
   })
-  return unwrapRpc<BookingQuote>(data, error)
+  const result = unwrapRpc<BookingQuote>(data, error)
+  const { page, service } = pageAndService(input.pageSlug, input.serviceId)
+  if (page && service) {
+    trackServiceSelected({
+      brand: page.brand_key,
+      serviceId: service.id,
+      serviceName: service.name,
+      value: numeric(service.base_price),
+    })
+
+    const key = `${input.pageSlug}:${input.serviceId}:${input.serviceEmployeeId}`
+    const nextFingerprint: QuoteFingerprint = {
+      extras: JSON.stringify([...input.extras].sort((a, b) => a.extra_id.localeCompare(b.extra_id))),
+      people: input.peopleCount,
+    }
+    const previous = quoteFingerprintCache.get(key)
+    if (previous && previous.extras !== nextFingerprint.extras) {
+      trackFunnelStep('booking_extras_changed', {
+        bs_brand: page.brand_key,
+        service_id: service.id,
+        extra_quantity: input.extras.reduce((sum, extra) => sum + extra.quantity, 0),
+        currency: 'BRL',
+        value: numeric(result.commercial_value),
+      })
+    }
+    if (previous && previous.people !== nextFingerprint.people) {
+      trackFunnelStep('booking_people_changed', {
+        bs_brand: page.brand_key,
+        service_id: service.id,
+        people_count: input.peopleCount,
+        currency: 'BRL',
+        value: numeric(result.commercial_value),
+      })
+    }
+    quoteFingerprintCache.set(key, nextFingerprint)
+  }
+  return result
 }
 
 export async function listBookingSlots(input: {
@@ -206,7 +269,24 @@ export async function listBookingSlots(input: {
     p_people_count: input.peopleCount,
     p_local_date: input.localDate,
   })
-  return unwrapRpc<BookingSlot[]>(data ?? [], error)
+  const result = unwrapRpc<BookingSlot[]>(data ?? [], error)
+  const { page, service } = pageAndService(input.pageSlug, input.serviceId)
+  trackFunnelStep('availability_searched', {
+    bs_brand: page?.brand_key ?? input.pageSlug,
+    service_id: input.serviceId,
+    service_name: service?.name,
+    desired_date: input.localDate,
+    people_count: input.peopleCount,
+    slot_count: result.length,
+  })
+  if (result.length === 0) {
+    trackFunnelStep('availability_empty', {
+      bs_brand: page?.brand_key ?? input.pageSlug,
+      service_id: input.serviceId,
+      desired_date: input.localDate,
+    })
+  }
+  return result
 }
 
 export async function createBookingHold(input: {
@@ -217,22 +297,40 @@ export async function createBookingHold(input: {
   peopleCount: number
   requestedStartAt: string
 }): Promise<CheckoutHold> {
-  const { data, error } = await supabase.rpc('public_create_checkout_hold', {
+  const { data, error } = await supabase.rpc('public_create_checkout_hold_tracked', {
     p_booking_page_slug: input.pageSlug,
     p_service_id: input.serviceId,
     p_service_employee_id: input.serviceEmployeeId,
     p_extra_selections: input.extras,
     p_people_count: input.peopleCount,
     p_requested_start_at: input.requestedStartAt,
+    p_attribution_json: attributionForBackend() ?? {},
   })
-  return unwrapRpc<CheckoutHold>(data, error)
+  const result = unwrapRpc<CheckoutHold>(data, error)
+  const { page, service } = pageAndService(input.pageSlug, input.serviceId)
+  trackFunnelStep('slot_selected', {
+    bs_brand: page?.brand_key ?? input.pageSlug,
+    service_id: input.serviceId,
+    requested_start_at: input.requestedStartAt,
+  })
+  trackHoldCreated({
+    holdId: result.checkout_hold_id,
+    brand: page?.brand_key ?? input.pageSlug,
+    serviceId: input.serviceId,
+    serviceName: service?.name ?? input.serviceId,
+    value: numeric(result.commercial_value),
+    people: input.peopleCount,
+  })
+  return result
 }
 
 export async function loadCheckoutContext(token: string): Promise<CheckoutContext> {
   const { data, error } = await supabase.rpc('public_get_checkout_context', {
     p_checkout_hold_token: token,
   })
-  return unwrapRpc<CheckoutContext>(data, error)
+  const result = unwrapRpc<CheckoutContext>(data, error)
+  checkoutContextCache.set(token, result)
+  return result
 }
 
 export async function setBookingRecoveryContact(token: string, phone: string, enabled = true): Promise<void> {
@@ -260,7 +358,17 @@ export async function bindCheckoutCustomer(input: {
     p_tax_id: input.taxId || null,
     p_recovery_enabled: input.recoveryEnabled,
   })
-  return unwrapRpc(data, error)
+  const result = unwrapRpc<{ customer_bound: boolean; customer_created: boolean; recovery_enabled: boolean; has_tax_id: boolean }>(data, error)
+  const context = checkoutContextCache.get(input.token)
+  if (context) {
+    trackCustomerDetailsCompleted({
+      holdId: context.checkout_hold_id,
+      brand: context.brand_key,
+      serviceId: context.service.id,
+      value: numeric(context.summary.commercial_value),
+    })
+  }
+  return result
 }
 
 export async function listCheckoutPackages(token: string): Promise<CheckoutPackage[]> {
@@ -276,6 +384,12 @@ export async function selectCheckoutPackage(token: string, packageId: string): P
     p_hour_package_id: packageId,
   })
   if (error) throw new Error(error.message)
+  const context = checkoutContextCache.get(token)
+  trackFunnelStep('hour_package_selected', {
+    bs_brand: context?.brand_key,
+    service_id: context?.service.id,
+    package_selected: true,
+  })
 }
 
 export async function clearCheckoutPackage(token: string): Promise<void> {
@@ -283,6 +397,12 @@ export async function clearCheckoutPackage(token: string): Promise<void> {
     p_checkout_hold_token: token,
   })
   if (error) throw new Error(error.message)
+  const context = checkoutContextCache.get(token)
+  trackFunnelStep('hour_package_selected', {
+    bs_brand: context?.brand_key,
+    service_id: context?.service.id,
+    package_selected: false,
+  })
 }
 
 export async function submitBookingCheckout(input: {
@@ -306,5 +426,34 @@ export async function submitBookingCheckout(input: {
 
   const payload = await res.json().catch(() => ({})) as { appointment?: AppointmentCheckoutResult; error?: { code?: string } }
   if (!res.ok || !payload.appointment) throw new Error(payload.error?.code ?? `HTTP_${res.status}`)
+
+  const context = checkoutContextCache.get(input.token)
+  const value = numeric(context?.summary.commercial_value)
+  if (context) {
+    trackFunnelStep('booking_terms_submitted', {
+      bs_brand: context.brand_key,
+      service_id: context.service.id,
+      accepted_terms: input.termVersionIds.length,
+      service_answers: input.answers.length,
+    })
+  }
+  trackAppointmentCreated({
+    appointmentId: payload.appointment.appointment_id,
+    publicCode: payload.appointment.public_code,
+    serviceName: context?.service.name ?? 'Reserva',
+    value,
+    status: payload.appointment.status,
+    packageReserved: payload.appointment.package_reserved,
+  })
+  if (payload.appointment.status === 'CONFIRMED') {
+    trackAppointmentConfirmed({
+      appointmentId: payload.appointment.appointment_id,
+      publicCode: payload.appointment.public_code,
+      serviceName: context?.service.name ?? 'Reserva',
+      commercialValue: value,
+      paymentMethod: payload.appointment.package_reserved ? 'HOUR_PACKAGE' : 'NO_CASH_DUE',
+      cashCollected: 0,
+    })
+  }
   return payload.appointment
 }
