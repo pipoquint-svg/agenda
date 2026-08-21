@@ -33,6 +33,10 @@ function numeric(value: number | string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function timeRange(startAt: string, endAt: string): string {
+  return `${time.format(new Date(startAt))}–${time.format(new Date(endAt))}`
+}
+
 function readableError(error: unknown): string {
   const raw = error instanceof Error ? error.message : 'Não foi possível concluir esta etapa.'
   const known: Array<[string, string]> = [
@@ -356,8 +360,10 @@ export function BookingPage({ slug }: { slug: string }) {
                     <div className="slots-grid" aria-label="Horários disponíveis">
                       {slots.map((slot) => {
                         const arrival = time.format(new Date(slot.slot_start_at))
+                        const end = time.format(new Date(slot.slot_end_at))
                         const core = time.format(new Date(slot.core_start_at))
-                        const differs = slot.slot_start_at !== slot.core_start_at
+                        const coreEnd = time.format(new Date(slot.core_end_at))
+                        const differs = slot.slot_start_at !== slot.core_start_at || slot.slot_end_at !== slot.core_end_at
                         return (
                           <button
                             type="button"
@@ -366,8 +372,8 @@ export function BookingPage({ slug }: { slug: string }) {
                             disabled={creatingHold !== null || hold !== null}
                             onClick={() => protectSlot(slot)}
                           >
-                            <strong>{arrival}</strong>
-                            {differs ? <small>Atendimento principal às {core}</small> : <small>Início do atendimento</small>}
+                            <strong>{arrival}–{end}</strong>
+                            {differs ? <small>Atendimento principal {core}–{coreEnd}</small> : <small>Período completo</small>}
                             <span>{money.format(numeric(slot.commercial_value))}</span>
                             {creatingHold === slot.slot_start_at ? <em>Protegendo…</em> : null}
                           </button>
@@ -391,8 +397,8 @@ export function BookingPage({ slug }: { slug: string }) {
                     <div className="hold-dot" />
                     <div>
                       <small>Horário protegido</small>
-                      <h2>{time.format(new Date(hold.slot_start_at))}</h2>
-                      {hold.slot_start_at !== hold.core_start_at ? <p>Atendimento principal às {time.format(new Date(hold.core_start_at))}.</p> : null}
+                      <h2>{timeRange(hold.slot_start_at, hold.slot_end_at)}</h2>
+                      {hold.slot_start_at !== hold.core_start_at || hold.slot_end_at !== hold.core_end_at ? <p>Atendimento principal {timeRange(hold.core_start_at, hold.core_end_at)}.</p> : null}
                       <p>Preencha a próxima etapa antes do contador terminar. Se expirar, o horário volta a ficar disponível.</p>
                     </div>
                     <strong className="hold-timer">{secondsLabel(remainingSeconds)}</strong>
