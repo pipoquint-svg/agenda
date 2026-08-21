@@ -22,23 +22,29 @@ function base64ToBytes(value: string): Uint8Array {
   return Uint8Array.from(binary, (char) => char.charCodeAt(0))
 }
 
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
+}
+
 export async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  const digest = await crypto.subtle.digest('SHA-256', asArrayBuffer(new TextEncoder().encode(value)))
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 async function encryptionKey(): Promise<CryptoKey> {
   const raw = base64ToBytes(requiredEnv('GOOGLE_TOKEN_ENCRYPTION_KEY'))
   if (raw.byteLength !== 32) throw new Error('GOOGLE_TOKEN_ENCRYPTION_KEY_MUST_BE_32_BYTES_BASE64')
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+  return crypto.subtle.importKey('raw', asArrayBuffer(raw), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
 }
 
 export async function encryptRefreshToken(token: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const cipher = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv: asArrayBuffer(iv) },
     await encryptionKey(),
-    new TextEncoder().encode(token),
+    asArrayBuffer(new TextEncoder().encode(token)),
   )
   return `v1.${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(cipher))}`
 }
@@ -47,9 +53,9 @@ export async function decryptRefreshToken(ciphertext: string): Promise<string> {
   const [version, iv64, cipher64] = ciphertext.split('.')
   if (version !== 'v1' || !iv64 || !cipher64) throw new Error('GOOGLE_REFRESH_TOKEN_CIPHERTEXT_INVALID')
   const plain = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: base64ToBytes(iv64) },
+    { name: 'AES-GCM', iv: asArrayBuffer(base64ToBytes(iv64)) },
     await encryptionKey(),
-    base64ToBytes(cipher64),
+    asArrayBuffer(base64ToBytes(cipher64)),
   )
   return new TextDecoder().decode(plain)
 }
