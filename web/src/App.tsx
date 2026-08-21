@@ -1,15 +1,34 @@
+import { useEffect } from 'react'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPage } from './BookingPage'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
+import { trackPublicPage } from './tracking'
 import './checkout.css'
 
 function PublicBookingRoute({ slug }: { slug: string }) {
+  useEffect(() => {
+    trackPublicPage({ pageType: 'BOOKING', brand: slug.toUpperCase(), pageSlug: slug })
+  }, [slug])
+
   return (
     <>
       <BookingPage slug={slug} />
       <BookingCheckoutSession />
+      <TrackingConsentBanner />
+    </>
+  )
+}
+
+function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: string | null }) {
+  useEffect(() => {
+    trackPublicPage({ pageType: 'DEMAND', brand })
+  }, [brand])
+
+  return (
+    <>
+      <DemandCaptureForm brand={brand} campaign={campaign} />
       <TrackingConsentBanner />
     </>
   )
@@ -32,12 +51,9 @@ export function App() {
 
   const params = new URLSearchParams(window.location.search)
   return (
-    <>
-      <DemandCaptureForm
-        brand={params.get('brand')?.trim() ?? ''}
-        campaign={params.get('campaign')?.trim() || null}
-      />
-      <TrackingConsentBanner />
-    </>
+    <PublicDemandRoute
+      brand={params.get('brand')?.trim() ?? ''}
+      campaign={params.get('campaign')?.trim() || null}
+    />
   )
 }
