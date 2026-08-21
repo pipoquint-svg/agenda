@@ -42,10 +42,15 @@ function maskWhatsapp(value: string): string {
   return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`
 }
 
-function todayLocal(): string {
-  const date = new Date()
-  const offset = date.getTimezoneOffset() * 60000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 10)
+function todaySaoPaulo(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
+  return `${pick('year')}-${pick('month')}-${pick('day')}`
 }
 
 function messageForError(code: string): { field: keyof Fields | 'form'; message: string } {
@@ -57,7 +62,9 @@ function messageForError(code: string): { field: keyof Fields | 'form'; message:
     case 'DESIRED_DATE_INVALID':
     case 'DESIRED_DATE_IN_PAST': return { field: 'desired_date', message: 'Escolha uma data de hoje em diante.' }
     case 'DESIRED_PERIOD_INVALID': return { field: 'desired_period', message: 'Selecione um período válido.' }
-    case 'CONSENT_REQUIRED': return { field: 'consent_contact', message: 'Autorize o contato para registrar seu interesse.' }
+    case 'CONSENT_REQUIRED':
+    case 'CONSENT_VERSION_REQUIRED': return { field: 'consent_contact', message: 'Autorize o contato para registrar seu interesse.' }
+    case 'CONSENT_VERSION_STALE': return { field: 'consent_contact', message: 'O texto de autorização foi atualizado. Leia novamente e marque a caixa para continuar.' }
     case 'RATE_LIMITED': return { field: 'form', message: 'Muitas tentativas foram feitas. Tente novamente mais tarde.' }
     case 'BRAND_INVALID': return { field: 'form', message: 'Este formulário não está disponível para esta marca.' }
     default: return { field: 'form', message: 'Não foi possível registrar seu interesse. Tente novamente.' }
@@ -104,14 +111,14 @@ export function DemandCaptureForm({ brand, campaign }: Props) {
     if (!fields.whatsapp.trim()) next.whatsapp = 'Informe seu WhatsApp.'
     if (!fields.email.trim()) next.email = 'Informe seu e-mail.'
     if (!fields.service_id) next.service_id = 'Selecione o serviço pretendido.'
-    if (fields.desired_date && fields.desired_date < todayLocal()) next.desired_date = 'Escolha uma data de hoje em diante.'
+    if (fields.desired_date && fields.desired_date < todaySaoPaulo()) next.desired_date = 'Escolha uma data de hoje em diante.'
     if (!fields.consent_contact) next.consent_contact = 'Autorize o contato para registrar seu interesse.'
     return next
   }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
-    if (!canSubmit) return
+    if (!canSubmit || !config) return
     const clientErrors = validateClient()
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors)
@@ -128,11 +135,23 @@ export function DemandCaptureForm({ brand, campaign }: Props) {
         notes: fields.notes.trim() || null,
         brand,
         campaign,
+        consent_text_version: config.consent.version,
       })
       setFields(initialFields)
       setSuccess(true)
     } catch (error) {
-      const result = messageForError(error instanceof ApiError ? error.code : 'REQUEST_FAILED')
+      const code = error instanceof ApiError ? error.code : 'REQUEST_FAILED'
+      if (code === 'CONSENT_VERSION_STALE') {
+        try {
+          const latest = await getDemandConfig()
+          setConfig(latest)
+          setFields((current) => ({ ...current, consent_contact: false }))
+        } catch {
+          setErrors({ form: 'Não foi possível atualizar o texto de autorização. Tente novamente.' })
+          return
+        }
+      }
+      const result = messageForError(code)
       setErrors({ [result.field]: result.message })
     } finally {
       setSubmitting(false)
@@ -187,7 +206,7 @@ export function DemandCaptureForm({ brand, campaign }: Props) {
 
             <label>
               <span>Data pretendida, opcional</span>
-              <input type="date" min={todayLocal()} value={fields.desired_date} onChange={(e) => setField('desired_date', e.target.value)} aria-invalid={Boolean(errors.desired_date)} />
+              <input type="date" min={todaySaoPaulo()} value={fields.desired_date} onChange={(e) => setField('desired_date', e.target.value)} aria-invalid={Boolean(errors.desired_date)} />
               {errors.desired_date && <small className="field-error">{errors.desired_date}</small>}
             </label>
 
