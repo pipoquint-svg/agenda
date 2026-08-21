@@ -28,6 +28,17 @@ jobs:
           deno check supabase/functions/demand-capture/index.ts
           deno check supabase/functions/demand-capture-admin/index.ts
 
+      - name: Enforce module isolation
+        run: |
+          if grep -R -n -E 'resource_allocations|appointments|checkout_holds|availability_rules|availability_exceptions|google_calendar' \
+            supabase/migrations/20260821204000_demand_capture.sql \
+            supabase/functions/demand-capture \
+            supabase/functions/demand-capture-admin \
+            supabase/functions/_shared/demand-capture.ts; then
+            echo "Demand capture attempted to depend on booking, availability or calendar state"
+            exit 1
+          fi
+
       - name: Enforce public editorial rule
         run: |
           if grep -R -n -E '—|–' \
