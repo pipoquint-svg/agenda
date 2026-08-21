@@ -55,6 +55,9 @@ verify_jwt = false
 [functions.mercado-pago-webhook]
 verify_jwt = false
 
-# The admin endpoint validates Supabase Auth and admin_users manually.
+# Admin endpoints validate the Supabase Auth bearer token against admin_users manually.
 [functions.demand-capture-admin]
+verify_jwt = false
+
+[functions.admin-agenda]
 verify_jwt = false
