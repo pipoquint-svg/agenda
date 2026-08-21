@@ -361,7 +361,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                 {quote ? (
                   <aside className="booking-summary">
                     <div><small>Estimativa atual</small><strong>{money.format(numeric(quote.commercial_value))}</strong></div>
-                    <div><small>Período contratado</small><strong>{durationLabel(quote.contracted_minutes ?? quote.core_duration_minutes ?? service.base_duration_minutes)}</strong></div>
+                    <div><small>Período contratado</small><strong>{durationLabel(quote.core_duration_minutes ?? service.base_duration_minutes)}</strong></div>
                   </aside>
                 ) : null}
 
