@@ -66,7 +66,9 @@ begin
 end;
 $$;
 
-create or replace function public.reserve_hour_package_usage(
+drop function public.reserve_hour_package_usage(uuid, uuid, uuid);
+
+create function public.reserve_hour_package_usage(
   p_package_id uuid,
   p_checkout_hold_id uuid,
   p_customer_id uuid
