@@ -47,6 +47,14 @@ verify_jwt = false
 [functions.booking-submit]
 verify_jwt = false
 
+# Public payment uses the opaque appointment token and never trusts client amounts.
+[functions.mercado-pago-payment]
+verify_jwt = false
+
+# Mercado Pago authenticates webhook requests with x-signature/x-request-id.
+[functions.mercado-pago-webhook]
+verify_jwt = false
+
 # The admin endpoint validates Supabase Auth and admin_users manually.
 [functions.demand-capture-admin]
 verify_jwt = false
