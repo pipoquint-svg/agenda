@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(13);
+select plan(14);
 
 insert into public.categories(id, name, slug)
 values ('97100000-0000-0000-0000-000000000001', 'Block Public Test', 'block-public-test');
