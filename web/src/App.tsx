@@ -1,9 +1,20 @@
+import { BookingPage } from './BookingPage'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 
 export function App() {
-  if (window.location.pathname.startsWith('/admin/demand')) {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+
+  if (path.startsWith('/admin/demand')) {
     return <DemandCaptureAdmin />
+  }
+
+  if (path === '/agendar/sabrina') {
+    return <BookingPage slug="sabrina" />
+  }
+
+  if (path === '/agendar/blacksheep') {
+    return <BookingPage slug="blacksheep" />
   }
 
   const params = new URLSearchParams(window.location.search)
