@@ -24,9 +24,14 @@ declare
   v_available integer;
   v_required_minutes integer;
   v_timezone text;
-  v_local_ts timestamp without time zone;
+  v_local_start_ts timestamp without time zone;
+  v_local_end_ts timestamp without time zone;
   v_dow smallint;
-  v_local_time time without time zone;
+  v_local_start_time time without time zone;
+  v_local_end_time time without time zone;
+  v_availability_matches integer := 0;
+  v_has_special boolean := false;
+  v_fully_regular boolean := false;
   v_availability_class text;
   v_booking_quote jsonb;
   v_extras_cash_amount numeric(12,2);
@@ -94,25 +99,41 @@ begin
   from public.operation_settings
   where id = 1;
 
-  v_local_ts := v_hold.requested_start_at at time zone v_timezone;
-  v_dow := extract(dow from v_local_ts)::smallint;
-  v_local_time := v_local_ts::time;
+  v_local_start_ts := v_hold.requested_start_at at time zone v_timezone;
+  v_local_end_ts := v_hold.requested_end_at at time zone v_timezone;
 
-  select case
-           when bool_or(ar.availability_class = 'SPECIAL') then 'SPECIAL'
-           else 'REGULAR'
-         end
-  into v_availability_class
+  if v_local_start_ts::date <> v_local_end_ts::date then
+    raise exception 'TIME_PACKAGE_AVAILABILITY_NOT_CLASSIFIED' using errcode = 'P0001';
+  end if;
+
+  v_dow := extract(dow from v_local_start_ts)::smallint;
+  v_local_start_time := v_local_start_ts::time;
+  v_local_end_time := v_local_end_ts::time;
+
+  select
+    count(*)::integer,
+    coalesce(bool_or(ar.availability_class = 'SPECIAL'), false),
+    coalesce(bool_or(
+      ar.availability_class = 'REGULAR'
+      and v_local_start_time >= ar.start_local_time
+      and v_local_end_time <= ar.end_local_time
+    ), false)
+  into v_availability_matches, v_has_special, v_fully_regular
   from public.availability_rules ar
   where ar.service_employee_id = v_hold.service_employee_id
     and ar.is_active
     and ar.weekday = v_dow
-    and v_local_time >= ar.start_local_time
-    and v_local_time < ar.end_local_time;
+    and ar.start_local_time < v_local_end_time
+    and ar.end_local_time > v_local_start_time;
 
-  if v_availability_class is null then
+  if v_availability_matches = 0 then
     raise exception 'TIME_PACKAGE_AVAILABILITY_NOT_CLASSIFIED' using errcode = 'P0001';
   end if;
+
+  v_availability_class := case
+    when v_has_special or not v_fully_regular then 'SPECIAL'
+    else 'REGULAR'
+  end;
 
   v_booking_quote := public.calculate_booking_quote(
     v_hold.service_id,
