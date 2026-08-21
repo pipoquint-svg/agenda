@@ -39,6 +39,9 @@ Deno.serve(async (req) => {
 
     await client.rpc('release_stale_integration_jobs', { p_stale_after_seconds: 300 })
 
+    const { error: holdExpiryError } = await client.rpc('expire_due_checkout_holds')
+    if (holdExpiryError) throw new Error(`CHECKOUT_HOLD_EXPIRY_FAILED:${holdExpiryError.message}`)
+
     // Periodic reconciliation is the safety net if Google push delivery is delayed/dropped.
     const { data: mappings } = await client.from('google_calendar_resources').select('google_calendar_id')
     const calendarIds = [...new Set((mappings ?? []).map((row: any) => row.google_calendar_id))]
@@ -165,7 +168,7 @@ Deno.serve(async (req) => {
       failed,
     })
   } catch (error) {
-    const code = error instanceof Error ? error.message : 'INTEGRATION_WORKER_FAILED'
+    const code = error instanceof Error ? error.message : 'INTEGRATION_JOB_FAILED'
     return errorResponse(error, code === 'INTERNAL_AUTH_REQUIRED' ? 401 : 500)
   }
 })
