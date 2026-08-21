@@ -2,6 +2,7 @@ import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPage } from './BookingPage'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
+import './checkout.css'
 
 function PublicBookingRoute({ slug }: { slug: string }) {
   return (
