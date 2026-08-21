@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(16);
+select plan(17);
 
 insert into public.resources (id, name, resource_type)
 values ('70000000-0000-0000-0000-000000000001', 'PROMOTION TEST STUDIO', 'PHYSICAL');
