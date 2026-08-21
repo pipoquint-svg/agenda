@@ -24,6 +24,7 @@ export type DemandSubmission = {
   notes: string | null
   campaign: string | null
   consent_contact: true
+  consent_text_version: string
 }
 
 export function parseConfiguredBrands(raw: string | undefined): string[] {
@@ -117,8 +118,10 @@ export function validateDemandSubmission(
 
   const notes = nullableText(body.notes, 300)
   const campaign = nullableText(body.campaign, 160)
+  const consentTextVersion = typeof body.consent_text_version === 'string' ? body.consent_text_version.trim() : ''
 
   if (body.consent_contact !== true) throw new Error('CONSENT_REQUIRED')
+  if (!consentTextVersion) throw new Error('CONSENT_VERSION_REQUIRED')
 
   return {
     name,
@@ -131,5 +134,6 @@ export function validateDemandSubmission(
     notes,
     campaign,
     consent_contact: true,
+    consent_text_version: consentTextVersion,
   }
 }
