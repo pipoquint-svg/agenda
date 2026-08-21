@@ -37,3 +37,11 @@ verify_jwt = false
 
 [functions.integration-worker]
 verify_jwt = false
+
+# Demand capture is public by design. Server-side validation is authoritative.
+[functions.demand-capture]
+verify_jwt = false
+
+# The admin endpoint validates Supabase Auth and admin_users manually.
+[functions.demand-capture-admin]
+verify_jwt = false
