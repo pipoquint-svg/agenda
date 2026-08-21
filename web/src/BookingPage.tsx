@@ -356,6 +356,7 @@ export function BookingPage({ slug }: { slug: string }) {
                     <div className="slots-grid" aria-label="Horários disponíveis">
                       {slots.map((slot) => {
                         const arrival = time.format(new Date(slot.slot_start_at))
+                        const end = time.format(new Date(slot.slot_end_at))
                         const core = time.format(new Date(slot.core_start_at))
                         const differs = slot.slot_start_at !== slot.core_start_at
                         return (
@@ -366,8 +367,8 @@ export function BookingPage({ slug }: { slug: string }) {
                             disabled={creatingHold !== null || hold !== null}
                             onClick={() => protectSlot(slot)}
                           >
-                            <strong>{arrival}</strong>
-                            {differs ? <small>Atendimento principal às {core}</small> : <small>Início do atendimento</small>}
+                            <strong>{arrival}–{end}</strong>
+                            {differs ? <small>Chegada às {arrival} · atendimento principal às {core}</small> : <small>Período completo</small>}
                             <span>{money.format(numeric(slot.commercial_value))}</span>
                             {creatingHold === slot.slot_start_at ? <em>Protegendo…</em> : null}
                           </button>
@@ -391,8 +392,8 @@ export function BookingPage({ slug }: { slug: string }) {
                     <div className="hold-dot" />
                     <div>
                       <small>Horário protegido</small>
-                      <h2>{time.format(new Date(hold.slot_start_at))}</h2>
-                      {hold.slot_start_at !== hold.core_start_at ? <p>Atendimento principal às {time.format(new Date(hold.core_start_at))}.</p> : null}
+                      <h2>{time.format(new Date(hold.slot_start_at))}–{time.format(new Date(hold.slot_end_at))}</h2>
+                      {hold.slot_start_at !== hold.core_start_at ? <p>Chegada às {time.format(new Date(hold.slot_start_at))}; atendimento principal às {time.format(new Date(hold.core_start_at))}.</p> : null}
                       <p>Preencha a próxima etapa antes do contador terminar. Se expirar, o horário volta a ficar disponível.</p>
                     </div>
                     <strong className="hold-timer">{secondsLabel(remainingSeconds)}</strong>
