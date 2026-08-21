@@ -2,6 +2,7 @@ import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPage } from './BookingPage'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
+import { TrackingConsentBanner } from './TrackingConsentBanner'
 import './checkout.css'
 
 function PublicBookingRoute({ slug }: { slug: string }) {
@@ -9,6 +10,7 @@ function PublicBookingRoute({ slug }: { slug: string }) {
     <>
       <BookingPage slug={slug} />
       <BookingCheckoutSession />
+      <TrackingConsentBanner />
     </>
   )
 }
@@ -30,9 +32,12 @@ export function App() {
 
   const params = new URLSearchParams(window.location.search)
   return (
-    <DemandCaptureForm
-      brand={params.get('brand')?.trim() ?? ''}
-      campaign={params.get('campaign')?.trim() || null}
-    />
+    <>
+      <DemandCaptureForm
+        brand={params.get('brand')?.trim() ?? ''}
+        campaign={params.get('campaign')?.trim() || null}
+      />
+      <TrackingConsentBanner />
+    </>
   )
 }
