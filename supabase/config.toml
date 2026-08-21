@@ -14,3 +14,20 @@ max_rows = 1000
 
 [studio]
 enabled = false
+
+# These functions implement their own authentication because Google callbacks/webhooks
+# and internal worker calls do not carry a Supabase user JWT.
+[functions.google-oauth]
+verify_jwt = false
+
+[functions.google-sync]
+verify_jwt = false
+
+[functions.google-webhook]
+verify_jwt = false
+
+[functions.google-watch]
+verify_jwt = false
+
+[functions.integration-worker]
+verify_jwt = false
