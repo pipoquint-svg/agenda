@@ -208,9 +208,18 @@ select is(
   'ledger balance reflects 120-minute reservation debit'
 );
 
-select ok(
-  public.reverse_hour_package_usage('30000000-0000-0000-0000-000000000090', 'TEST_CANCELLATION') is not null
-  and (select ledger_minutes from public.hour_package_balances where hour_package_id = '30000000-0000-0000-0000-000000000070') = 2400,
+do $$
+begin
+  perform public.reverse_hour_package_usage(
+    '30000000-0000-0000-0000-000000000090',
+    'TEST_CANCELLATION'
+  );
+end;
+$$;
+
+select is(
+  (select ledger_minutes from public.hour_package_balances where hour_package_id = '30000000-0000-0000-0000-000000000070'),
+  2400,
   'cancellation creates compensating ledger movement and restores minutes'
 );
 
