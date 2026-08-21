@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(16);
+select plan(17);
 
 insert into public.resources (id, name, resource_type)
 values ('92000000-0000-0000-0000-000000000001', 'GOOGLE TEST STUDIO', 'PHYSICAL');
@@ -59,7 +59,8 @@ select public.mark_google_sync_failure(
 
 select ok(
   exists (
-    select 1 from public.google_sync_state
+    select 1
+    from public.google_sync_state
     where google_calendar_id = '92000000-0000-0000-0000-000000000020'
       and health_status = 'STALE'
       and sync_token is null
@@ -178,7 +179,7 @@ select public.ignore_google_external_block(
 select is(
   (select payload->>'status' from ignored_block),
   'IGNORED_BY_ADMIN',
-  'admin can dismiss only a specific active external block with reason'
+  'admin can dismiss a specific active external block with reason'
 );
 
 select public.upsert_google_calendar_event(
@@ -192,7 +193,8 @@ select public.upsert_google_calendar_event(
 
 select ok(
   exists (
-    select 1 from public.resource_allocations ra
+    select 1
+    from public.resource_allocations ra
     where ra.google_calendar_event_id = ((select payload->>'google_calendar_event_id' from blocking_event))::uuid
       and ra.status = 'IGNORED_BY_ADMIN'
   ),
@@ -210,12 +212,17 @@ select public.upsert_google_calendar_event(
 
 select ok(
   exists (
-    select 1 from public.resource_allocations ra
+    select 1
+    from public.resource_allocations ra
     where ra.google_calendar_event_id = ((select payload->>'google_calendar_event_id' from blocking_event))::uuid
       and ra.status = 'EXTERNAL_ACTIVE'
-      and ra.occupied_range = tstzrange('2035-01-15 10:00:00-03'::timestamptz, '2035-01-15 11:00:00-03'::timestamptz, '[)')
+      and ra.occupied_range = tstzrange(
+        '2035-01-15 10:00:00-03'::timestamptz,
+        '2035-01-15 11:00:00-03'::timestamptz,
+        '[)'
+      )
   ),
-  'remote change invalidates prior ignore and reevaluates the external block'
+  'changed remote payload invalidates prior ignore and reevaluates the block'
 );
 
 select public.upsert_google_calendar_event(
@@ -227,7 +234,8 @@ select public.upsert_google_calendar_event(
 
 select ok(
   exists (
-    select 1 from public.resource_allocations ra
+    select 1
+    from public.resource_allocations ra
     where ra.google_calendar_event_id = ((select payload->>'google_calendar_event_id' from blocking_event))::uuid
       and ra.status = 'RELEASED'
   ),
@@ -264,7 +272,11 @@ insert into public.resource_allocations (
   '92000000-0000-0000-0000-000000000001',
   'MANUAL_BLOCK',
   'BLOCKED',
-  tstzrange('2035-01-15 14:00:00-03'::timestamptz, '2035-01-15 15:00:00-03'::timestamptz, '[)'),
+  tstzrange(
+    '2035-01-15 14:00:00-03'::timestamptz,
+    '2035-01-15 15:00:00-03'::timestamptz,
+    '[)'
+  ),
   'Internal conflict target'
 );
 
@@ -279,23 +291,37 @@ select public.upsert_google_calendar_event(
 
 select ok(
   exists (
-    select 1 from public.resource_allocations ra
+    select 1
+    from public.resource_allocations ra
     where ra.google_calendar_event_id = ((select payload->>'google_calendar_event_id' from conflict_event))::uuid
       and ra.status = 'EXTERNAL_ACTIVE'
-      and ra.occupied_range = tstzrange('2035-01-15 12:00:00-03'::timestamptz, '2035-01-15 13:00:00-03'::timestamptz, '[)')
+      and ra.occupied_range = tstzrange(
+        '2035-01-15 12:00:00-03'::timestamptz,
+        '2035-01-15 13:00:00-03'::timestamptz,
+        '[)'
+      )
   ),
-  'conflicting Google move preserves previous safe blocking allocation instead of silently opening it'
+  'conflicting Google move preserves previous safe blocking allocation'
 );
 
 select ok(
   exists (
-    select 1 from public.schedule_divergences sd
+    select 1
+    from public.schedule_divergences sd
     where sd.google_calendar_event_id = ((select payload->>'google_calendar_event_id' from conflict_event))::uuid
       and sd.status = 'OPEN'
-      and sd.desired_range = tstzrange('2035-01-15 14:00:00-03'::timestamptz, '2035-01-15 15:00:00-03'::timestamptz, '[)')
-      and sd.active_range = tstzrange('2035-01-15 12:00:00-03'::timestamptz, '2035-01-15 13:00:00-03'::timestamptz, '[)')
+      and sd.desired_range = tstzrange(
+        '2035-01-15 14:00:00-03'::timestamptz,
+        '2035-01-15 15:00:00-03'::timestamptz,
+        '[)'
+      )
+      and sd.active_range = tstzrange(
+        '2035-01-15 12:00:00-03'::timestamptz,
+        '2035-01-15 13:00:00-03'::timestamptz,
+        '[)'
+      )
   ),
-  'conflicting Google move opens divergence with desired and still-active ranges'
+  'conflicting Google move opens divergence with desired and active ranges'
 );
 
 select * from finish();
