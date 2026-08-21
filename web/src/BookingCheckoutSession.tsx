@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BookingCheckout } from './BookingCheckout'
 import { PaymentPanel } from './PaymentPanel'
 import type { CheckoutHold } from './bookingApi'
+import './payment.css'
 
 type StoredHold = {
   token: string
