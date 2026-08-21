@@ -78,7 +78,11 @@ Deno.serve(async (req) => {
 
     const { data: jobs, error: claimError } = await client.rpc('claim_integration_jobs', {
       p_worker_id: workerId,
-      p_job_types: ['GOOGLE_CALENDAR_SYNC', 'GOOGLE_APPOINTMENT_SYNC'],
+      p_job_types: [
+        'GOOGLE_CALENDAR_SYNC',
+        'GOOGLE_APPOINTMENT_SYNC',
+        'CHECKOUT_HOLD_EXPIRED_RECOVERY',
+      ],
       p_limit: 10,
     })
     if (claimError) throw new Error(`INTEGRATION_JOB_CLAIM_FAILED:${claimError.message}`)
@@ -112,6 +116,18 @@ Deno.serve(async (req) => {
             discardedStale += 1
             continue
           }
+        } else if (job.job_type === 'CHECKOUT_HOLD_EXPIRED_RECOVERY') {
+          const payload = (job.payload_json ?? {}) as Record<string, unknown>
+          const phone = typeof payload.phone === 'string' ? payload.phone : ''
+          const templateKey = typeof payload.template_key === 'string' ? payload.template_key : ''
+          const resumeToken = typeof payload.resume_token === 'string' ? payload.resume_token : ''
+          if (!phone || !templateKey || !resumeToken) throw new Error('CHECKOUT_RECOVERY_PAYLOAD_INVALID')
+
+          await invokeFunction('whatsapp-send-template', secret, {
+            phone,
+            template_key: templateKey,
+            resume_token: resumeToken,
+          })
         } else {
           throw new Error(`UNSUPPORTED_JOB_TYPE:${job.job_type}`)
         }
