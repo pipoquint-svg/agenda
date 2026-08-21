@@ -117,7 +117,8 @@ select is(
 );
 
 update public.checkout_holds
-set expires_at = now() - interval '1 second'
+set created_at = now() - interval '10 minutes',
+    expires_at = now() - interval '1 second'
 where id = '95000000-0000-0000-0000-000000000050';
 
 select public.expire_due_checkout_holds();
