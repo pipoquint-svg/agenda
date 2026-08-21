@@ -47,6 +47,7 @@ Deno.test('submission rejects past date using Sao Paulo calendar date', () => {
     service_id: '11111111-1111-4111-8111-111111111111',
     desired_date: '2026-08-20',
     consent_contact: true,
+    consent_text_version: 'v1',
   }, ['brand-a'], now), 'DESIRED_DATE_IN_PAST')
 })
 
@@ -58,7 +59,19 @@ Deno.test('submission requires explicit consent', () => {
     brand: 'brand-a',
     service_id: '11111111-1111-4111-8111-111111111111',
     consent_contact: false,
+    consent_text_version: 'v1',
   }, ['brand-a']), 'CONSENT_REQUIRED')
+})
+
+Deno.test('submission requires the displayed consent version', () => {
+  assertThrows(() => validateDemandSubmission({
+    name: 'Pessoa Teste',
+    whatsapp: '(48) 99999-1234',
+    email: 'pessoa@teste.local',
+    brand: 'brand-a',
+    service_id: '11111111-1111-4111-8111-111111111111',
+    consent_contact: true,
+  }, ['brand-a']), 'CONSENT_VERSION_REQUIRED')
 })
 
 Deno.test('valid submission is normalized for persistence', () => {
@@ -73,10 +86,12 @@ Deno.test('valid submission is normalized for persistence', () => {
     notes: ' observacao ',
     campaign: ' campanha ',
     consent_contact: true,
+    consent_text_version: 'consent-v1',
   }, ['brand-a'])
 
   assertEquals(result.name, 'Pessoa Teste')
   assertEquals(result.whatsapp, '5548999991234')
   assertEquals(result.email, 'pessoa@teste.local')
   assertEquals(result.notes, 'observacao')
+  assertEquals(result.consent_text_version, 'consent-v1')
 })
