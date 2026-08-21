@@ -1,3 +1,58 @@
+create sequence if not exists public.hour_package_movement_ledger_seq;
+
+alter table public.hour_package_movements
+  add column ledger_seq bigint;
+
+alter table public.hour_package_movements disable trigger hour_package_movements_immutable_trg;
+
+with ranked as (
+  select
+    id,
+    row_number() over (
+      order by
+        created_at,
+        case when movement_type = 'INITIAL_CREDIT' then 0 else 1 end,
+        id
+    )::bigint as seq
+  from public.hour_package_movements
+)
+update public.hour_package_movements m
+set ledger_seq = r.seq
+from ranked r
+where r.id = m.id;
+
+alter table public.hour_package_movements enable trigger hour_package_movements_immutable_trg;
+
+alter sequence public.hour_package_movement_ledger_seq
+  owned by public.hour_package_movements.ledger_seq;
+
+alter table public.hour_package_movements
+  alter column ledger_seq set default nextval('public.hour_package_movement_ledger_seq');
+
+DO $$
+declare
+  v_max bigint;
+begin
+  select max(ledger_seq) into v_max
+  from public.hour_package_movements;
+
+  if v_max is null then
+    perform setval('public.hour_package_movement_ledger_seq', 1, false);
+  else
+    perform setval('public.hour_package_movement_ledger_seq', v_max, true);
+  end if;
+end;
+$$;
+
+alter table public.hour_package_movements
+  alter column ledger_seq set not null;
+
+create unique index hour_package_movements_ledger_seq_uq
+  on public.hour_package_movements (ledger_seq);
+
+comment on column public.hour_package_movements.ledger_seq is
+  'Monotonic accounting sequence used to order immutable package ledger movements deterministically.';
+
 create or replace function public.format_duration_seconds(p_seconds bigint)
 returns text
 language sql
@@ -23,6 +78,7 @@ create or replace view public.hour_package_statement_entries as
 with movement_rows as (
   select
     m.id as movement_id,
+    m.ledger_seq,
     m.hour_package_id,
     p.customer_id,
     m.appointment_id,
@@ -43,7 +99,7 @@ with movement_rows as (
     apu.special_surcharge_percent,
     sum(m.seconds_delta) over (
       partition by m.hour_package_id
-      order by m.created_at, m.id
+      order by m.ledger_seq
       rows between unbounded preceding and current row
     )::bigint as balance_after_seconds
   from public.hour_package_movements m
@@ -56,6 +112,7 @@ with movement_rows as (
 )
 select
   movement_id,
+  ledger_seq,
   hour_package_id,
   customer_id,
   registered_at,
@@ -133,6 +190,7 @@ begin
   select coalesce(jsonb_agg(
     jsonb_build_object(
       'movement_id', e.movement_id,
+      'ledger_seq', e.ledger_seq,
       'registered_at', e.registered_at,
       'movement_type', e.movement_type,
       'movement_label', e.movement_label,
@@ -157,7 +215,7 @@ begin
       'balance_after_seconds', e.balance_after_seconds,
       'balance_after_time', e.balance_after_time,
       'reason', e.reason
-    ) order by e.registered_at, e.movement_id
+    ) order by e.ledger_seq
   ), '[]'::jsonb)
   into v_entries
   from public.hour_package_statement_entries e
