@@ -1,64 +1,3 @@
-create table public.pricing_rules (
-  id uuid primary key default gen_random_uuid(),
-  service_id uuid not null references public.services(id) on delete cascade,
-  name text not null,
-  rule_scope text not null check (rule_scope in ('DAY_TIME','PEOPLE')),
-  days_of_week smallint[],
-  start_local_time time without time zone,
-  end_local_time time without time zone,
-  min_people integer,
-  max_people integer,
-  valid_from_date date,
-  valid_until_date date,
-  action_type text not null check (action_type in ('REPLACE_PRICE','ADD_AMOUNT','ADD_PERCENT')),
-  amount numeric(12,2),
-  percentage numeric(7,4),
-  priority integer not null default 100,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  check (days_of_week is null or days_of_week <@ array[1,2,3,4,5,6,7]::smallint[]),
-  check (valid_until_date is null or valid_from_date is null or valid_until_date >= valid_from_date),
-  check (min_people is null or min_people >= 1),
-  check (max_people is null or max_people >= 1),
-  check (max_people is null or min_people is null or max_people >= min_people),
-  check (
-    (action_type = 'REPLACE_PRICE' and amount is not null and amount >= 0 and percentage is null)
-    or (action_type = 'ADD_AMOUNT' and amount is not null and percentage is null)
-    or (action_type = 'ADD_PERCENT' and percentage is not null and percentage > -100 and amount is null)
-  ),
-  check (
-    (rule_scope = 'DAY_TIME' and min_people is null and max_people is null)
-    or (rule_scope = 'PEOPLE' and min_people is not null and max_people is not null and days_of_week is null and start_local_time is null and end_local_time is null)
-  )
-);
-
-create index pricing_rules_service_active_idx
-  on public.pricing_rules (service_id, rule_scope, priority, id)
-  where is_active;
-
-create table public.coupons (
-  id uuid primary key default gen_random_uuid(),
-  code text not null,
-  discount_type text not null check (discount_type in ('FIXED','PERCENT')),
-  discount_value numeric(12,2) not null check (discount_value > 0),
-  valid_from date,
-  valid_until date,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  check (valid_until is null or valid_from is null or valid_until >= valid_from),
-  check (discount_type <> 'PERCENT' or discount_value <= 100)
-);
-
-create unique index coupons_code_ci_uq on public.coupons (upper(code));
-
-create table public.coupon_services (
-  coupon_id uuid not null references public.coupons(id) on delete cascade,
-  service_id uuid not null references public.services(id) on delete cascade,
-  primary key (coupon_id, service_id)
-);
-
 create or replace function public.calculate_booking_quote(
   p_service_id uuid,
   p_service_employee_id uuid,
@@ -90,7 +29,7 @@ declare
   v_local_ts timestamp without time zone;
   v_local_date date;
   v_local_time time without time zone;
-  v_isodow smallint;
+  v_dow smallint;
   v_processed_extras integer := 0;
   v_requested_extras integer := 0;
   v_resource_ids uuid[] := '{}'::uuid[];
@@ -180,7 +119,7 @@ begin
     v_local_ts := p_requested_start_at at time zone v_timezone;
     v_local_date := v_local_ts::date;
     v_local_time := v_local_ts::time;
-    v_isodow := extract(isodow from v_local_ts)::smallint;
+    v_dow := extract(dow from v_local_ts)::smallint;
 
     for r in
       select pr.*
@@ -190,20 +129,9 @@ begin
         and pr.rule_scope = 'DAY_TIME'
         and (pr.valid_from_date is null or v_local_date >= pr.valid_from_date)
         and (pr.valid_until_date is null or v_local_date <= pr.valid_until_date)
-        and (pr.days_of_week is null or v_isodow = any(pr.days_of_week))
-        and (
-          pr.start_local_time is null
-          or pr.end_local_time is null
-          or (
-            pr.start_local_time <= pr.end_local_time
-            and v_local_time >= pr.start_local_time
-            and v_local_time < pr.end_local_time
-          )
-          or (
-            pr.start_local_time > pr.end_local_time
-            and (v_local_time >= pr.start_local_time or v_local_time < pr.end_local_time)
-          )
-        )
+        and (pr.days_of_week is null or v_dow = any(pr.days_of_week))
+        and (pr.start_local_time is null or v_local_time >= pr.start_local_time)
+        and (pr.end_local_time is null or v_local_time < pr.end_local_time)
       order by pr.priority asc, pr.id asc
     loop
       if r.action_type = 'REPLACE_PRICE' then
@@ -250,10 +178,10 @@ begin
     select c.*
     into v_coupon
     from public.coupons c
-    where upper(c.code) = upper(btrim(p_coupon_code))
+    where lower(c.code) = lower(btrim(p_coupon_code))
       and c.is_active
-      and (c.valid_from is null or coalesce(v_local_date, current_date) >= c.valid_from)
-      and (c.valid_until is null or coalesce(v_local_date, current_date) <= c.valid_until)
+      and (c.valid_from is null or coalesce(p_requested_start_at, now()) >= c.valid_from)
+      and (c.valid_until is null or coalesce(p_requested_start_at, now()) <= c.valid_until)
       and (
         not exists (select 1 from public.coupon_services cs where cs.coupon_id = c.id)
         or exists (
