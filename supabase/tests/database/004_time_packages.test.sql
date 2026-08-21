@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(12);
+select plan(13);
 
 insert into public.categories (id, name, slug)
 values ('00000000-0000-0000-0000-000000000311', 'Locação', 'locacao-pacote')
@@ -26,6 +26,34 @@ values (
   '00000000-0000-0000-0000-000000000201'
 )
 on conflict do nothing;
+
+insert into public.availability_rules (
+  service_employee_id, weekday, start_local_time, end_local_time, slot_interval_minutes, availability_class
+)
+values
+  (
+    '00000000-0000-0000-0000-000000000511',
+    6, '09:00', '18:00', 30, 'REGULAR'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000511',
+    1, '18:00', '22:00', 30, 'SPECIAL'
+  );
+
+insert into public.extras (id, name, price, duration_delta_minutes)
+values (
+  '00000000-0000-0000-0000-000000000911',
+  'Extra equipamento',
+  80,
+  0
+);
+
+insert into public.service_extras (service_id, extra_id, max_quantity)
+values (
+  '00000000-0000-0000-0000-000000000411',
+  '00000000-0000-0000-0000-000000000911',
+  1
+);
 
 insert into public.customers (id, name, email, phone)
 values (
@@ -134,7 +162,8 @@ select is(
 
 insert into public.checkout_holds (
   id, public_token_hash, service_id, service_employee_id, selection_hash,
-  people_count, requested_start_at, requested_end_at, expires_at
+  customer_id, extra_selections, people_count,
+  requested_start_at, requested_end_at, expires_at
 )
 values (
   '00000000-0000-0000-0000-000000000811',
@@ -142,6 +171,8 @@ values (
   '00000000-0000-0000-0000-000000000411',
   '00000000-0000-0000-0000-000000000511',
   'selection-time-package-test',
+  '00000000-0000-0000-0000-000000000611',
+  '[{"extra_id":"00000000-0000-0000-0000-000000000911","quantity":1}]'::jsonb,
   2,
   '2035-01-13 10:00:00-03',
   '2035-01-13 12:00:00-03',
@@ -151,13 +182,9 @@ values (
 select ok(
   (public.reserve_time_package_minutes(
     '00000000-0000-0000-0000-000000000711'::uuid,
-    '00000000-0000-0000-0000-000000000811'::uuid,
-    120,
-    '2035-01-13 10:00:00-03'::timestamptz,
-    'REGULAR',
-    80
+    '00000000-0000-0000-0000-000000000811'::uuid
   )).id is not null,
-  'package minutes can be reserved against an active checkout hold'
+  'package minutes can be reserved only from the identified active checkout hold'
 );
 
 select is(
@@ -173,7 +200,7 @@ select is(
    from public.time_package_usages
    where checkout_hold_id = '00000000-0000-0000-0000-000000000811'::uuid),
   30.00::numeric,
-  'usage snapshots the R$30 special-time surcharge'
+  'usage snapshots the R$30 special-time surcharge derived from held slot'
 );
 
 select is(
@@ -181,7 +208,7 @@ select is(
    from public.time_package_usages
    where checkout_hold_id = '00000000-0000-0000-0000-000000000811'::uuid),
   110.00::numeric,
-  'usage snapshots total cash due including extras'
+  'usage snapshots R$30 surcharge plus R$80 held extras'
 );
 
 select is(
