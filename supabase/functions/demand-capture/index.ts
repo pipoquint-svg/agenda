@@ -43,6 +43,8 @@ Deno.serve(async (req) => {
     const brands = parseConfiguredBrands(Deno.env.get('DEMAND_CAPTURE_BRANDS'))
     const consentText = requiredEnv('DEMAND_CAPTURE_CONSENT_TEXT')
     const consentVersion = requiredEnv('DEMAND_CAPTURE_CONSENT_VERSION')
+    if (/[—–]/.test(consentText)) throw new Error('DEMAND_CAPTURE_CONSENT_TEXT_INVALID')
+
     const client = adminClient()
 
     if (req.method === 'GET') {
@@ -65,6 +67,7 @@ Deno.serve(async (req) => {
     enforceIpRateLimit(req)
 
     const submission = validateDemandSubmission(await req.json(), brands)
+    if (submission.consent_text_version !== consentVersion) throw new Error('CONSENT_VERSION_STALE')
 
     const { data: service, error: serviceError } = await client
       .from('services')
@@ -88,7 +91,7 @@ Deno.serve(async (req) => {
       p_source: 'site',
       p_campaign: submission.campaign,
       p_consent_contact: true,
-      p_consent_text_version: consentVersion,
+      p_consent_text_version: submission.consent_text_version,
       p_consent_at: new Date().toISOString(),
     })
 
@@ -102,6 +105,7 @@ Deno.serve(async (req) => {
     const code = error instanceof Error ? error.message : 'DEMAND_CAPTURE_FAILED'
     const publicCode = code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
+      : publicCode === 'CONSENT_VERSION_STALE' ? 409
       : publicCode.startsWith('MISSING_ENV') || publicCode.endsWith('_NOT_CONFIGURED') ? 503
       : 400
     return response({ error: { code: publicCode } }, status)
