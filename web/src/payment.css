@@ -1,0 +1,29 @@
+.payment-panel { display: grid; gap: 18px; padding-top: 18px; border-top: 1px solid #deded8; }
+.payment-heading { display: grid; gap: 4px; }
+.payment-heading > small, .payment-confirmed > small { text-transform: uppercase; letter-spacing: .06em; font-weight: 750; color: #62625d; }
+.payment-heading h3, .payment-confirmed h3 { margin: 0; font-size: 1.25rem; }
+.payment-heading p, .payment-confirmed p { margin: 0; color: #666; line-height: 1.45; }
+.payment-kind-grid { display: grid; gap: 9px; grid-template-columns: 1fr; }
+.payment-choice { display: grid; grid-template-columns: 22px 1fr; align-items: start; gap: 10px; padding: 13px; border: 1px solid #d7d7d0; border-radius: 10px; background: #fff; cursor: pointer; }
+.payment-choice.selected { border-color: var(--booking-accent, #171717); box-shadow: inset 0 0 0 1px var(--booking-accent, #171717); }
+.payment-choice input { width: 18px; height: 18px; min-height: auto; margin: 2px 0 0; }
+.payment-choice span { display: grid; gap: 3px; }
+.payment-choice small { color: #666; font-weight: 450; }
+.payment-method-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 4px; border-radius: 11px; background: #f0f0ec; }
+.payment-method-tabs button { min-height: 42px; border: 0; border-radius: 8px; background: transparent; font-weight: 700; cursor: pointer; }
+.payment-method-tabs button.active { background: #fff; box-shadow: 0 1px 5px rgb(0 0 0 / .08); }
+.payment-method-body { display: grid; gap: 14px; }
+.payment-amount { display: grid; gap: 3px; padding: 14px; border-radius: 10px; background: #f7f7f4; }
+.payment-amount span, .payment-amount small { color: #666; }
+.payment-amount strong { font-size: 1.5rem; }
+.pix-box { display: grid; gap: 12px; padding: 14px; border: 1px solid #deded8; border-radius: 12px; }
+.pix-box img { width: min(240px, 100%); aspect-ratio: 1; object-fit: contain; justify-self: center; }
+.pix-box textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; line-height: 1.35; }
+.pix-box p { margin: 0; text-align: center; color: #666; }
+.card-brick { min-height: 240px; }
+.card-brick.busy { opacity: .72; pointer-events: none; }
+.payment-confirmed { padding: 18px; border: 1px solid #d8e7d7; border-radius: 12px; background: #f5faf4; }
+
+@media (min-width: 650px) {
+  .payment-kind-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
