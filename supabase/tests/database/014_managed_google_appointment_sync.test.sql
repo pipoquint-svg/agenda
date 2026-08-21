@@ -112,7 +112,7 @@ select is(
 );
 
 update public.appointments
-set status = 'CANCELLED', version = 5, cancelled_at = now()
+set status = 'CANCELLED', version = 5
 where id = '94000000-0000-0000-0000-000000000070';
 
 select is(
@@ -163,7 +163,7 @@ select has_index(
 );
 
 update public.appointments
-set status = 'COMPLETED', version = 6, completed_at = now()
+set status = 'COMPLETED', version = 6
 where id = '94000000-0000-0000-0000-000000000070';
 
 select is(
