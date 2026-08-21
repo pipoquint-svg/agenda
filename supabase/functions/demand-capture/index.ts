@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     const brands = parseConfiguredBrands(Deno.env.get('DEMAND_CAPTURE_BRANDS'))
     const consentText = requiredEnv('DEMAND_CAPTURE_CONSENT_TEXT')
     const consentVersion = requiredEnv('DEMAND_CAPTURE_CONSENT_VERSION')
-    if (/[—–]/.test(consentText)) throw new Error('DEMAND_CAPTURE_CONSENT_TEXT_INVALID')
+    if (/\u2014|\u2013/.test(consentText)) throw new Error('DEMAND_CAPTURE_CONSENT_TEXT_INVALID')
 
     const client = adminClient()
 
