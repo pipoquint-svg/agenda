@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
   try {
     requireInternal(req)
     const body = await req.json()
-    const appointmentId = body.appointment_id as string | undefined
+    const appointmentId = String(body.appointment_id ?? '')
     const entityVersion = Number(body.entity_version)
     if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
     if (!Number.isInteger(entityVersion) || entityVersion < 1) throw new Error('ENTITY_VERSION_REQUIRED')
@@ -134,7 +134,6 @@ Deno.serve(async (req) => {
       throw new Error('GOOGLE_WRITE_CALENDAR_NOT_CONFIGURED')
     }
 
-    // If the write target changed, clean up the old managed event first.
     for (const mirror of mirrors ?? []) {
       if (mirror.google_calendar_id !== desired.google_calendar_id) await removeMirror(mirror)
     }
@@ -190,7 +189,6 @@ Deno.serve(async (req) => {
     }
 
     const normalized = normalizeGoogleEvent(remoteEvent)
-    // The event created by this worker is always managed even if Google returns a sparse response.
     normalized.p_managed_by_agenda = true
     normalized.p_agenda_appointment_id = appointmentId
     normalized.p_bs_source = 'blacksheep_agenda'
