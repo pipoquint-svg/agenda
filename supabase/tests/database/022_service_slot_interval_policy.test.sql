@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(10);
+select plan(11);
 
 select is(
   (select default_slot_interval_minutes from public.operation_settings where id = 1),
