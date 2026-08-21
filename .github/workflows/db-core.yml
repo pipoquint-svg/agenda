@@ -18,7 +18,7 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.111.0
 
       - name: Install PostgreSQL client
         run: |
@@ -39,4 +39,7 @@ jobs:
 
       - name: Stop local Supabase
         if: always()
-        run: supabase stop --no-backup
+        run: |
+          if command -v supabase >/dev/null 2>&1; then
+            supabase stop --no-backup || true
+          fi
