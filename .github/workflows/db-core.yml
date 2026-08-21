@@ -21,7 +21,9 @@ jobs:
           deno-version: v2.x
 
       - name: Test Google Edge helpers
-        run: deno test --allow-env supabase/functions/_shared/google_test.ts
+        run: |
+          deno test --allow-env supabase/functions/_shared/google_test.ts
+          deno test supabase/functions/_shared/managed-event_test.ts
 
       - name: Type-check Edge Functions
         run: |
@@ -29,6 +31,7 @@ jobs:
           deno check supabase/functions/google-sync/index.ts
           deno check supabase/functions/google-webhook/index.ts
           deno check supabase/functions/google-watch/index.ts
+          deno check supabase/functions/google-appointment-sync/index.ts
           deno check supabase/functions/integration-worker/index.ts
 
       - name: Setup Supabase CLI
