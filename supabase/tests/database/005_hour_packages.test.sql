@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(12);
+select plan(14);
 
 select ok(to_regclass('public.customer_hour_packages') is not null, 'customer_hour_packages exists');
 select ok(to_regclass('public.hour_package_services') is not null, 'hour_package_services exists');
@@ -43,6 +43,15 @@ insert into public.availability_rules (
   service_employee_id, weekday, start_local_time, end_local_time, slot_interval_minutes
 ) values (
   '00000000-0000-0000-0000-000000000403', 1, '09:00', '18:00', 30
+);
+
+insert into public.pricing_rules (
+  service_id, name, rule_scope, min_people, max_people,
+  action_type, amount, priority
+) values (
+  '00000000-0000-0000-0000-000000000402',
+  '4 pessoas +100', 'PEOPLE', 4, 4,
+  'ADD_AMOUNT', 100, 10
 );
 
 insert into public.customer_hour_packages (
@@ -106,9 +115,9 @@ insert into public.checkout_holds (
   '00000000-0000-0000-0000-000000000601', 'test-package-hold',
   '00000000-0000-0000-0000-000000000402',
   '00000000-0000-0000-0000-000000000403',
-  'selection', 1,
+  'selection', 4,
   '2035-01-20 15:00:00+00', '2035-01-20 17:00:00+00', 'ACTIVE',
-  now() + interval '10 minutes', 200, 120,
+  now() + interval '10 minutes', 300, 120,
   array['00000000-0000-0000-0000-000000000101'::uuid]
 );
 
@@ -123,6 +132,18 @@ select is(
   ),
   8280::bigint,
   '2h weekend booking reserves 2h18 from package'
+);
+
+select is(
+  (select u.package_discount_amount from public.hour_package_usages u where u.checkout_hold_id = '00000000-0000-0000-0000-000000000601'),
+  200.00::numeric,
+  'package automatically removes covered studio price from checkout'
+);
+
+select is(
+  (select u.remaining_commercial_value from public.hour_package_usages u where u.checkout_hold_id = '00000000-0000-0000-0000-000000000601'),
+  100.00::numeric,
+  'people surcharge remains payable in money'
 );
 
 select is(
