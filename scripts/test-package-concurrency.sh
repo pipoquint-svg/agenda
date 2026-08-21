@@ -54,7 +54,7 @@ insert into public.customer_time_packages (
   id, customer_id, name, total_minutes, purchase_amount, valid_from, expires_at
 ) values (
   '$PACKAGE_ID', '$CUSTOMER_ID', '2 hour race package', 120, 200,
-  now() - interval '1 day', now() + interval '6 months'
+  '2000-01-01 00:00:00+00', '2100-01-01 00:00:00+00'
 );
 
 insert into public.time_package_services (package_id, service_id)
