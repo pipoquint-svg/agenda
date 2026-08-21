@@ -1,6 +1,17 @@
+import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPage } from './BookingPage'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
+import './checkout.css'
+
+function PublicBookingRoute({ slug }: { slug: string }) {
+  return (
+    <>
+      <BookingPage slug={slug} />
+      <BookingCheckoutSession />
+    </>
+  )
+}
 
 export function App() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/'
@@ -10,11 +21,11 @@ export function App() {
   }
 
   if (path === '/agendar/sabrina') {
-    return <BookingPage slug="sabrina" />
+    return <PublicBookingRoute slug="sabrina" />
   }
 
   if (path === '/agendar/blacksheep') {
-    return <BookingPage slug="blacksheep" />
+    return <PublicBookingRoute slug="blacksheep" />
   }
 
   const params = new URLSearchParams(window.location.search)

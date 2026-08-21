@@ -35,6 +35,7 @@ jobs:
           deno check supabase/functions/google-appointment-sync/index.ts
           deno check supabase/functions/whatsapp-send-template/index.ts
           deno check supabase/functions/integration-worker/index.ts
+          deno check supabase/functions/booking-submit/index.ts
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1

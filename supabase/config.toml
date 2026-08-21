@@ -42,6 +42,11 @@ verify_jwt = false
 [functions.demand-capture]
 verify_jwt = false
 
+# Public checkout submit validates the opaque hold token server-side and captures
+# request evidence (IP/User-Agent) before calling service-role-only promotion.
+[functions.booking-submit]
+verify_jwt = false
+
 # The admin endpoint validates Supabase Auth and admin_users manually.
 [functions.demand-capture-admin]
 verify_jwt = false
