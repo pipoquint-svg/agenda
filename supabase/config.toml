@@ -29,5 +29,8 @@ verify_jwt = false
 [functions.google-watch]
 verify_jwt = false
 
+[functions.google-appointment-sync]
+verify_jwt = false
+
 [functions.integration-worker]
 verify_jwt = false

@@ -1,5 +1,6 @@
 import { adminClient, errorResponse, jsonResponse, requireAdmin } from '../_shared/supabase.ts'
 import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken } from '../_shared/google.ts'
+import { managedEventNeedsRepair, type ManagedAppointmentDesiredState } from '../_shared/managed-event.ts'
 
 async function authorize(req: Request): Promise<void> {
   const internal = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
@@ -14,15 +15,32 @@ type EventsPage = {
   nextSyncToken?: string
 }
 
+async function enqueueRepair(
+  client: ReturnType<typeof adminClient>,
+  appointmentId: string,
+  version: number,
+  discriminator: string,
+): Promise<void> {
+  await client.from('integration_jobs').upsert({
+    job_type: 'GOOGLE_APPOINTMENT_SYNC',
+    entity_type: 'APPOINTMENT',
+    entity_id: appointmentId,
+    entity_version: version,
+    payload_json: { reason: 'GOOGLE_MANAGED_EVENT_DRIFT', discriminator },
+    idempotency_key: `google-appointment-repair:${appointmentId}:${version}:${discriminator}`,
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+}
+
 async function performSync(
   internalCalendarId: string,
   accessToken: string,
   googleCalendarId: string,
   syncToken: string | null,
   forceFull: boolean,
-): Promise<{ full: boolean; processed: number; nextSyncToken: string }> {
+): Promise<{ full: boolean; processed: number; nextSyncToken: string; repairs: number }> {
   const client = adminClient()
   const full = forceFull || !syncToken
+  const syncStartedAt = new Date().toISOString()
   if (full) {
     const { error } = await client.rpc('prepare_google_full_sync', { p_google_calendar_id: internalCalendarId })
     if (error) throw new Error(error.message)
@@ -31,6 +49,7 @@ async function performSync(
   let pageToken: string | undefined
   let nextSyncToken: string | undefined
   let processed = 0
+  let repairs = 0
 
   do {
     const endpoint = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(googleCalendarId)}/events`)
@@ -44,20 +63,82 @@ async function performSync(
     for (const event of page.items ?? []) {
       const normalized = normalizeGoogleEvent(event)
       if (!normalized.p_google_event_id) continue
+
+      // Google can return sparse cancelled instances. Preserve Agenda ownership already
+      // known by the mirror instead of erasing it when extendedProperties are absent.
+      if (normalized.p_status === 'cancelled' && !normalized.p_agenda_appointment_id) {
+        const { data: existing } = await client
+          .from('google_calendar_events')
+          .select('managed_by_agenda, agenda_appointment_id, bs_source, recurring_event_id, original_start_at, original_start_date')
+          .eq('google_calendar_id', internalCalendarId)
+          .eq('google_event_id', normalized.p_google_event_id)
+          .maybeSingle()
+        if (existing?.managed_by_agenda && existing.agenda_appointment_id) {
+          normalized.p_managed_by_agenda = true
+          normalized.p_agenda_appointment_id = existing.agenda_appointment_id
+          normalized.p_bs_source = existing.bs_source ?? 'blacksheep_agenda'
+          normalized.p_recurring_event_id = normalized.p_recurring_event_id ?? existing.recurring_event_id
+          normalized.p_original_start_at = normalized.p_original_start_at ?? existing.original_start_at
+          normalized.p_original_start_date = normalized.p_original_start_date ?? existing.original_start_date
+        }
+      }
+
       const { error: eventError } = await client.rpc('upsert_google_calendar_event', {
         p_google_calendar_id: internalCalendarId,
         ...normalized,
       })
       if (eventError) throw new Error(`GOOGLE_EVENT_APPLY_FAILED:${eventError.message}`)
       processed += 1
+
+      if (normalized.p_managed_by_agenda && normalized.p_agenda_appointment_id) {
+        const { data: desiredData, error: desiredError } = await client.rpc('get_google_appointment_desired_state', {
+          p_appointment_id: normalized.p_agenda_appointment_id,
+        })
+        if (!desiredError && desiredData) {
+          const desired = desiredData as ManagedAppointmentDesiredState
+          if (managedEventNeedsRepair(
+            { status: normalized.p_status, start_at: normalized.p_start_at, end_at: normalized.p_end_at },
+            desired,
+          )) {
+            const discriminator = normalized.p_etag?.replaceAll('"', '') || normalized.p_google_updated_at || normalized.p_google_event_id
+            await enqueueRepair(client, desired.appointment_id, desired.version, discriminator)
+            repairs += 1
+          }
+        }
+      }
     }
 
     pageToken = page.nextPageToken
     if (page.nextSyncToken) nextSyncToken = page.nextSyncToken
   } while (pageToken)
 
+  // A full sync can omit an event deleted earlier. Any active managed mirror not seen
+  // during this rebuild is stale remote state and must be reconciled from the appointment.
+  if (full) {
+    const { data: unseen } = await client
+      .from('google_calendar_events')
+      .select('google_event_id, agenda_appointment_id, last_seen_at')
+      .eq('google_calendar_id', internalCalendarId)
+      .eq('managed_by_agenda', true)
+      .neq('status', 'cancelled')
+      .lt('last_seen_at', syncStartedAt)
+
+    for (const mirror of unseen ?? []) {
+      if (!mirror.agenda_appointment_id) continue
+      const { data: desiredData, error: desiredError } = await client.rpc('get_google_appointment_desired_state', {
+        p_appointment_id: mirror.agenda_appointment_id,
+      })
+      if (desiredError || !desiredData) continue
+      const desired = desiredData as ManagedAppointmentDesiredState
+      if (desired.desired_action === 'PRESENT') {
+        await enqueueRepair(client, desired.appointment_id, desired.version, `missing-${mirror.google_event_id}`)
+        repairs += 1
+      }
+    }
+  }
+
   if (!nextSyncToken) throw new Error('GOOGLE_NEXT_SYNC_TOKEN_MISSING')
-  return { full, processed, nextSyncToken }
+  return { full, processed, nextSyncToken, repairs }
 }
 
 Deno.serve(async (req) => {
@@ -146,6 +227,7 @@ Deno.serve(async (req) => {
       google_calendar_id: calendar.id,
       mode: result.full ? 'FULL' : 'INCREMENTAL',
       processed: result.processed,
+      repairs_enqueued: result.repairs,
       health_status: 'HEALTHY',
     })
   } catch (error) {
