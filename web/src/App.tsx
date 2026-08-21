@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
-import { BookingPage } from './BookingPage'
+import { BookingPageDuration } from './BookingPageDuration'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
@@ -14,7 +14,7 @@ function PublicBookingRoute({ slug }: { slug: string }) {
 
   return (
     <>
-      <BookingPage slug={slug} />
+      <BookingPageDuration slug={slug} />
       <BookingCheckoutSession />
       <TrackingConsentBanner />
     </>
