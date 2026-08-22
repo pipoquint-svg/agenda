@@ -35,14 +35,13 @@ function numeric(value: unknown, field: string, nullable = false): number | null
   return next
 }
 
-function redactPricing(data: unknown): unknown {
-  if (Array.isArray(data)) {
-    return data.map((item) => redactPricing(item))
-  }
+function redactCommercial(data: unknown): unknown {
+  if (Array.isArray(data)) return data.map((item) => redactCommercial(item))
   if (!data || typeof data !== 'object') return data
   const item = { ...(data as Record<string, unknown>) }
   delete item.base_price
   delete item.price_per_block
+  delete item.change_policy
   if (Array.isArray(item.pricing_tiers)) {
     item.pricing_tiers = item.pricing_tiers.map((tier) => {
       if (!tier || typeof tier !== 'object' || Array.isArray(tier)) return tier
@@ -71,7 +70,7 @@ Deno.serve(async (req) => {
       const canSeeFinance = await can('FINANCE_VIEW')
       const { data, error } = await client.rpc('service_admin_list_service_settings')
       if (error) throw new Error(error.message)
-      return json({ services: canSeeFinance ? data : redactPricing(data) })
+      return json({ services: canSeeFinance ? data : redactCommercial(data) })
     }
 
     await requirePermission('SERVICES_MANAGE')
@@ -116,7 +115,7 @@ Deno.serve(async (req) => {
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(canSeeFinance ? data : redactPricing(data))
+      return json(canSeeFinance ? data : redactCommercial(data))
     }
 
     if (action === 'DURATION_CONFIGURATION') {
