@@ -32,15 +32,38 @@ function appointmentId(url: URL): string {
   return id
 }
 
+function brandFilter(url: URL): string | null {
+  const brand = clean(url.searchParams.get('brand_key'))?.toUpperCase() ?? null
+  if (brand && !['BLACKSHEEP', 'SABRINA'].includes(brand)) throw new Error('ADMIN_BRAND_FILTER_INVALID')
+  return brand
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
-    await requireAdmin(req)
-    const client = adminClient()
     const url = new URL(req.url)
     const action = clean(url.searchParams.get('action')) ?? 'agenda'
+    const moduleKey = action === 'amelia' ? 'AMELIA' : action === 'dashboard' ? 'DASHBOARD' : 'AGENDA'
+    const admin = await requireAdmin(req, moduleKey)
+    const client = adminClient()
+
+    if (action === 'permissions') {
+      const { data, error } = await client.rpc('service_admin_get_permissions', { p_admin_user_id: admin.adminId })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
+    if (action === 'dashboard') {
+      const { data, error } = await client.rpc('service_admin_dashboard', {
+        p_start_at: requiredIso(url, 'start_at'),
+        p_end_at: requiredIso(url, 'end_at'),
+        p_brand_key: brandFilter(url),
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
 
     if (action === 'appointment') {
       const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: appointmentId(url) })
@@ -65,11 +88,9 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'amelia') {
-      const startAt = requiredIso(url, 'start_at')
-      const endAt = requiredIso(url, 'end_at')
       const { data, error } = await client.rpc('service_admin_list_amelia_history', {
-        p_start_at: startAt,
-        p_end_at: endAt,
+        p_start_at: requiredIso(url, 'start_at'),
+        p_end_at: requiredIso(url, 'end_at'),
         p_search: clean(url.searchParams.get('search')),
       })
       if (error) throw new Error(error.message)
@@ -78,17 +99,17 @@ Deno.serve(async (req) => {
 
     if (action !== 'agenda') throw new Error('ADMIN_ACTION_INVALID')
 
-    const startAt = requiredIso(url, 'start_at')
-    const endAt = requiredIso(url, 'end_at')
     const { data, error } = await client.rpc('service_admin_list_agenda', {
-      p_start_at: startAt,
-      p_end_at: endAt,
+      p_start_at: requiredIso(url, 'start_at'),
+      p_end_at: requiredIso(url, 'end_at'),
     })
     if (error) throw new Error(error.message)
     return json(data)
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_AGENDA_FAILED'
-    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401 : 400
+    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
+      : code === 'ADMIN_MODULE_ACCESS_DENIED' ? 403
+      : 400
     return json({ error: { code } }, status)
   }
 })
