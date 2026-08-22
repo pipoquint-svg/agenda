@@ -14,7 +14,8 @@ const financeKeys = new Set([
   'contract_settled', 'cash_received', 'contract_balance', 'operational_penalties_cash_received',
   'penalty_amount', 'penalty_due_now', 'refundable_amount', 'credit_amount',
   'cancellation_penalty_outstanding', 'contract_value', 'net_paid',
-  'billing_mode', 'invoice_due_days',
+  'billing_mode', 'invoice_due_days', 'invoice_due_days_snapshot',
+  'invoice_due_basis', 'invoice_due_base_at', 'invoice_due_at', 'invoice_authorized_by_admin_id',
 ])
 
 const settlementDecisionKeys = new Set([
