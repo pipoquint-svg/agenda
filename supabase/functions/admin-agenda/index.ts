@@ -45,7 +45,10 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url)
     const action = clean(url.searchParams.get('action')) ?? 'agenda'
-    const moduleKey = action === 'amelia' ? 'AMELIA' : action === 'dashboard' ? 'DASHBOARD' : 'AGENDA'
+    const moduleKey = action === 'permissions' ? undefined
+      : action === 'amelia' ? 'AMELIA'
+      : action === 'dashboard' ? 'DASHBOARD'
+      : 'AGENDA'
     const admin = await requireAdmin(req, moduleKey)
     const client = adminClient()
 
