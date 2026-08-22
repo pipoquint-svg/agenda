@@ -1,15 +1,28 @@
 # BlackSheep Agenda — Mapa Funcional V1.11 — Emenda de Escopo
 
 **Status:** Normativo — decisão funcional posterior à auditoria retroativa de 22/08/2026  
-**Base:** Mapa Funcional V1.8 + decisões humanas registradas em 22/08/2026  
+**Base:** Mapa Funcional V1.10 + decisões humanas registradas em 22/08/2026  
 **Escopo:** Sabrina Pierri + BlackSheep Estúdio Criativo  
-**Autoridade:** esta emenda altera explicitamente o escopo funcional da V1 nos pontos abaixo e prevalece sobre trechos conflitantes da V1.8 até a consolidação do documento mestre integral.
+**Autoridade:** esta emenda altera explicitamente o escopo funcional da V1 nos pontos abaixo e prevalece somente sobre trechos conflitantes da V1.10 até a consolidação do documento mestre integral.
 
 ---
 
 # 1. Objetivo desta emenda
 
-A auditoria retroativa confirmou que parte do código desenvolvido corretamente não estava refletida no Mapa Funcional V1.8. As decisões abaixo foram aprovadas explicitamente e passam a integrar a V1.
+A auditoria retroativa e a posterior auditoria de conformidade de escopo foram revalidadas contra o **Mapa Funcional V1.10**, que é a base funcional fechada imediatamente anterior a esta emenda.
+
+A revalidação confirmou que vários itens inicialmente suspeitos já estavam formalmente dentro da V1.10 e **não são mudanças introduzidas por esta emenda**, entre eles:
+
+- checkout hold curto e promoção atômica;
+- gestão de reserva por token opaco;
+- preço variável por dia, horário e pessoas;
+- pacotes de horas pré-pagos, saldo em segundos e reconciliação em remarcação;
+- crédito de cancelamento;
+- multas e políticas de cancelamento/remarcação por serviço;
+- separação Sabrina + BlackSheep no mesmo motor;
+- Google Calendar, Mercado Pago, WhatsApp transacional e controle administrativo.
+
+As decisões abaixo são somente as decisões posteriores que precisavam ser incorporadas ou esclarecidas para que a especificação voltasse a preceder a implementação.
 
 Nenhuma destas decisões transforma a Agenda em SaaS ou multi-workspace.
 
@@ -190,7 +203,7 @@ Continuam fora da V1, sem alteração:
 - assinaturas;
 - IA.
 
-A existência de condições comerciais especiais por cliente, aprovada nesta emenda, é uma exceção explícita à antiga exclusão genérica de “benefício permanente por cliente”. A exceção é restrita às regras documentadas no item 2 e não autoriza benefícios arbitrários.
+A existência de condições comerciais especiais por cliente, aprovada nesta emenda, é uma **exceção explícita e restrita** à exclusão genérica de “benefício permanente por cliente” da seção 64 da V1.10. A exceção abrange somente as regras documentadas no item 2 e não autoriza benefícios arbitrários ou um motor genérico de fidelidade/CRM.
 
 ---
 
@@ -199,9 +212,10 @@ A existência de condições comerciais especiais por cliente, aprovada nesta em
 Para as decisões descritas neste documento:
 
 1. esta emenda V1.11 é a autoridade funcional;
-2. contratos técnicos/ADRs devem realizá-la sem alterar a regra comercial;
-3. modelo de dados e interface devem refletir a mesma decisão;
-4. qualquer nova divergência exige nova decisão explícita antes de código.
+2. nos demais pontos, o Mapa Funcional V1.10 permanece vigente;
+3. contratos técnicos/ADRs devem realizar a regra funcional sem alterá-la silenciosamente;
+4. modelo de dados e interface devem refletir as mesmas decisões;
+5. qualquer nova divergência exige nova decisão explícita antes de código.
 
 ---
 
