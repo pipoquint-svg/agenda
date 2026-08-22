@@ -1,5 +1,9 @@
 -- Module-level administrative permissions and operational dashboard read model.
 
+alter table public.admin_users drop constraint if exists admin_users_role_check;
+alter table public.admin_users
+  add constraint admin_users_role_check check (role in ('OWNER','ADMIN','STAFF'));
+
 create table public.admin_user_permissions (
   admin_user_id uuid not null references public.admin_users(id) on delete cascade,
   module_key text not null check (module_key in ('DASHBOARD','AGENDA','CLIENTS','FINANCE','PACKAGES','SERVICES','INTEGRATIONS','AMELIA','TEAM')),
@@ -147,13 +151,12 @@ begin
     and upper(ra.occupied_range) > p_start_at
     and (
       v_brand is null
-      or a.id is null
-      or exists (
+      or (a.id is not null and exists (
         select 1
         from public.booking_page_services bps
         join public.booking_pages bp on bp.id=bps.booking_page_id and bp.is_active
         where bps.service_id=a.service_id and bps.is_active and bp.brand_key=v_brand
-      )
+      ))
     );
 
   return jsonb_build_object(
