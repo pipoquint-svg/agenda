@@ -14,6 +14,7 @@ const financeKeys = new Set([
   'contract_settled', 'cash_received', 'contract_balance', 'operational_penalties_cash_received',
   'penalty_amount', 'penalty_due_now', 'refundable_amount', 'credit_amount',
   'cancellation_penalty_outstanding', 'contract_value', 'net_paid',
+  'billing_mode', 'invoice_due_days',
 ])
 
 const settlementDecisionKeys = new Set([
@@ -95,19 +96,14 @@ Deno.serve(async (req) => {
       if (action === 'set_customer_terms') {
         await requirePermission('CUSTOMERS_MANAGE')
         const customerIdValue = uuid(body.customer_id, 'CUSTOMER_ID_INVALID')
-        const billingMode = typeof body.billing_mode === 'string' ? body.billing_mode.toUpperCase() : ''
         const serviceIds = Array.isArray(body.authorized_service_ids)
           ? body.authorized_service_ids.map((value) => uuid(value, 'AUTHORIZED_SERVICE_INVALID'))
           : []
-        const invoiceDueDays = body.invoice_due_days === null || body.invoice_due_days === undefined
-          ? null
-          : Number(body.invoice_due_days)
         const prebookHoldMinutes = Number(body.prebook_hold_minutes)
         const maxActivePrebooks = Number(body.max_active_prebooks)
 
         if (!Number.isInteger(prebookHoldMinutes) || prebookHoldMinutes <= 0) throw new Error('PREBOOK_HOLD_MINUTES_INVALID')
         if (!Number.isInteger(maxActivePrebooks) || maxActivePrebooks <= 0) throw new Error('MAX_ACTIVE_PREBOOKS_INVALID')
-        if (invoiceDueDays !== null && (!Number.isInteger(invoiceDueDays) || invoiceDueDays < 0)) throw new Error('INVOICE_DUE_DAYS_INVALID')
 
         const { data: currentTerms, error: currentTermsError } = await client
           .from('customer_commercial_terms')
@@ -115,6 +111,25 @@ Deno.serve(async (req) => {
           .eq('customer_id', customerIdValue)
           .maybeSingle()
         if (currentTermsError) throw new Error(currentTermsError.message)
+
+        const hasBillingMode = Object.prototype.hasOwnProperty.call(body, 'billing_mode')
+        const hasInvoiceDueDays = Object.prototype.hasOwnProperty.call(body, 'invoice_due_days')
+        const requestedBillingMode = hasBillingMode && typeof body.billing_mode === 'string'
+          ? body.billing_mode.toUpperCase()
+          : null
+        const requestedInvoiceDueDays = hasInvoiceDueDays
+          ? body.invoice_due_days === null || body.invoice_due_days === undefined
+            ? null
+            : Number(body.invoice_due_days)
+          : null
+
+        if (!currentTerms && !canManageFinance) throw new Error('ADMIN_PERMISSION_DENIED')
+
+        const billingMode = requestedBillingMode ?? currentTerms?.billing_mode ?? ''
+        const invoiceDueDays = hasInvoiceDueDays ? requestedInvoiceDueDays : currentTerms?.invoice_due_days ?? null
+        if (billingMode !== 'CHECKOUT' && billingMode !== 'INVOICE') throw new Error('BILLING_MODE_INVALID')
+        if (invoiceDueDays !== null && (!Number.isInteger(invoiceDueDays) || invoiceDueDays < 0)) throw new Error('INVOICE_DUE_DAYS_INVALID')
+        if (billingMode === 'INVOICE' && invoiceDueDays === null) throw new Error('INVOICE_DUE_DAYS_REQUIRED')
 
         if (customerFinancialTermsChanged(currentTerms, {
           billing_mode: billingMode,
@@ -136,7 +151,7 @@ Deno.serve(async (req) => {
           p_admin_id: admin.adminId,
         })
         if (error) throw new Error(error.message)
-        return json(data)
+        return json(canViewFinance ? data : redactFinance(data))
       }
 
       if (action === 'authorize_invoice') {
@@ -219,7 +234,7 @@ Deno.serve(async (req) => {
         p_limit: limit,
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(canViewFinance ? data : redactFinance(data))
     }
 
     if (action === 'customer_profile') {
@@ -229,7 +244,7 @@ Deno.serve(async (req) => {
       })
       if (error) throw new Error(error.message)
       if (!data) throw new Error('CUSTOMER_NOT_FOUND')
-      return json(data)
+      return json(canViewFinance ? data : redactFinance(data))
     }
 
     if (action === 'customer_services') {
