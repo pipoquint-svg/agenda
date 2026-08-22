@@ -10,6 +10,22 @@ import type {
   ExtraSelection,
 } from './bookingApi'
 
+export type DurationPricingTier = {
+  id: string
+  min_blocks: number
+  max_blocks: number | null
+  price_per_block: number | string
+}
+
+export type DurationPreset = {
+  id: string
+  block_count: number
+  title: string
+  description: string | null
+  badge: string | null
+  is_featured: boolean
+}
+
 export type DurationBookingService = {
   id: string
   name: string
@@ -28,6 +44,8 @@ export type DurationBookingService = {
   minimum_people: number
   maximum_people: number
   requires_terms: boolean
+  duration_pricing_tiers: DurationPricingTier[]
+  duration_presets: DurationPreset[]
   employees: BookingEmployee[]
   extras: BookingExtra[]
   fields: BookingField[]
@@ -68,9 +86,21 @@ export function contractedMinutes(service: DurationBookingService, blocks: numbe
   return service.base_duration_minutes
 }
 
+export function durationUnitPrice(service: DurationBookingService, blocks: number): number {
+  const tier = (service.duration_pricing_tiers ?? []).find((candidate) =>
+    blocks >= candidate.min_blocks && (candidate.max_blocks === null || blocks <= candidate.max_blocks),
+  )
+  return tier ? numeric(tier.price_per_block) : numeric(service.price_per_block)
+}
+
+export function durationBasePrice(service: DurationBookingService, blocks: number): number {
+  return durationUnitPrice(service, blocks) * blocks
+}
+
 export function startingPrice(service: DurationBookingService): number {
   if (service.duration_mode === 'BLOCKS') {
-    return numeric(service.price_per_block) * (service.minimum_booking_blocks ?? 1)
+    const blocks = service.minimum_booking_blocks ?? 1
+    return durationBasePrice(service, blocks)
   }
   return numeric(service.base_price)
 }
