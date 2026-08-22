@@ -1,4 +1,4 @@
-import { adminClient, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -44,8 +44,12 @@ Deno.serve(async (req) => {
     const action = typeof body?.action === 'string' ? body.action.trim().toUpperCase() : ''
     const appointmentId = uuid(body?.appointment_id, 'APPOINTMENT_ID_INVALID')
     const client = adminClient()
+    const requirePermission = async (permission: string) => {
+      if (!(await hasAdminPermission(admin.adminId, permission))) throw new Error('ADMIN_PERMISSION_DENIED')
+    }
 
     if (action === 'LIST_SLOTS') {
+      await requirePermission('AGENDA_MANAGE')
       const date = localDate(body?.local_date)
       const { data, error } = await client.rpc('service_admin_list_reschedule_slots', {
         p_appointment_id: appointmentId,
@@ -56,6 +60,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'CREATE_HOLD') {
+      await requirePermission('AGENDA_MANAGE')
       const requestedStartAt = isoDateTime(body?.requested_start_at)
       const { data, error } = await client.rpc('service_admin_create_reschedule_hold', {
         p_appointment_id: appointmentId,
@@ -68,6 +73,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'REGISTER_PENALTY') {
+      await requirePermission('AGENDA_MANAGE')
+      await requirePermission('FINANCE_MANAGE')
       const policyActionId = uuid(body?.policy_action_id, 'POLICY_ACTION_ID_INVALID')
       const method = typeof body?.method === 'string' ? body.method.trim().toUpperCase() : ''
       if (!['PIX', 'CARD', 'CASH', 'TRANSFER', 'OTHER'].includes(method)) throw new Error('INVALID_PENALTY_PAYMENT_METHOD')
@@ -83,6 +90,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'APPLY') {
+      await requirePermission('AGENDA_MANAGE')
       const policyActionId = uuid(body?.policy_action_id, 'POLICY_ACTION_ID_INVALID')
       const { data, error } = await client.rpc('service_admin_apply_reschedule', {
         p_policy_action_id: policyActionId,
@@ -95,7 +103,9 @@ Deno.serve(async (req) => {
     throw new Error('RESCHEDULE_ACTION_INVALID')
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_RESCHEDULE_ACTION_FAILED'
-    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401 : 400
+    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
+      : code === 'ADMIN_PERMISSION_DENIED' ? 403
+      : 400
     return json({ error: { code } }, status)
   }
 })

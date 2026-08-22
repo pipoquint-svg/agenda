@@ -1,4 +1,4 @@
-import { adminClient, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -101,8 +101,12 @@ Deno.serve(async (req) => {
     const body = await req.json()
     const action = typeof body?.action === 'string' ? body.action.trim().toUpperCase() : ''
     const client = adminClient()
+    const requirePermission = async (permission: string) => {
+      if (!(await hasAdminPermission(admin.adminId, permission))) throw new Error('ADMIN_PERMISSION_DENIED')
+    }
 
     if (action === 'CANCEL') {
+      await requirePermission('AGENDA_MANAGE')
       const appointmentId = uuid(body?.appointment_id)
       const settlement = body?.settlement_choice === null || body?.settlement_choice === undefined || body?.settlement_choice === ''
         ? null
@@ -124,6 +128,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'PROCESS_REFUND') {
+      await requirePermission('FINANCE_MANAGE')
       const policyActionId = uuid(body?.policy_action_id, 'POLICY_ACTION_ID_INVALID')
       const { data: initialData, error: initialError } = await client.rpc('service_get_cancellation_refund_plan', {
         p_policy_action_id: policyActionId,
@@ -213,6 +218,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_APPOINTMENT_ACTION_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
+      : code === 'ADMIN_PERMISSION_DENIED' ? 403
       : code.startsWith('MISSING_ENV') ? 503
       : 400
     return json({ error: { code } }, status)
