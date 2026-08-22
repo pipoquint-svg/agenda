@@ -1,4 +1,4 @@
-import { adminClient, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
 import { DEMAND_STATUSES } from '../_shared/demand-capture.ts'
 
 const corsHeaders = {
@@ -99,15 +99,23 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
 
   try {
-    await requireAdmin(req)
     const client = adminClient()
 
     if (req.method === 'PATCH') {
+      const admin = await requireAdminPermission(req, 'LEADS_MANAGE')
       const body = await req.json() as Record<string, unknown>
       const id = typeof body.id === 'string' ? body.id : ''
       const status = typeof body.status === 'string' ? body.status : ''
       if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('ID_INVALID')
       if (!DEMAND_STATUSES.includes(status as typeof DEMAND_STATUSES[number])) throw new Error('STATUS_INVALID')
+
+      const { data: before, error: beforeError } = await client
+        .from('demand_capture')
+        .select('id, status')
+        .eq('id', id)
+        .maybeSingle()
+      if (beforeError) throw new Error(`DEMAND_LOOKUP_FAILED:${beforeError.message}`)
+      if (!before) throw new Error('DEMAND_NOT_FOUND')
 
       const { data, error } = await client
         .from('demand_capture')
@@ -117,10 +125,24 @@ Deno.serve(async (req) => {
         .maybeSingle()
       if (error) throw new Error(`STATUS_UPDATE_FAILED:${error.message}`)
       if (!data) throw new Error('DEMAND_NOT_FOUND')
+
+      if (before.status !== data.status) {
+        const { error: auditError } = await client.from('audit_logs').insert({
+          admin_user_id: admin.adminId,
+          entity_type: 'DEMAND_CAPTURE',
+          entity_id: id,
+          action: 'DEMAND_STATUS_CHANGED',
+          before_json: before,
+          after_json: data,
+          origin: 'ADMIN',
+        })
+        if (auditError) throw new Error(`AUDIT_LOG_FAILED:${auditError.message}`)
+      }
       return json(data)
     }
 
     if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
+    await requireAdminPermission(req, 'LEADS_VIEW')
 
     const url = new URL(req.url)
     const filters = readFilters(url)
@@ -189,7 +211,9 @@ Deno.serve(async (req) => {
     })
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'DEMAND_ADMIN_FAILED'
-    const status = code.startsWith('ADMIN_') ? 401 : 400
+    const status = code === 'ADMIN_PERMISSION_DENIED' ? 403
+      : code.startsWith('ADMIN_') ? 401
+      : 400
     return json({ error: { code } }, status)
   }
 })
