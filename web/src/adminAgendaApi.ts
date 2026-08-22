@@ -70,6 +70,30 @@ export type AppointmentDetailResponse = {
   resources: AdminResource[]
 }
 
+export type ChangePolicyPreview = {
+  appointment_id: string
+  service_id: string
+  action_type: 'RESCHEDULE' | 'CANCEL'
+  requested_at: string
+  original_start_at: string
+  hours_before_start: number | string
+  notice_hours: number
+  inside_notice_window: boolean
+  prior_customer_reschedules: number
+  contract_value: number | string
+  net_paid: number | string
+  penalty_type: 'NONE' | 'FIXED' | 'PERCENT'
+  penalty_value: number | string
+  penalty_amount: number | string
+  penalty_due_now: number | string
+  refund_allowed: boolean
+  credit_allowed: boolean
+  credit_validity_days: number
+  refundable_amount: number | string
+  credit_amount: number | string
+  cancellation_penalty_outstanding: number | string
+}
+
 export type AmeliaHistoryRecord = {
   id: string
   amelia_booking_id: string
@@ -115,29 +139,22 @@ async function adminRequest(path: string, accessToken: string): Promise<Response
   return response
 }
 
-export async function getAdminAgenda(
-  startAt: string,
-  endAt: string,
-  accessToken: string,
-): Promise<AdminAgendaResponse> {
+export async function getAdminAgenda(startAt: string, endAt: string, accessToken: string): Promise<AdminAgendaResponse> {
   const params = new URLSearchParams({ action: 'agenda', start_at: startAt, end_at: endAt })
   return (await adminRequest(`admin-agenda?${params}`, accessToken)).json()
 }
 
-export async function getAdminAppointment(
-  id: string,
-  accessToken: string,
-): Promise<AppointmentDetailResponse> {
+export async function getAdminAppointment(id: string, accessToken: string): Promise<AppointmentDetailResponse> {
   const params = new URLSearchParams({ action: 'appointment', id })
   return (await adminRequest(`admin-agenda?${params}`, accessToken)).json()
 }
 
-export async function getAmeliaHistory(
-  startAt: string,
-  endAt: string,
-  search: string,
-  accessToken: string,
-): Promise<{ records: AmeliaHistoryRecord[] }> {
+export async function getChangePolicyPreview(id: string, changeType: 'RESCHEDULE' | 'CANCEL', accessToken: string): Promise<ChangePolicyPreview> {
+  const params = new URLSearchParams({ action: 'change_preview', id, change_type: changeType })
+  return (await adminRequest(`admin-agenda?${params}`, accessToken)).json()
+}
+
+export async function getAmeliaHistory(startAt: string, endAt: string, search: string, accessToken: string): Promise<{ records: AmeliaHistoryRecord[] }> {
   const params = new URLSearchParams({ action: 'amelia', start_at: startAt, end_at: endAt })
   if (search.trim()) params.set('search', search.trim())
   return (await adminRequest(`admin-agenda?${params}`, accessToken)).json()

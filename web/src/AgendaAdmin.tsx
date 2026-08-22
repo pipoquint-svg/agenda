@@ -9,6 +9,7 @@ import {
   type AmeliaHistoryRecord,
   type AppointmentDetailResponse,
 } from './adminAgendaApi'
+import { AppointmentChangePreview } from './AppointmentChangePreview'
 import { supabase } from './supabase'
 
 type Tab = 'AGENDA' | 'AMELIA'
@@ -89,7 +90,7 @@ function statusClass(status: string): string {
   return `agenda-badge agenda-badge-${normalized}`
 }
 
-function DetailPanel({ detail, onClose }: { detail: AppointmentDetailResponse; onClose: () => void }) {
+function DetailPanel({ detail, accessToken, onClose }: { detail: AppointmentDetailResponse; accessToken: string; onClose: () => void }) {
   const appointment = detail.appointment
   const customer = detail.customer ?? {}
   return (
@@ -124,6 +125,8 @@ function DetailPanel({ detail, onClose }: { detail: AppointmentDetailResponse; o
           <p>{detail.payments.length} lançamento(s) de pagamento</p>
         </section>
       </div>
+
+      <AppointmentChangePreview appointmentId={appointment.id} accessToken={accessToken} appointmentStatus={appointment.status} />
 
       <section className="agenda-detail-section">
         <h3>Recursos ocupados</h3>
@@ -272,6 +275,7 @@ export function AgendaAdmin() {
           <p>Reservas nativas, ocupação real dos recursos e histórico legado.</p>
         </div>
         <div className="agenda-header-actions">
+          <a className="secondary agenda-link-button" href="/admin/configuracoes">Configurações</a>
           <a className="secondary agenda-link-button" href="/admin/demand">Demanda</a>
           <button className="secondary" type="button" onClick={() => supabase.auth.signOut()}>Sair</button>
         </div>
@@ -334,9 +338,7 @@ export function AgendaAdmin() {
         </>
       ) : (
         <section className="agenda-day-card">
-          <div className="table-heading">
-            <div><h2>Histórico Amelia</h2><span>Consulta somente leitura — não altera a agenda atual.</span></div>
-          </div>
+          <div className="table-heading"><div><h2>Histórico Amelia</h2><span>Consulta somente leitura — não altera a agenda atual.</span></div></div>
           <form className="agenda-history-search" onSubmit={(event) => void searchAmelia(event)}>
             <label><span>Buscar</span><input placeholder="Cliente, telefone, serviço ou ID Amelia" value={ameliaSearch} onChange={(event) => setAmeliaSearch(event.target.value)} /></label>
             <button className="primary" type="submit">Consultar</button>
@@ -365,7 +367,7 @@ export function AgendaAdmin() {
         </section>
       )}
 
-      {detail && <DetailPanel detail={detail} onClose={() => setDetail(null)} />}
+      {detail && <DetailPanel detail={detail} accessToken={accessToken} onClose={() => setDetail(null)} />}
     </main>
   )
 }
