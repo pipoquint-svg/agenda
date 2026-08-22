@@ -1,8 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { ChangePolicyEditor, defaultChangePolicy } from './ChangePolicyEditor'
 import {
   listServiceSettings,
+  saveChangePolicy,
   saveDurationConfiguration,
   saveServiceTiming,
+  type ChangePolicy,
   type DurationPreset,
   type DurationPricingTier,
   type ServiceSettings,
@@ -19,6 +22,7 @@ function cloneService(service: ServiceSettings): ServiceSettings {
     ...service,
     pricing_tiers: service.pricing_tiers.map((tier) => ({ ...tier })),
     duration_presets: service.duration_presets.map((preset) => ({ ...preset })),
+    change_policy: service.change_policy ? { ...service.change_policy } : { ...defaultChangePolicy },
   }
 }
 
@@ -168,6 +172,22 @@ export function ServiceSettingsAdmin() {
     }
   }
 
+  async function savePolicy() {
+    if (!draft || !accessToken || !draft.change_policy) return
+    setSaving(true)
+    setError('')
+    setMessage('')
+    try {
+      await saveChangePolicy(draft.id, draft.change_policy, accessToken)
+      setMessage('Política de remarcação e cancelamento salva para este serviço.')
+      await load(accessToken)
+    } catch {
+      setError('Não foi possível salvar a política. Confira multas, percentuais e janela de antecedência.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function updateTier(index: number, values: Partial<DurationPricingTier>) {
     if (!draft) return
     const next = draft.pricing_tiers.map((tier, tierIndex) => tierIndex === index ? { ...tier, ...values } : tier)
@@ -180,6 +200,10 @@ export function ServiceSettingsAdmin() {
     patch({ duration_presets: next })
   }
 
+  function updatePolicy(policy: ChangePolicy) {
+    patch({ change_policy: policy })
+  }
+
   if (!authReady) return <main className="admin-shell"><p>Carregando acesso.</p></main>
   if (!accessToken) return <Login onReady={setAccessToken} />
 
@@ -189,7 +213,7 @@ export function ServiceSettingsAdmin() {
         <div>
           <span className="agenda-eyebrow">BlackSheep Agenda</span>
           <h1>Configurações dos serviços</h1>
-          <p>Duração, buffers e preço são regras do serviço — não do calendário.</p>
+          <p>Duração, buffers, preço e políticas são regras independentes de cada serviço.</p>
         </div>
         <div className="agenda-header-actions">
           <a className="secondary agenda-link-button" href="/admin/agenda">Agenda</a>
@@ -276,6 +300,13 @@ export function ServiceSettingsAdmin() {
                 </section>
               </>
             ) : null}
+
+            <ChangePolicyEditor
+              policy={draft.change_policy ?? defaultChangePolicy}
+              saving={saving}
+              onChange={updatePolicy}
+              onSave={() => void savePolicy()}
+            />
           </div>
         ) : <section className="settings-card"><p>Selecione um serviço.</p></section>}
       </div>

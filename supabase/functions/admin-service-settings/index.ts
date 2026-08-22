@@ -87,6 +87,18 @@ Deno.serve(async (req) => {
       return json(data)
     }
 
+    if (action === 'CHANGE_POLICY') {
+      if (!body?.policy || typeof body.policy !== 'object' || Array.isArray(body.policy)) {
+        throw new Error('INVALID_CHANGE_POLICY')
+      }
+      const { data, error } = await client.rpc('service_admin_upsert_change_policy', {
+        p_service_id: serviceId,
+        p_policy: body.policy,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
     throw new Error('SERVICE_SETTINGS_ACTION_INVALID')
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'SERVICE_SETTINGS_FAILED'

@@ -1,0 +1,33 @@
+.policy-settings-card { display: grid; gap: 14px; }
+.policy-window-row { max-width: 340px; }
+.policy-window-row label, .policy-credit-days { display: grid; gap: 5px; }
+.policy-window-row label > span, .policy-credit-days > span { font-size: .76rem; font-weight: 750; color: #55554f; }
+.policy-window-row small, .policy-credit-days small { color: #73736d; font-size: .72rem; line-height: 1.35; }
+.policy-input-suffix { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border: 1px solid #d4d4ce; border-radius: 8px; overflow: hidden; background: #fff; }
+.policy-input-suffix input { border: 0; border-radius: 0; }
+.policy-input-suffix > span { padding: 0 10px; color: #666660; font-size: .78rem; }
+.policy-section { border-top: 1px solid #e6e6e1; padding-top: 14px; }
+.policy-section-title { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.policy-section-title h3 { margin: 0 0 2px; font-size: 1rem; }
+.policy-section-title p { margin: 0; color: #6b6b65; font-size: .82rem; }
+.policy-penalty-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.policy-penalty-card { border: 1px solid #dfdfd9; border-radius: 10px; padding: 10px; display: grid; gap: 8px; align-content: start; background: #fafaf7; }
+.policy-penalty-card > strong { font-size: .82rem; line-height: 1.35; }
+.policy-penalty-card label { display: grid; gap: 4px; }
+.policy-penalty-card label > span { font-size: .72rem; font-weight: 700; color: #5d5d57; }
+.policy-penalty-card small { color: #777770; font-size: .71rem; line-height: 1.35; }
+.policy-cancel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.policy-cancel-window { border: 1px solid #e2e2dc; border-radius: 11px; padding: 9px; }
+.policy-cancel-window .policy-penalty-card { border: 0; padding: 3px; background: transparent; }
+.policy-options { display: grid; gap: 6px; margin-top: 8px; padding: 9px; background: #f6f6f2; border-radius: 8px; }
+.policy-options .settings-check { padding: 0; white-space: normal; }
+.policy-credit-days { max-width: 360px; margin-top: 10px; }
+.policy-summary { margin: 0; }
+
+@media (max-width: 850px) {
+  .policy-penalty-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 650px) {
+  .policy-cancel-grid { grid-template-columns: 1fr; }
+}

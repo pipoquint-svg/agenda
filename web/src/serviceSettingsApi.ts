@@ -20,6 +20,27 @@ export type DurationPreset = {
   sort_order: number
 }
 
+export type PenaltyType = 'NONE' | 'FIXED' | 'PERCENT'
+
+export type ChangePolicy = {
+  notice_hours: number
+  reschedule_first_penalty_type: PenaltyType
+  reschedule_first_penalty_value: number | string
+  reschedule_repeat_penalty_type: PenaltyType
+  reschedule_repeat_penalty_value: number | string
+  reschedule_late_penalty_type: PenaltyType
+  reschedule_late_penalty_value: number | string
+  cancellation_early_penalty_type: PenaltyType
+  cancellation_early_penalty_value: number | string
+  cancellation_late_penalty_type: PenaltyType
+  cancellation_late_penalty_value: number | string
+  cancellation_early_refund_allowed: boolean
+  cancellation_early_credit_allowed: boolean
+  cancellation_late_refund_allowed: boolean
+  cancellation_late_credit_allowed: boolean
+  cancellation_credit_validity_days: number
+}
+
 export type ServiceSettings = {
   id: string
   name: string
@@ -37,7 +58,7 @@ export type ServiceSettings = {
   buffer_after_minutes: number
   pricing_tiers: DurationPricingTier[]
   duration_presets: DurationPreset[]
-  change_policy: Record<string, unknown> | null
+  change_policy: ChangePolicy | null
 }
 
 type TimingPayload = {
@@ -102,4 +123,11 @@ export async function saveServiceTiming(payload: TimingPayload, accessToken: str
 
 export async function saveDurationConfiguration(payload: DurationConfigurationPayload, accessToken: string): Promise<void> {
   await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+export async function saveChangePolicy(serviceId: string, policy: ChangePolicy, accessToken: string): Promise<void> {
+  await request('admin-service-settings', accessToken, {
+    method: 'PUT',
+    body: JSON.stringify({ service_id: serviceId, action: 'CHANGE_POLICY', policy }),
+  })
 }
