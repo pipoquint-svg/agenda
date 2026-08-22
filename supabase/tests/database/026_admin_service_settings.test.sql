@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(13);
+select plan(14);
 
 select has_function(
   'public', 'service_admin_list_service_settings', array[]::text[],
