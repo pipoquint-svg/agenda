@@ -1,4 +1,5 @@
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
+import { customerFinancialTermsChanged } from './customerTermsPermission.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -80,9 +81,8 @@ Deno.serve(async (req) => {
 
       if (action === 'set_customer_terms') {
         await requirePermission('CUSTOMERS_MANAGE')
+        const customerIdValue = uuid(body.customer_id, 'CUSTOMER_ID_INVALID')
         const billingMode = typeof body.billing_mode === 'string' ? body.billing_mode.toUpperCase() : ''
-        if (billingMode === 'INVOICE') await requirePermission('FINANCE_MANAGE')
-
         const serviceIds = Array.isArray(body.authorized_service_ids)
           ? body.authorized_service_ids.map((value) => uuid(value, 'AUTHORIZED_SERVICE_INVALID'))
           : []
@@ -96,8 +96,22 @@ Deno.serve(async (req) => {
         if (!Number.isInteger(maxActivePrebooks) || maxActivePrebooks <= 0) throw new Error('MAX_ACTIVE_PREBOOKS_INVALID')
         if (invoiceDueDays !== null && (!Number.isInteger(invoiceDueDays) || invoiceDueDays < 0)) throw new Error('INVOICE_DUE_DAYS_INVALID')
 
+        const { data: currentTerms, error: currentTermsError } = await client
+          .from('customer_commercial_terms')
+          .select('billing_mode,invoice_due_days')
+          .eq('customer_id', customerIdValue)
+          .maybeSingle()
+        if (currentTermsError) throw new Error(currentTermsError.message)
+
+        if (customerFinancialTermsChanged(currentTerms, {
+          billing_mode: billingMode,
+          invoice_due_days: invoiceDueDays,
+        })) {
+          await requirePermission('FINANCE_MANAGE')
+        }
+
         const { data, error } = await client.rpc('service_admin_set_customer_commercial_terms', {
-          p_customer_id: uuid(body.customer_id, 'CUSTOMER_ID_INVALID'),
+          p_customer_id: customerIdValue,
           p_can_prebook: body.can_prebook === true,
           p_prebook_hold_minutes: prebookHoldMinutes,
           p_max_active_prebooks: maxActivePrebooks,
