@@ -35,6 +35,25 @@ function numeric(value: unknown, field: string, nullable = false): number | null
   return next
 }
 
+function redactPricing(data: unknown): unknown {
+  if (!Array.isArray(data)) return data
+  return data.map((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+    const item = { ...(raw as Record<string, unknown>) }
+    delete item.base_price
+    delete item.price_per_block
+    if (Array.isArray(item.pricing_tiers)) {
+      item.pricing_tiers = item.pricing_tiers.map((tier) => {
+        if (!tier || typeof tier !== 'object' || Array.isArray(tier)) return tier
+        const next = { ...(tier as Record<string, unknown>) }
+        delete next.price_per_block
+        return next
+      })
+    }
+    return item
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -49,9 +68,10 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET') {
       await requirePermission('SERVICES_VIEW')
+      const canSeeFinance = await can('FINANCE_VIEW')
       const { data, error } = await client.rpc('service_admin_list_service_settings')
       if (error) throw new Error(error.message)
-      return json({ services: data })
+      return json({ services: canSeeFinance ? data : redactPricing(data) })
     }
 
     await requirePermission('SERVICES_MANAGE')
@@ -81,7 +101,7 @@ Deno.serve(async (req) => {
       const mode = body?.duration_mode === 'BLOCKS' ? 'BLOCKS' : body?.duration_mode === 'FIXED' ? 'FIXED' : null
       if (!mode) throw new Error('INVALID_DURATION_MODE')
 
-      const { data, error } = await client.rpc('service_admin_update_timing', {
+      const { data, error } = await client.rpc('service_admin_update_timing_audited', {
         p_service_id: serviceId,
         p_duration_mode: mode,
         p_base_duration_minutes: integer(body.base_duration_minutes, 'base_duration_minutes'),
@@ -92,32 +112,37 @@ Deno.serve(async (req) => {
         p_price_per_block: numeric(body.price_per_block, 'price_per_block', mode === 'FIXED'),
         p_buffer_before_minutes: integer(body.buffer_before_minutes, 'buffer_before_minutes'),
         p_buffer_after_minutes: integer(body.buffer_after_minutes, 'buffer_after_minutes'),
+        p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
       return json(data)
     }
 
     if (action === 'DURATION_CONFIGURATION') {
+      await requirePermission('FINANCE_MANAGE')
       const tiers = Array.isArray(body?.pricing_tiers) ? body.pricing_tiers : null
       const presets = Array.isArray(body?.duration_presets) ? body.duration_presets : null
       if (!tiers || !presets) throw new Error('INVALID_DURATION_CONFIGURATION')
 
-      const { data, error } = await client.rpc('service_admin_replace_duration_configuration', {
+      const { data, error } = await client.rpc('service_admin_replace_duration_configuration_audited', {
         p_service_id: serviceId,
         p_pricing_tiers: tiers,
         p_duration_presets: presets,
+        p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
       return json(data)
     }
 
     if (action === 'CHANGE_POLICY') {
+      await requirePermission('FINANCE_MANAGE')
       if (!body?.policy || typeof body.policy !== 'object' || Array.isArray(body.policy)) {
         throw new Error('INVALID_CHANGE_POLICY')
       }
-      const { data, error } = await client.rpc('service_admin_upsert_change_policy', {
+      const { data, error } = await client.rpc('service_admin_upsert_change_policy_audited', {
         p_service_id: serviceId,
         p_policy: body.policy,
+        p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
       return json(data)
