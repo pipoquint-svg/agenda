@@ -43,7 +43,7 @@ select ok(
 );
 select ok(
   not has_function_privilege('service_role', 'public.service_admin_upsert_change_policy(uuid,jsonb)', 'EXECUTE'),
-  'legacy policy mutation is no longer directly executable by service role'
+  'internal policy primitive is not directly executable by service role'
 );
 
 select throws_ok(
@@ -100,18 +100,14 @@ select lives_ok(
     '97500000-0000-4000-8000-000000000002'::uuid,
     '{
       "notice_hours":48,
-      "reschedule_first_penalty_type":"NONE","reschedule_first_penalty_value":0,
-      "reschedule_repeat_penalty_type":"NONE","reschedule_repeat_penalty_value":0,
-      "reschedule_late_penalty_type":"NONE","reschedule_late_penalty_value":0,
-      "cancellation_early_penalty_type":"NONE","cancellation_early_penalty_value":0,
-      "cancellation_late_penalty_type":"NONE","cancellation_late_penalty_value":0,
-      "cancellation_early_refund_allowed":false,"cancellation_early_credit_allowed":false,
-      "cancellation_late_refund_allowed":false,"cancellation_late_credit_allowed":false,
-      "cancellation_credit_validity_days":1
+      "reschedule_first_early_percent":0,
+      "reschedule_first_late_percent":20,
+      "reschedule_repeat_percent":30,
+      "cancellation_late_percent":30
     }'::jsonb,
     '22000000-0000-4000-8000-000000000001'::uuid
   )$$,
-  'complete first policy is accepted without implicit commercial defaults'
+  'complete V2 first policy is accepted without implicit commercial defaults'
 );
 
 select ok(exists(
