@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(16);
+select plan(17);
 
 select has_function('public', 'service_admin_get_operation_settings', array[]::text[], 'operation settings read model exists');
 select has_function('public', 'service_admin_set_dashboard_occupancy_resource', array['uuid','uuid'], 'occupancy resource mutation exists');
