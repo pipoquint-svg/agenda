@@ -68,8 +68,6 @@ create unique index appointments_source_pre_reservation_uq
   on public.appointments (source_pre_reservation_id)
   where source_pre_reservation_id is not null;
 
--- Prevent overlapping ACTIVE pre-reservations for the same customer from being duplicated accidentally.
--- Resource-level conflict is still authoritative in resource_allocations when the hold is materialized.
 create unique index pre_reservations_idempotency_shape_uq
   on public.pre_reservations (customer_id, service_id, start_at, end_at)
   where status = 'ACTIVE';
@@ -157,7 +155,7 @@ begin
    where id = p_appointment_id;
 
   insert into public.audit_logs (
-    admin_user_id, entity_type, entity_id, action, payload_json
+    admin_user_id, entity_type, entity_id, action, after_json, origin
   ) values (
     p_admin_id, 'APPOINTMENT', p_appointment_id, 'AUTHORIZE_INVOICE',
     jsonb_build_object(
@@ -165,7 +163,8 @@ begin
       'invoice_due_days', v_terms.invoice_due_days,
       'invoice_due_at', v_due_at,
       'customer_id', v_appt.primary_customer_id
-    )
+    ),
+    'ADMIN'
   );
 
   return jsonb_build_object(
