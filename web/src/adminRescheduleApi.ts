@@ -8,6 +8,7 @@ export type AdminRescheduleSlot = {
   pre_service_minutes: number
   post_service_minutes: number
   duration_minutes: number
+  package_delta_seconds?: number
 }
 
 export type AdminRescheduleHold = {
@@ -26,6 +27,11 @@ export type AdminRescheduleHold = {
   penalty_type: string
   penalty_value: number | string
   penalty_due_now: number | string
+  package_reconciliation?: {
+    uses_package?: boolean
+    delta_seconds?: number | string
+    is_special_period?: boolean
+  }
 }
 
 export type AdminRescheduleApplyResult = {
@@ -38,6 +44,15 @@ export type AdminRescheduleApplyResult = {
   appointment_version?: number
   google_sync_enqueued?: boolean
   already_applied?: boolean
+  package_reconciliation?: Record<string, unknown>
+}
+
+export type AdminReschedulePenaltyPayment = {
+  policy_action_id: string
+  payment_transaction_id: string
+  cash_amount: number | string
+  status: 'PAID'
+  idempotent_replay: boolean
 }
 
 export class AdminRescheduleError extends Error {
@@ -75,11 +90,7 @@ export async function listAdminRescheduleSlots(input: {
   localDate: string
   accessToken: string
 }): Promise<AdminRescheduleSlot[]> {
-  const result = await call({
-    action: 'LIST_SLOTS',
-    appointment_id: input.appointmentId,
-    local_date: input.localDate,
-  }, input.accessToken)
+  const result = await call({ action: 'LIST_SLOTS', appointment_id: input.appointmentId, local_date: input.localDate }, input.accessToken)
   return result.slots ?? []
 }
 
@@ -88,10 +99,22 @@ export async function createAdminRescheduleHold(input: {
   requestedStartAt: string
   accessToken: string
 }): Promise<AdminRescheduleHold> {
+  return call({ action: 'CREATE_HOLD', appointment_id: input.appointmentId, requested_start_at: input.requestedStartAt }, input.accessToken)
+}
+
+export async function registerAdminReschedulePenalty(input: {
+  appointmentId: string
+  policyActionId: string
+  method: 'PIX' | 'CARD' | 'CASH' | 'TRANSFER' | 'OTHER'
+  notes: string | null
+  accessToken: string
+}): Promise<AdminReschedulePenaltyPayment> {
   return call({
-    action: 'CREATE_HOLD',
+    action: 'REGISTER_PENALTY',
     appointment_id: input.appointmentId,
-    requested_start_at: input.requestedStartAt,
+    policy_action_id: input.policyActionId,
+    method: input.method,
+    notes: input.notes,
   }, input.accessToken)
 }
 
@@ -100,9 +123,5 @@ export async function applyAdminReschedule(input: {
   policyActionId: string
   accessToken: string
 }): Promise<AdminRescheduleApplyResult> {
-  return call({
-    action: 'APPLY',
-    appointment_id: input.appointmentId,
-    policy_action_id: input.policyActionId,
-  }, input.accessToken)
+  return call({ action: 'APPLY', appointment_id: input.appointmentId, policy_action_id: input.policyActionId }, input.accessToken)
 }
