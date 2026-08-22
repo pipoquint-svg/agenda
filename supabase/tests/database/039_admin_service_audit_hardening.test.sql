@@ -125,11 +125,11 @@ select ok(exists(
 select lives_ok(
   $$select public.service_admin_replace_duration_configuration_audited(
     '97500000-0000-4000-8000-000000000002'::uuid,
-    '[]'::jsonb,
-    '[]'::jsonb,
+    '[{"min_blocks":2,"max_blocks":8,"price_per_block":95,"is_active":true,"sort_order":0}]'::jsonb,
+    '[{"block_count":4,"title":"4 blocos","description":null,"badge":null,"is_featured":false,"is_active":true,"sort_order":0}]'::jsonb,
     '22000000-0000-4000-8000-000000000001'::uuid
   )$$,
-  'finance-authorized admin can replace duration configuration'
+  'finance-authorized admin can replace duration configuration with an effective change'
 );
 
 select ok(exists(
