@@ -11,3 +11,22 @@
 .change-preview-result dt { color: #676761; font-size: .77rem; }
 .change-preview-result dd { margin: 0; text-align: right; font-weight: 700; font-size: .8rem; }
 .change-preview-warning { color: #777770; line-height: 1.4; }
+
+.cancellation-execution { display: grid; gap: 10px; padding: 11px; border: 1px solid #e6caca; border-radius: 10px; background: #fffafa; }
+.cancellation-execution fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: 7px; }
+.cancellation-execution legend { margin-bottom: 6px; font-size: .78rem; font-weight: 800; }
+.cancellation-execution fieldset label { display: flex; gap: 8px; align-items: flex-start; padding: 9px; border: 1px solid #dfdfda; border-radius: 8px; background: #fff; }
+.cancellation-execution fieldset input { width: 17px; height: 17px; min-height: auto; margin-top: 2px; }
+.cancellation-execution fieldset label > span { display: grid; gap: 2px; }
+.cancellation-execution fieldset small { color: #666660; font-size: .72rem; line-height: 1.35; }
+.cancellation-no-settlement { padding: 8px 9px; border-radius: 8px; background: #f3f3ef; color: #5e5e58; font-size: .76rem; }
+.cancellation-reason { display: grid; gap: 5px; }
+.cancellation-reason > span { font-size: .75rem; font-weight: 750; }
+.cancellation-reason textarea { width: 100%; resize: vertical; }
+.cancellation-ack { display: flex; gap: 8px; align-items: flex-start; font-size: .76rem; line-height: 1.4; }
+.cancellation-ack input { width: 17px; height: 17px; min-height: auto; margin-top: 1px; flex: 0 0 auto; }
+.danger-action { border: 1px solid #8a2d2d; border-radius: 8px; background: #8a2d2d; color: #fff; padding: 10px 12px; font-weight: 800; }
+.danger-action:disabled { opacity: .45; cursor: not-allowed; }
+.cancellation-success { display: grid; gap: 5px; padding: 11px; border: 1px solid #bcd7c1; border-radius: 10px; background: #f0f8f1; color: #285831; }
+.cancellation-success p { margin: 0; font-size: .8rem; line-height: 1.4; }
+.cancellation-success small { color: #527258; }
