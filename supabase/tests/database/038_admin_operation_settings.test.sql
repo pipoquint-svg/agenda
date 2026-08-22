@@ -34,10 +34,16 @@ select is(
   'null'::jsonb,
   'read returns null when occupancy resource is not configured'
 );
-select is(
-  jsonb_array_length(public.service_admin_get_operation_settings()->'eligible_occupancy_resources'),
-  1,
-  'only active PHYSICAL resources are eligible in this isolated fixture'
+select ok(
+  exists (
+    select 1 from jsonb_array_elements(public.service_admin_get_operation_settings()->'eligible_occupancy_resources') x
+    where x->>'id' = '31000000-0000-4000-8000-000000000001'
+  )
+  and not exists (
+    select 1 from jsonb_array_elements(public.service_admin_get_operation_settings()->'eligible_occupancy_resources') x
+    where x->>'id' in ('31000000-0000-4000-8000-000000000002','31000000-0000-4000-8000-000000000003')
+  ),
+  'eligible list includes active PHYSICAL and excludes inactive PHYSICAL and PERSON without assuming seed size'
 );
 
 select lives_ok(
@@ -54,11 +60,12 @@ select is(
 );
 select is(
   (select count(*)::integer from public.audit_logs
-   where entity_type = 'OPERATION_SETTINGS'
+   where entity_type = 'DASHBOARD_OCCUPANCY_RESOURCE'
+     and entity_id = '31000000-0000-4000-8000-000000000001'
      and action = 'DASHBOARD_OCCUPANCY_RESOURCE_CHANGED'
      and admin_user_id = '21000000-0000-4000-8000-000000000001'),
   1,
-  'first state change writes one audit event'
+  'first state change writes one audit event against the involved resource'
 );
 
 select lives_ok(
@@ -70,7 +77,7 @@ select lives_ok(
 );
 select is(
   (select count(*)::integer from public.audit_logs
-   where entity_type = 'OPERATION_SETTINGS'
+   where entity_type = 'DASHBOARD_OCCUPANCY_RESOURCE'
      and action = 'DASHBOARD_OCCUPANCY_RESOURCE_CHANGED'
      and admin_user_id = '21000000-0000-4000-8000-000000000001'),
   1,
