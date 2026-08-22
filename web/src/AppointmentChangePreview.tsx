@@ -8,6 +8,7 @@ import {
   type CancellationSettlementChoice,
 } from './adminAppointmentActionsApi'
 import { getChangePolicyPreview, type ChangePolicyPreview } from './adminAgendaApi'
+import { AppointmentRescheduleFlow } from './AppointmentRescheduleFlow'
 import './appointmentChangePreview.css'
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -102,7 +103,7 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
   appointmentId: string
   accessToken: string
   appointmentStatus: string
-  onAppointmentChanged?: (result: AdminCancellationResult) => void | Promise<void>
+  onAppointmentChanged?: (result?: AdminCancellationResult) => void | Promise<void>
 }) {
   const [preview, setPreview] = useState<ChangePolicyPreview | null>(null)
   const [loading, setLoading] = useState<'RESCHEDULE' | 'CANCEL' | null>(null)
@@ -186,6 +187,7 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
   }
 
   const cancelPreview = preview?.action_type === 'CANCEL' ? preview : null
+  const reschedulePreview = preview?.action_type === 'RESCHEDULE' ? preview : null
   const hasRefund = Boolean(cancelPreview?.refund_allowed && Number(cancelPreview.refundable_amount) > 0)
   const hasCredit = Boolean(cancelPreview?.credit_allowed && Number(cancelPreview.credit_amount) > 0)
 
@@ -212,6 +214,15 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
           {error ? <div className="form-alert error" role="alert">{error}</div> : null}
           {preview ? <PreviewResult preview={preview} /> : null}
 
+          {reschedulePreview ? (
+            <AppointmentRescheduleFlow
+              appointmentId={appointmentId}
+              accessToken={accessToken}
+              preview={reschedulePreview}
+              onApplied={async () => { await onAppointmentChanged?.() }}
+            />
+          ) : null}
+
           {cancelPreview ? (
             <div className="cancellation-execution">
               {(hasRefund || hasCredit) ? (
@@ -226,7 +237,7 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
               <label className="cancellation-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /><span>Confirmo que revisei a política acima. Ao continuar, o horário será liberado imediatamente e esta ação ficará registrada no histórico.</span></label>
               <button className="danger-action" type="button" disabled={!acknowledged || executingCancel || ((hasRefund || hasCredit) && !settlement)} onClick={() => void executeCancellation()}>{executingCancel ? 'Cancelando…' : 'Confirmar cancelamento da reserva'}</button>
             </div>
-          ) : <small className="change-preview-warning">A simulação não altera reserva, pagamento ou horário.</small>}
+          ) : preview ? null : <small className="change-preview-warning">A simulação não altera reserva, pagamento ou horário.</small>}
         </>
       )}
     </section>
