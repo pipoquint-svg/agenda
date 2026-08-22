@@ -34,7 +34,7 @@ select has_function('public','service_record_cancellation_provider_refund',array
 select ok(not has_function_privilege('anon','public.service_get_cancellation_refund_plan(uuid)','EXECUTE'),'anonymous clients cannot inspect provider refund plans');
 
 select is((public.service_admin_cancel_appointment('97700000-0000-0000-0000-000000000010',null,'MIXED_REFUND','2035-03-07 10:00:00-03','CLIENT',null)->>'policy_action_status'),'PENDING_REFUND','mixed-payment cancellation enters pending refund');
-select is((select refundable_amount from public.appointment_policy_actions where appointment_id='97700000-0000-0000-0000-000000000010' and action_type='CANCEL'),600.00::numeric(12,2),'early cancellation returns all contract funds settled, including payment discount value');
+select is((select refundable_amount from public.appointment_policy_actions where appointment_id='97700000-0000-0000-0000-000000000010' and action_type='CANCEL'),575.00::numeric(12,2),'refund target is customer cash actually received, never the R$25 payment discount');
 select is((select (public.service_get_cancellation_refund_plan(id)->>'mercado_pago_available_cash')::numeric(12,2) from public.appointment_policy_actions where appointment_id='97700000-0000-0000-0000-000000000010' and action_type='CANCEL'),475.00::numeric(12,2),'refund plan identifies Mercado Pago cash available');
 select is((select (public.service_get_cancellation_refund_plan(id)->>'manual_refund_cash')::numeric(12,2) from public.appointment_policy_actions where appointment_id='97700000-0000-0000-0000-000000000010' and action_type='CANCEL'),100.00::numeric(12,2),'manual cash portion remains explicitly manual');
 
@@ -45,7 +45,7 @@ select lives_ok($$select public.service_record_cancellation_provider_refund(
 select is((select contract_amount_settled from public.payment_transactions where provider_payment_id='mp-refund-mixed-475' and transaction_type='REFUND'),500.00::numeric(12,2),'PIX cash refund restores proportional contract amount including discount');
 select is((select status from public.payment_transactions where id='97700000-0000-0000-0000-000000000011'),'REFUNDED','fully refunded provider charge is marked REFUNDED');
 select is((select status from public.appointment_policy_actions where appointment_id='97700000-0000-0000-0000-000000000010' and action_type='CANCEL'),'PENDING_REFUND','mixed cancellation remains pending while manual cash is outstanding');
-select is((public.get_appointment_financial_summary('97700000-0000-0000-0000-000000000010')->>'cash_contract_net')::numeric(12,2),100.00::numeric(12,2),'financial summary reports remaining net contract settlement after provider refund');
+select is((public.get_appointment_financial_summary('97700000-0000-0000-0000-000000000010')->>'cash_received')::numeric(12,2),100.00::numeric(12,2),'financial summary reports remaining customer cash after provider refund');
 select is((select financial_status::text from public.appointments where id='97700000-0000-0000-0000-000000000010'),'PARTIALLY_REFUNDED','mixed refund produces partially-refunded financial state');
 
 select is((public.service_admin_cancel_appointment('97700000-0000-0000-0000-000000000020',null,'MP_ONLY_REFUND','2035-03-08 10:00:00-03','CLIENT',null)->>'policy_action_status'),'PENDING_REFUND','provider-only cancellation starts pending');
