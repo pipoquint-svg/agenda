@@ -64,3 +64,6 @@ verify_jwt = false
 
 [functions.admin-service-settings]
 verify_jwt = false
+
+[functions.admin-appointment-actions]
+verify_jwt = false
