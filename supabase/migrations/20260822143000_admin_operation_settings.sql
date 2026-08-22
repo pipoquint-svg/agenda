@@ -50,6 +50,8 @@ declare
   v_before jsonb;
   v_after jsonb;
   v_resource public.resources%rowtype;
+  v_before_resource_id uuid;
+  v_audit_entity_id uuid;
 begin
   if not exists (
     select 1 from public.admin_users
@@ -69,6 +71,7 @@ begin
   end if;
 
   select public.service_admin_get_operation_settings() into v_before;
+  v_before_resource_id := nullif(v_before->>'dashboard_occupancy_resource_id', '')::uuid;
 
   update public.operation_settings
   set dashboard_occupancy_resource_id = p_resource_id,
@@ -77,14 +80,15 @@ begin
 
   select public.service_admin_get_operation_settings() into v_after;
 
-  if (v_before->>'dashboard_occupancy_resource_id') is distinct from (v_after->>'dashboard_occupancy_resource_id') then
+  if v_before_resource_id is distinct from p_resource_id then
+    v_audit_entity_id := coalesce(p_resource_id, v_before_resource_id);
     insert into public.audit_logs(
       admin_user_id, entity_type, entity_id, action,
       before_json, after_json, origin
     ) values (
       p_actor_admin_id,
-      'OPERATION_SETTINGS',
-      null,
+      'DASHBOARD_OCCUPANCY_RESOURCE',
+      v_audit_entity_id,
       'DASHBOARD_OCCUPANCY_RESOURCE_CHANGED',
       v_before,
       v_after,
@@ -105,4 +109,4 @@ grant execute on function public.service_admin_set_dashboard_occupancy_resource(
 comment on function public.service_admin_get_operation_settings() is
   'Admin read model for operation settings; occupancy resources are explicit active PHYSICAL resources only.';
 comment on function public.service_admin_set_dashboard_occupancy_resource(uuid,uuid) is
-  'Admin mutation for explicit dashboard occupancy resource selection with audit before/after.';
+  'Admin mutation for explicit dashboard occupancy resource selection with audit before/after against the involved resource.';
