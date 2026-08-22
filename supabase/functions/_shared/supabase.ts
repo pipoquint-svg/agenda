@@ -24,7 +24,14 @@ export function adminClient(): SupabaseClient {
   })
 }
 
-export async function requireAdmin(req: Request): Promise<{ adminId: string; authUserId: string }> {
+export type AdminContext = {
+  adminId: string
+  authUserId: string
+  role: string
+  permissions: Record<string, boolean>
+}
+
+export async function requireAdmin(req: Request, requiredModule?: string): Promise<AdminContext> {
   const header = req.headers.get('authorization') ?? ''
   const match = header.match(/^Bearer\s+(.+)$/i)
   if (!match) throw new Error('ADMIN_AUTH_REQUIRED')
@@ -35,13 +42,34 @@ export async function requireAdmin(req: Request): Promise<{ adminId: string; aut
 
   const { data: admin, error: adminError } = await client
     .from('admin_users')
-    .select('id, auth_user_id, is_active')
+    .select('id, auth_user_id, role, is_active')
     .eq('auth_user_id', userData.user.id)
     .eq('is_active', true)
     .maybeSingle()
 
   if (adminError || !admin) throw new Error('ADMIN_ACCESS_DENIED')
-  return { adminId: admin.id, authUserId: admin.auth_user_id }
+
+  const { data: permissionRows, error: permissionError } = await client
+    .from('admin_user_permissions')
+    .select('module_key, can_access')
+    .eq('admin_user_id', admin.id)
+
+  if (permissionError) throw new Error('ADMIN_PERMISSION_LOOKUP_FAILED')
+
+  const permissions = Object.fromEntries(
+    (permissionRows ?? []).map((row) => [String(row.module_key), Boolean(row.can_access)]),
+  )
+
+  if (requiredModule && admin.role !== 'OWNER' && permissions[requiredModule.toUpperCase()] !== true) {
+    throw new Error('ADMIN_MODULE_ACCESS_DENIED')
+  }
+
+  return {
+    adminId: admin.id,
+    authUserId: admin.auth_user_id,
+    role: admin.role,
+    permissions,
+  }
 }
 
 export function jsonResponse(body: unknown, status = 200): Response {
