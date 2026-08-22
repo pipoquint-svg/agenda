@@ -1,13 +1,12 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { parseConfiguredBrands, validateDemandSubmission } from '../_shared/demand-capture.ts'
+import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
-
-const ipBuckets = new Map<string, { count: number; resetAt: number }>()
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,20 +19,6 @@ function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim()
   if (!value) throw new Error(`MISSING_ENV:${name}`)
   return value
-}
-
-function enforceIpRateLimit(req: Request): void {
-  const ip = (req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown')
-    .split(',')[0]
-    .trim()
-  const now = Date.now()
-  const current = ipBuckets.get(ip)
-  if (!current || current.resetAt <= now) {
-    ipBuckets.set(ip, { count: 1, resetAt: now + 10 * 60 * 1000 })
-    return
-  }
-  if (current.count >= 20) throw new Error('RATE_LIMITED')
-  current.count += 1
 }
 
 Deno.serve(async (req) => {
@@ -64,7 +49,14 @@ Deno.serve(async (req) => {
     }
 
     if (req.method !== 'POST') return response({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
-    enforceIpRateLimit(req)
+
+    // Preserve the existing policy (20 requests / 10 minutes), now in the shared DB
+    // counter so separate Edge instances consume one aggregate quota.
+    await enforceDistributedPublicRateLimit(client, req, {
+      scope: 'DEMAND_CAPTURE',
+      limit: 20,
+      windowSeconds: 600,
+    })
 
     const submission = validateDemandSubmission(await req.json(), brands)
     if (submission.consent_text_version !== consentVersion) throw new Error('CONSENT_VERSION_STALE')
@@ -106,7 +98,7 @@ Deno.serve(async (req) => {
     const publicCode = code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'CONSENT_VERSION_STALE' ? 409
-      : publicCode.startsWith('MISSING_ENV') || publicCode.endsWith('_NOT_CONFIGURED') ? 503
+      : publicCode.startsWith('MISSING_ENV') || publicCode.endsWith('_NOT_CONFIGURED') || publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : 400
     return response({ error: { code: publicCode } }, status)
   }

@@ -193,6 +193,23 @@ function unwrapRpc<T>(data: unknown, error: { message: string } | null): T {
   return data as T
 }
 
+async function callPublicGateway<T>(name: 'booking-hold' | 'booking-checkout', body: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`${functionsBaseUrl}/${name}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      apikey: publicApiKey,
+      authorization: `Bearer ${publicApiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+  const payload = await res.json().catch(() => ({})) as { hold?: T; data?: T; error?: { code?: string } }
+  if (!res.ok) throw new Error(payload.error?.code ?? `HTTP_${res.status}`)
+  const value = name === 'booking-hold' ? payload.hold : payload.data
+  if (value === undefined) throw new Error('PUBLIC_GATEWAY_INVALID_RESPONSE')
+  return value as T
+}
+
 export async function loadBookingPage(slug: string): Promise<BookingPageData | null> {
   const { data, error } = await supabase.rpc('public_get_booking_page', { p_slug: slug })
   const result = unwrapRpc<BookingPageData | null>(data, error)
@@ -297,16 +314,15 @@ export async function createBookingHold(input: {
   peopleCount: number
   requestedStartAt: string
 }): Promise<CheckoutHold> {
-  const { data, error } = await supabase.rpc('public_create_checkout_hold_tracked', {
-    p_booking_page_slug: input.pageSlug,
-    p_service_id: input.serviceId,
-    p_service_employee_id: input.serviceEmployeeId,
-    p_extra_selections: input.extras,
-    p_people_count: input.peopleCount,
-    p_requested_start_at: input.requestedStartAt,
-    p_attribution_json: attributionForBackend() ?? {},
+  const result = await callPublicGateway<CheckoutHold>('booking-hold', {
+    booking_page_slug: input.pageSlug,
+    service_id: input.serviceId,
+    service_employee_id: input.serviceEmployeeId,
+    extra_selections: input.extras,
+    people_count: input.peopleCount,
+    requested_start_at: input.requestedStartAt,
+    attribution_json: attributionForBackend() ?? {},
   })
-  const result = unwrapRpc<CheckoutHold>(data, error)
   const { page, service } = pageAndService(input.pageSlug, input.serviceId)
   trackFunnelStep('slot_selected', {
     bs_brand: page?.brand_key ?? input.pageSlug,
@@ -325,21 +341,17 @@ export async function createBookingHold(input: {
 }
 
 export async function loadCheckoutContext(token: string): Promise<CheckoutContext> {
-  const { data, error } = await supabase.rpc('public_get_checkout_context', {
-    p_checkout_hold_token: token,
+  const result = await callPublicGateway<CheckoutContext>('booking-checkout', {
+    action: 'CONTEXT', checkout_hold_token: token,
   })
-  const result = unwrapRpc<CheckoutContext>(data, error)
   checkoutContextCache.set(token, result)
   return result
 }
 
 export async function setBookingRecoveryContact(token: string, phone: string, enabled = true): Promise<void> {
-  const { error } = await supabase.rpc('set_checkout_hold_recovery_contact', {
-    p_checkout_hold_token: token,
-    p_phone: phone,
-    p_enabled: enabled,
+  await callPublicGateway<unknown>('booking-checkout', {
+    action: 'SET_RECOVERY_CONTACT', checkout_hold_token: token, phone, enabled,
   })
-  if (error) throw new Error(error.message)
 }
 
 export async function bindCheckoutCustomer(input: {
@@ -350,15 +362,15 @@ export async function bindCheckoutCustomer(input: {
   taxId: string
   recoveryEnabled: boolean
 }): Promise<{ customer_bound: boolean; customer_created: boolean; recovery_enabled: boolean; has_tax_id: boolean }> {
-  const { data, error } = await supabase.rpc('public_bind_checkout_customer', {
-    p_checkout_hold_token: input.token,
-    p_name: input.name,
-    p_email: input.email,
-    p_phone: input.phone,
-    p_tax_id: input.taxId || null,
-    p_recovery_enabled: input.recoveryEnabled,
+  const result = await callPublicGateway<{ customer_bound: boolean; customer_created: boolean; recovery_enabled: boolean; has_tax_id: boolean }>('booking-checkout', {
+    action: 'BIND_CUSTOMER',
+    checkout_hold_token: input.token,
+    name: input.name,
+    email: input.email,
+    phone: input.phone,
+    tax_id: input.taxId || null,
+    recovery_enabled: input.recoveryEnabled,
   })
-  const result = unwrapRpc<{ customer_bound: boolean; customer_created: boolean; recovery_enabled: boolean; has_tax_id: boolean }>(data, error)
   const context = checkoutContextCache.get(input.token)
   if (context) {
     trackCustomerDetailsCompleted({
@@ -372,18 +384,15 @@ export async function bindCheckoutCustomer(input: {
 }
 
 export async function listCheckoutPackages(token: string): Promise<CheckoutPackage[]> {
-  const { data, error } = await supabase.rpc('public_list_checkout_hour_packages', {
-    p_checkout_hold_token: token,
+  return callPublicGateway<CheckoutPackage[]>('booking-checkout', {
+    action: 'LIST_PACKAGES', checkout_hold_token: token,
   })
-  return unwrapRpc<CheckoutPackage[]>(data ?? [], error)
 }
 
 export async function selectCheckoutPackage(token: string, packageId: string): Promise<void> {
-  const { error } = await supabase.rpc('public_select_checkout_hour_package', {
-    p_checkout_hold_token: token,
-    p_hour_package_id: packageId,
+  await callPublicGateway<unknown>('booking-checkout', {
+    action: 'SELECT_PACKAGE', checkout_hold_token: token, hour_package_id: packageId,
   })
-  if (error) throw new Error(error.message)
   const context = checkoutContextCache.get(token)
   trackFunnelStep('hour_package_selected', {
     bs_brand: context?.brand_key,
@@ -393,10 +402,9 @@ export async function selectCheckoutPackage(token: string, packageId: string): P
 }
 
 export async function clearCheckoutPackage(token: string): Promise<void> {
-  const { error } = await supabase.rpc('public_clear_checkout_hour_package', {
-    p_checkout_hold_token: token,
+  await callPublicGateway<unknown>('booking-checkout', {
+    action: 'CLEAR_PACKAGE', checkout_hold_token: token,
   })
-  if (error) throw new Error(error.message)
   const context = checkoutContextCache.get(token)
   trackFunnelStep('hour_package_selected', {
     bs_brand: context?.brand_key,

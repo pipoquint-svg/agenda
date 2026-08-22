@@ -23,8 +23,8 @@ select is(
 );
 
 select ok(
-  has_function_privilege('anon', 'public.public_create_checkout_hold_tracked(text,uuid,uuid,jsonb,integer,timestamptz,jsonb)', 'EXECUTE'),
-  'anon can call the tracked public hold wrapper'
+  not has_function_privilege('anon', 'public.public_create_checkout_hold_tracked(text,uuid,uuid,jsonb,integer,timestamptz,jsonb)', 'EXECUTE'),
+  'anon cannot bypass the distributed hold gateway through the tracked RPC'
 );
 
 select ok(
