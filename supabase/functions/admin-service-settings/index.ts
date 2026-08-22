@@ -36,22 +36,22 @@ function numeric(value: unknown, field: string, nullable = false): number | null
 }
 
 function redactPricing(data: unknown): unknown {
-  if (!Array.isArray(data)) return data
-  return data.map((raw) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
-    const item = { ...(raw as Record<string, unknown>) }
-    delete item.base_price
-    delete item.price_per_block
-    if (Array.isArray(item.pricing_tiers)) {
-      item.pricing_tiers = item.pricing_tiers.map((tier) => {
-        if (!tier || typeof tier !== 'object' || Array.isArray(tier)) return tier
-        const next = { ...(tier as Record<string, unknown>) }
-        delete next.price_per_block
-        return next
-      })
-    }
-    return item
-  })
+  if (Array.isArray(data)) {
+    return data.map((item) => redactPricing(item))
+  }
+  if (!data || typeof data !== 'object') return data
+  const item = { ...(data as Record<string, unknown>) }
+  delete item.base_price
+  delete item.price_per_block
+  if (Array.isArray(item.pricing_tiers)) {
+    item.pricing_tiers = item.pricing_tiers.map((tier) => {
+      if (!tier || typeof tier !== 'object' || Array.isArray(tier)) return tier
+      const next = { ...(tier as Record<string, unknown>) }
+      delete next.price_per_block
+      return next
+    })
+  }
+  return item
 }
 
 Deno.serve(async (req) => {
@@ -100,6 +100,7 @@ Deno.serve(async (req) => {
     if (action === 'TIMING') {
       const mode = body?.duration_mode === 'BLOCKS' ? 'BLOCKS' : body?.duration_mode === 'FIXED' ? 'FIXED' : null
       if (!mode) throw new Error('INVALID_DURATION_MODE')
+      const canSeeFinance = await can('FINANCE_VIEW')
 
       const { data, error } = await client.rpc('service_admin_update_timing_audited', {
         p_service_id: serviceId,
@@ -108,14 +109,14 @@ Deno.serve(async (req) => {
         p_booking_block_minutes: integer(body.booking_block_minutes, 'booking_block_minutes', mode === 'FIXED'),
         p_minimum_booking_blocks: integer(body.minimum_booking_blocks, 'minimum_booking_blocks', mode === 'FIXED'),
         p_maximum_booking_blocks: integer(body.maximum_booking_blocks, 'maximum_booking_blocks', mode === 'FIXED'),
-        p_base_price: numeric(body.base_price, 'base_price'),
-        p_price_per_block: numeric(body.price_per_block, 'price_per_block', mode === 'FIXED'),
+        p_base_price: numeric(body.base_price, 'base_price', true),
+        p_price_per_block: numeric(body.price_per_block, 'price_per_block', true),
         p_buffer_before_minutes: integer(body.buffer_before_minutes, 'buffer_before_minutes'),
         p_buffer_after_minutes: integer(body.buffer_after_minutes, 'buffer_after_minutes'),
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(canSeeFinance ? data : redactPricing(data))
     }
 
     if (action === 'DURATION_CONFIGURATION') {
