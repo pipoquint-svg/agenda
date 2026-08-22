@@ -1,4 +1,4 @@
-import { adminClient, errorResponse, jsonResponse, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
 import {
   encryptRefreshToken,
   exchangeAuthorizationCode,
@@ -34,7 +34,7 @@ function redirectResult(base: string, status: 'success' | 'error', code?: string
 }
 
 async function start(req: Request): Promise<Response> {
-  const { adminId } = await requireAdmin(req)
+  const { adminId } = await requireAdminPermission(req, 'INTEGRATIONS_MANAGE')
   const rawState = randomSecret(32)
   const stateHash = await sha256Hex(rawState)
   const client = adminClient()
@@ -163,7 +163,9 @@ Deno.serve(async (req) => {
     return await start(req)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'GOOGLE_OAUTH_FAILED'
-    const authFailure = message.startsWith('ADMIN_')
-    return errorResponse(error, authFailure ? 401 : 400)
+    const status = message === 'ADMIN_PERMISSION_DENIED' ? 403
+      : message.startsWith('ADMIN_') ? 401
+      : 400
+    return errorResponse(error, status)
   }
 })

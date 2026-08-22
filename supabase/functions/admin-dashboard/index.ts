@@ -6,6 +6,12 @@ const corsHeaders = {
   'access-control-allow-methods': 'GET, OPTIONS',
 }
 
+const financePendingKinds = new Set([
+  'PAYMENT_AWAITING',
+  'RESCHEDULE_PENALTY_PENDING',
+  'CANCELLATION_REFUND_PENDING',
+])
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -21,6 +27,19 @@ function requiredIso(url: URL, key: string): string {
   return parsed.toISOString()
 }
 
+function redactFinancialPendingItems(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+  const output = { ...(data as Record<string, unknown>) }
+  if (Array.isArray(output.pending_items)) {
+    output.pending_items = output.pending_items.filter((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return true
+      const kind = String((item as Record<string, unknown>).kind ?? '')
+      return !financePendingKinds.has(kind)
+    })
+  }
+  return output
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -30,6 +49,7 @@ Deno.serve(async (req) => {
     if (!(await hasAdminPermission(admin.adminId, 'DASHBOARD_VIEW'))) {
       throw new Error('ADMIN_PERMISSION_DENIED')
     }
+    const canSeeFinance = await hasAdminPermission(admin.adminId, 'FINANCE_VIEW')
 
     const url = new URL(req.url)
     const scopeRaw = url.searchParams.get('operation_scope')?.trim().toUpperCase() ?? ''
@@ -45,7 +65,7 @@ Deno.serve(async (req) => {
       p_operation_scope: operationScope,
     })
     if (error) throw new Error(error.message)
-    return json(data)
+    return json(canSeeFinance ? data : redactFinancialPendingItems(data))
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_DASHBOARD_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED'

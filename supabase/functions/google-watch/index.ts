@@ -1,11 +1,11 @@
-import { adminClient, errorResponse, jsonResponse, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
 import { decryptRefreshToken, googleJson, randomSecret, refreshAccessToken, sha256Hex } from '../_shared/google.ts'
 
 async function authorize(req: Request): Promise<void> {
   const internal = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
   if (internal && supplied === internal) return
-  await requireAdmin(req)
+  await requireAdminPermission(req, 'INTEGRATIONS_MANAGE')
 }
 
 type WatchResponse = {
@@ -104,7 +104,9 @@ Deno.serve(async (req) => {
     })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'GOOGLE_WATCH_FAILED'
-    const authFailure = code.startsWith('ADMIN_')
-    return errorResponse(error, authFailure ? 401 : 400)
+    const status = code === 'ADMIN_PERMISSION_DENIED' ? 403
+      : code.startsWith('ADMIN_') ? 401
+      : 400
+    return errorResponse(error, status)
   }
 })

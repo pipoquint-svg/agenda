@@ -27,25 +27,19 @@ jobs:
           deno test supabase/functions/_shared/whatsapp_test.ts
           deno test supabase/functions/_shared/mercado-pago_test.ts
 
-      - name: Type-check Edge Functions
+      - name: Type-check every Edge Function
         run: |
-          deno check supabase/functions/google-oauth/index.ts
-          deno check supabase/functions/google-sync/index.ts
-          deno check supabase/functions/google-webhook/index.ts
-          deno check supabase/functions/google-watch/index.ts
-          deno check supabase/functions/google-appointment-sync/index.ts
-          deno check supabase/functions/whatsapp-send-template/index.ts
-          deno check supabase/functions/integration-worker/index.ts
-          deno check supabase/functions/demand-capture/index.ts
-          deno check supabase/functions/demand-capture-admin/index.ts
-          deno check supabase/functions/booking-submit/index.ts
-          deno check supabase/functions/mercado-pago-payment/index.ts
-          deno check supabase/functions/mercado-pago-webhook/index.ts
-          deno check supabase/functions/admin-agenda/index.ts
-          deno check supabase/functions/admin-service-settings/index.ts
-          deno check supabase/functions/admin-operation-settings/index.ts
-          deno check supabase/functions/admin-appointment-actions/index.ts
-          deno check supabase/functions/admin-reschedule-actions/index.ts
+          mapfile -d '' edge_files < <(find supabase/functions -mindepth 2 -maxdepth 2 -name index.ts -print0 | sort -z)
+          if [[ ${#edge_files[@]} -eq 0 ]]; then
+            echo "No Edge Functions found" >&2
+            exit 1
+          fi
+          printf 'Type-checking %d Edge Functions\n' "${#edge_files[@]}"
+          for file in "${edge_files[@]}"; do
+            echo "::group::deno check ${file}"
+            deno check "${file}"
+            echo "::endgroup::"
+          done
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1

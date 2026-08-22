@@ -1,4 +1,4 @@
-import { adminClient, errorResponse, jsonResponse, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
 import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken } from '../_shared/google.ts'
 import { managedEventNeedsRepair, type ManagedAppointmentDesiredState } from '../_shared/managed-event.ts'
 
@@ -6,7 +6,7 @@ async function authorize(req: Request): Promise<void> {
   const internal = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
   if (internal && supplied === internal) return
-  await requireAdmin(req)
+  await requireAdminPermission(req, 'INTEGRATIONS_MANAGE')
 }
 
 type EventsPage = {
@@ -64,8 +64,6 @@ async function performSync(
       const normalized = normalizeGoogleEvent(event)
       if (!normalized.p_google_event_id) continue
 
-      // Google can return sparse cancelled instances. Preserve Agenda ownership already
-      // known by the mirror instead of erasing it when extendedProperties are absent.
       if (normalized.p_status === 'cancelled' && !normalized.p_agenda_appointment_id) {
         const { data: existing } = await client
           .from('google_calendar_events')
@@ -112,8 +110,6 @@ async function performSync(
     if (page.nextSyncToken) nextSyncToken = page.nextSyncToken
   } while (pageToken)
 
-  // A full sync can omit an event deleted earlier. Any active managed mirror not seen
-  // during this rebuild is stale remote state and must be reconciled from the appointment.
   if (full) {
     const { data: unseen } = await client
       .from('google_calendar_events')
@@ -232,7 +228,9 @@ Deno.serve(async (req) => {
     })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'GOOGLE_SYNC_FAILED'
-    const authFailure = code.startsWith('ADMIN_')
-    return errorResponse(error, authFailure ? 401 : 400)
+    const status = code === 'ADMIN_PERMISSION_DENIED' ? 403
+      : code.startsWith('ADMIN_') ? 401
+      : 400
+    return errorResponse(error, status)
   }
 })

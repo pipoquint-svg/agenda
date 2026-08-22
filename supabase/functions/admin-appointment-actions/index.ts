@@ -114,6 +114,9 @@ Deno.serve(async (req) => {
       if (settlement !== null && settlement !== 'REFUND' && settlement !== 'CREDIT') {
         throw new Error('INVALID_CANCELLATION_SETTLEMENT')
       }
+      if (settlement === 'REFUND' || settlement === 'CREDIT') {
+        await requirePermission('FINANCE_MANAGE')
+      }
 
       const reason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, 500) : null
       const { data, error } = await client.rpc('service_admin_cancel_appointment', {
