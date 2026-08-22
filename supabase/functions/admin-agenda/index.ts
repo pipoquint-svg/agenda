@@ -1,10 +1,19 @@
-import { adminClient, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
+
+const financeKeys = new Set([
+  'commercial_value', 'financial_status', 'financial', 'payments',
+  'base_price_snapshot', 'variable_price_adjustment', 'extras_total', 'coupon_discount',
+  'gross_contract_settled', 'gross_cash_received', 'refunded_contract_amount', 'refunded_cash_amount',
+  'contract_settled', 'cash_received', 'contract_balance', 'operational_penalties_cash_received',
+  'penalty_amount', 'penalty_due_now', 'refundable_amount', 'credit_amount',
+  'cancellation_penalty_outstanding', 'contract_value', 'net_paid',
+])
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -40,6 +49,17 @@ function customerId(url: URL): string {
   return uuid(clean(url.searchParams.get('id')), 'CUSTOMER_ID_INVALID')
 }
 
+function redactFinance(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactFinance)
+  if (!value || typeof value !== 'object') return value
+  const result: Record<string, unknown> = {}
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (financeKeys.has(key)) continue
+    result[key] = redactFinance(nested)
+  }
+  return result
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'GET' && req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -48,16 +68,24 @@ Deno.serve(async (req) => {
     const admin = await requireAdmin(req)
     const client = adminClient()
     const url = new URL(req.url)
+    const can = (permission: string) => hasAdminPermission(admin.adminId, permission)
+    const requirePermission = async (permission: string) => {
+      if (!(await can(permission))) throw new Error('ADMIN_PERMISSION_DENIED')
+    }
+    const canViewFinance = await can('FINANCE_VIEW')
 
     if (req.method === 'POST') {
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
       const action = clean(typeof body.action === 'string' ? body.action : null)
 
       if (action === 'set_customer_terms') {
+        await requirePermission('CUSTOMERS_MANAGE')
+        const billingMode = typeof body.billing_mode === 'string' ? body.billing_mode.toUpperCase() : ''
+        if (billingMode === 'INVOICE') await requirePermission('FINANCE_MANAGE')
+
         const serviceIds = Array.isArray(body.authorized_service_ids)
           ? body.authorized_service_ids.map((value) => uuid(value, 'AUTHORIZED_SERVICE_INVALID'))
           : []
-        const billingMode = typeof body.billing_mode === 'string' ? body.billing_mode : ''
         const invoiceDueDays = body.invoice_due_days === null || body.invoice_due_days === undefined
           ? null
           : Number(body.invoice_due_days)
@@ -85,9 +113,22 @@ Deno.serve(async (req) => {
       }
 
       if (action === 'authorize_invoice') {
+        await requirePermission('FINANCE_MANAGE')
         const { data, error } = await client.rpc('service_admin_authorize_invoiced_appointment', {
           p_appointment_id: uuid(body.appointment_id, 'APPOINTMENT_ID_INVALID'),
           p_admin_id: admin.adminId,
+        })
+        if (error) throw new Error(error.message)
+        return json(data)
+      }
+
+      if (action === 'set_permission') {
+        await requirePermission('TEAM_MANAGE')
+        const { data, error } = await client.rpc('service_admin_set_permission', {
+          p_target_admin_id: uuid(body.admin_user_id, 'ADMIN_USER_ID_INVALID'),
+          p_permission: typeof body.permission === 'string' ? body.permission : '',
+          p_is_granted: body.is_granted === true,
+          p_actor_admin_id: admin.adminId,
         })
         if (error) throw new Error(error.message)
         return json(data)
@@ -98,13 +139,21 @@ Deno.serve(async (req) => {
 
     const action = clean(url.searchParams.get('action')) ?? 'agenda'
 
-    if (action === 'appointment') {
-      const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: appointmentId(url) })
+    if (action === 'access_profile') {
+      const { data, error } = await client.rpc('service_admin_get_access_profile', { p_admin_id: admin.adminId })
       if (error) throw new Error(error.message)
       return json(data)
     }
 
+    if (action === 'appointment') {
+      await requirePermission('AGENDA_VIEW')
+      const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: appointmentId(url) })
+      if (error) throw new Error(error.message)
+      return json(canViewFinance ? data : redactFinance(data))
+    }
+
     if (action === 'change_preview') {
+      await requirePermission('AGENDA_MANAGE')
       const changeType = clean(url.searchParams.get('change_type'))
       if (changeType !== 'RESCHEDULE' && changeType !== 'CANCEL') throw new Error('INVALID_CHANGE_ACTION')
       const requestedAt = clean(url.searchParams.get('requested_at'))
@@ -117,10 +166,11 @@ Deno.serve(async (req) => {
         p_requested_at: parsedRequestedAt.toISOString(),
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(canViewFinance ? data : redactFinance(data))
     }
 
     if (action === 'amelia') {
+      await requirePermission('AGENDA_VIEW')
       const startAt = requiredIso(url, 'start_at')
       const endAt = requiredIso(url, 'end_at')
       const { data, error } = await client.rpc('service_admin_list_amelia_history', {
@@ -129,10 +179,11 @@ Deno.serve(async (req) => {
         p_search: clean(url.searchParams.get('search')),
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(canViewFinance ? data : redactFinance(data))
     }
 
     if (action === 'customers') {
+      await requirePermission('CUSTOMERS_VIEW')
       const limitRaw = Number(url.searchParams.get('limit') ?? '50')
       const limit = Number.isInteger(limitRaw) ? Math.max(1, Math.min(limitRaw, 100)) : 50
       const { data, error } = await client.rpc('service_admin_list_customers', {
@@ -144,6 +195,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'customer_profile') {
+      await requirePermission('CUSTOMERS_VIEW')
       const { data, error } = await client.rpc('service_admin_get_customer_commercial_profile', {
         p_customer_id: customerId(url),
       })
@@ -153,6 +205,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'customer_services') {
+      await requirePermission('CUSTOMERS_VIEW')
       const { data, error } = await client
         .from('services')
         .select('id,name,slug,duration_mode,is_active,sort_order')
@@ -165,6 +218,7 @@ Deno.serve(async (req) => {
 
     if (action !== 'agenda') throw new Error('ADMIN_ACTION_INVALID')
 
+    await requirePermission('AGENDA_VIEW')
     const startAt = requiredIso(url, 'start_at')
     const endAt = requiredIso(url, 'end_at')
     const { data, error } = await client.rpc('service_admin_list_agenda', {
@@ -172,10 +226,12 @@ Deno.serve(async (req) => {
       p_end_at: endAt,
     })
     if (error) throw new Error(error.message)
-    return json(data)
+    return json(canViewFinance ? data : redactFinance(data))
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_AGENDA_FAILED'
-    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401 : 400
+    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED'
+      ? 401
+      : code === 'ADMIN_PERMISSION_DENIED' ? 403 : 400
     return json({ error: { code } }, status)
   }
 })

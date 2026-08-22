@@ -44,6 +44,25 @@ export async function requireAdmin(req: Request): Promise<{ adminId: string; aut
   return { adminId: admin.id, authUserId: admin.auth_user_id }
 }
 
+export async function hasAdminPermission(adminId: string, permission: string): Promise<boolean> {
+  const client = adminClient()
+  const { data, error } = await client.rpc('service_admin_has_permission', {
+    p_admin_id: adminId,
+    p_permission: permission,
+  })
+  if (error) throw new Error(error.message)
+  return data === true
+}
+
+export async function requireAdminPermission(
+  req: Request,
+  permission: string,
+): Promise<{ adminId: string; authUserId: string }> {
+  const admin = await requireAdmin(req)
+  if (!(await hasAdminPermission(admin.adminId, permission))) throw new Error('ADMIN_PERMISSION_DENIED')
+  return admin
+}
+
 export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
