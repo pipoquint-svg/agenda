@@ -42,6 +42,15 @@ verify_jwt = false
 [functions.demand-capture]
 verify_jwt = false
 
+# Public hold creation is routed through a distributed rate limit before the
+# service-role-only authoritative hold RPC.
+[functions.booking-hold]
+verify_jwt = false
+
+# Public tokenized checkout operations are routed through a distributed rate limit.
+[functions.booking-checkout]
+verify_jwt = false
+
 # Public checkout submit validates the opaque hold token server-side and captures
 # request evidence (IP/User-Agent) before calling service-role-only promotion.
 [functions.booking-submit]
