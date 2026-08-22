@@ -57,6 +57,8 @@ declare
   v_result jsonb;
   v_old_base numeric;
   v_old_block numeric;
+  v_requested_base numeric;
+  v_requested_block numeric;
 begin
   if not public.service_admin_has_permission(p_admin_id, 'SERVICES_MANAGE') then
     raise exception using errcode = 'P0001', message = 'ADMIN_PERMISSION_DENIED';
@@ -68,8 +70,16 @@ begin
     raise exception using errcode = 'P0001', message = 'SERVICE_NOT_FOUND';
   end if;
 
-  if v_old_base is distinct from p_base_price
-     or v_old_block is distinct from (case when p_duration_mode = 'BLOCKS' then p_price_per_block else null end) then
+  -- Hidden financial fields may be omitted by non-finance clients. Omission means
+  -- preserve the authoritative value, never zero it or invent a replacement.
+  v_requested_base := coalesce(p_base_price, v_old_base);
+  v_requested_block := case
+    when p_duration_mode = 'BLOCKS' then coalesce(p_price_per_block, v_old_block)
+    else null
+  end;
+
+  if v_old_base is distinct from v_requested_base
+     or v_old_block is distinct from v_requested_block then
     if not public.service_admin_has_permission(p_admin_id, 'FINANCE_MANAGE') then
       raise exception using errcode = 'P0001', message = 'ADMIN_PERMISSION_DENIED';
     end if;
@@ -79,7 +89,7 @@ begin
   v_result := public.service_admin_update_timing(
     p_service_id, p_duration_mode, p_base_duration_minutes,
     p_booking_block_minutes, p_minimum_booking_blocks, p_maximum_booking_blocks,
-    p_base_price, p_price_per_block, p_buffer_before_minutes, p_buffer_after_minutes
+    v_requested_base, v_requested_block, p_buffer_before_minutes, p_buffer_after_minutes
   );
   v_after := public.service_admin_service_snapshot(p_service_id);
 
