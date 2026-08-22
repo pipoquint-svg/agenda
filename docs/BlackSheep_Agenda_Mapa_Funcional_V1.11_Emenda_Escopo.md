@@ -52,13 +52,20 @@ Toda ativação é explícita e auditada.
 
 A pré-reserva só poderá ser descrita como horário protegido quando houver alocação autoritativa de recursos pelo mesmo mecanismo de integridade da agenda normal.
 
-Enquanto essa implementação não estiver concluída, a UI não pode prometer bloqueio de horário.
+Enquanto essa implementação não estiver concluída e testada, a UI não pode prometer bloqueio de horário.
 
 ## Faturamento
 
 O modo `INVOICE` permite confirmação administrativa sem checkout Mercado Pago.
 
-O vencimento usa prazo configurável por cliente, mas a base temporal do vencimento deve ser definida explicitamente antes de ativação real: data do serviço, data da confirmação ou data de emissão. Não inferir silenciosamente.
+Decisão funcional aprovada em 22/08/2026:
+
+- `invoice_due_days` é contado a partir da **data/hora de realização do serviço**;
+- a base autoritativa é o início efetivo do serviço (`appointment.start_at` ou o campo explícito equivalente do domínio quando o envelope possui fases auxiliares);
+- não usar data de confirmação da reserva nem data de emissão da cobrança como base;
+- o domínio deve persistir explicitamente a identificação da base, o timestamp-base, o prazo em dias e o vencimento resultante;
+- o vencimento é determinístico: `service_start + invoice_due_days`;
+- nenhum cliente real, inclusive regra conhecida de 15 dias, é configurado ou seedado automaticamente.
 
 ---
 
@@ -221,16 +228,17 @@ Para as decisões descritas neste documento:
 
 # 12. Pendências que esta emenda NÃO aprova
 
-Esta emenda não declara como prontas:
+Esta emenda não declara como prontas, enquanto não houver evidência do respectivo gate:
 
 - pré-reserva autoritativa de recursos;
-- definição da base temporal do vencimento de INVOICE;
 - escolha real do recurso-base de ocupação;
 - testes reais de Mercado Pago sandbox;
 - testes reais de Google Calendar;
 - testes em dispositivos físicos;
 - branch protection;
-- testes adversariais da superfície pública;
-- rate limiting distribuído.
+- testes adversariais HTTP da superfície pública em ambiente remoto;
+- validação remota do rate limiting distribuído e da concorrência real.
+
+A base temporal do INVOICE **não é mais uma decisão pendente**: foi aprovada como `SERVICE_START` em 22/08/2026. A implementação e os testes dessa regra continuam sujeitos ao gate técnico do issue #72.
 
 Esses itens permanecem sujeitos aos gates e frentes pós-auditoria.

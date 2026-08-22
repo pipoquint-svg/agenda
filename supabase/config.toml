@@ -64,6 +64,10 @@ verify_jwt = false
 [functions.mercado-pago-webhook]
 verify_jwt = false
 
+# Opaque pre-reservation tokens are resolved only behind distributed rate limiting.
+[functions.prebook-access]
+verify_jwt = false
+
 # Admin endpoints validate the Supabase Auth bearer token against admin_users manually.
 [functions.demand-capture-admin]
 verify_jwt = false
@@ -78,4 +82,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-reschedule-actions]
+verify_jwt = false
+
+[functions.admin-pre-reservations]
 verify_jwt = false

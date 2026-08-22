@@ -64,6 +64,9 @@ jobs:
       - name: Run Gate A concurrency test
         run: bash scripts/test-concurrency.sh
 
+      - name: Run pre-reservation concurrency test
+        run: bash scripts/test-pre-reservation-concurrency.sh
+
       - name: Run package balance concurrency test
         run: bash scripts/test-package-concurrency.sh
 
