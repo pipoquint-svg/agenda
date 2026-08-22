@@ -16,6 +16,10 @@ const financeKeys = new Set([
   'cancellation_penalty_outstanding', 'contract_value', 'net_paid',
 ])
 
+const settlementDecisionKeys = new Set([
+  'refund_allowed', 'credit_allowed', 'credit_validity_days',
+])
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -50,15 +54,23 @@ function customerId(url: URL): string {
   return uuid(clean(url.searchParams.get('id')), 'CUSTOMER_ID_INVALID')
 }
 
-function redactFinance(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactFinance)
+function redactKeys(value: unknown, keys: Set<string>): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactKeys(item, keys))
   if (!value || typeof value !== 'object') return value
   const result: Record<string, unknown> = {}
   for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    if (financeKeys.has(key)) continue
-    result[key] = redactFinance(nested)
+    if (keys.has(key)) continue
+    result[key] = redactKeys(nested, keys)
   }
   return result
+}
+
+function redactFinance(value: unknown): unknown {
+  return redactKeys(value, financeKeys)
+}
+
+function redactSettlementDecisions(value: unknown): unknown {
+  return redactKeys(value, settlementDecisionKeys)
 }
 
 Deno.serve(async (req) => {
@@ -74,6 +86,7 @@ Deno.serve(async (req) => {
       if (!(await can(permission))) throw new Error('ADMIN_PERMISSION_DENIED')
     }
     const canViewFinance = await can('FINANCE_VIEW')
+    const canManageFinance = await can('FINANCE_MANAGE')
 
     if (req.method === 'POST') {
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
@@ -180,7 +193,8 @@ Deno.serve(async (req) => {
         p_requested_at: parsedRequestedAt.toISOString(),
       })
       if (error) throw new Error(error.message)
-      return json(canViewFinance ? data : redactFinance(data))
+      const financeScoped = canViewFinance ? data : redactFinance(data)
+      return json(canManageFinance ? financeScoped : redactSettlementDecisions(financeScoped))
     }
 
     if (action === 'amelia') {
