@@ -1,5 +1,5 @@
 import { attributionForBackend, trackFunnelStep, trackHoldCreated, trackServiceSelected } from './tracking'
-import { supabase } from './supabase'
+import { functionsBaseUrl, publicApiKey, supabase } from './supabase'
 import type {
   BookingEmployee,
   BookingExtra,
@@ -197,17 +197,30 @@ export async function createDurationBookingHold(input: {
   peopleCount: number
   requestedStartAt: string
 }): Promise<CheckoutHold & { duration_blocks?: number | null; contracted_minutes?: number }> {
-  const { data, error } = await supabase.rpc('public_create_checkout_hold_tracked_duration', {
-    p_booking_page_slug: input.pageSlug,
-    p_service_id: input.service.id,
-    p_service_employee_id: input.serviceEmployeeId,
-    p_duration_blocks: input.durationBlocks,
-    p_extra_selections: input.extras,
-    p_people_count: input.peopleCount,
-    p_requested_start_at: input.requestedStartAt,
-    p_attribution_json: attributionForBackend() ?? {},
+  const res = await fetch(`${functionsBaseUrl}/booking-hold`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      apikey: publicApiKey,
+      authorization: `Bearer ${publicApiKey}`,
+    },
+    body: JSON.stringify({
+      booking_page_slug: input.pageSlug,
+      service_id: input.service.id,
+      service_employee_id: input.serviceEmployeeId,
+      duration_blocks: input.durationBlocks,
+      extra_selections: input.extras,
+      people_count: input.peopleCount,
+      requested_start_at: input.requestedStartAt,
+      attribution_json: attributionForBackend() ?? {},
+    }),
   })
-  const result = unwrapRpc<CheckoutHold & { duration_blocks?: number | null; contracted_minutes?: number }>(data, error)
+  const payload = await res.json().catch(() => ({})) as {
+    hold?: CheckoutHold & { duration_blocks?: number | null; contracted_minutes?: number }
+    error?: { code?: string }
+  }
+  if (!res.ok || !payload.hold) throw new Error(payload.error?.code ?? `HTTP_${res.status}`)
+  const result = payload.hold
 
   trackFunnelStep('slot_selected', {
     bs_brand: pageCache.get(input.pageSlug)?.brand_key ?? input.pageSlug,
