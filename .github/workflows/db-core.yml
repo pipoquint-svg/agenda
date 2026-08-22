@@ -26,6 +26,7 @@ jobs:
           deno test supabase/functions/_shared/managed-event_test.ts
           deno test supabase/functions/_shared/whatsapp_test.ts
           deno test supabase/functions/_shared/mercado-pago_test.ts
+          deno test supabase/functions/_shared/public-rate-limit_test.ts
 
       - name: Type-check every Edge Function
         run: |
@@ -65,6 +66,9 @@ jobs:
 
       - name: Run package balance concurrency test
         run: bash scripts/test-package-concurrency.sh
+
+      - name: Run distributed rate-limit concurrency test
+        run: bash scripts/test-rate-limit-concurrency.sh
 
       - name: Stop local Supabase
         if: always()
