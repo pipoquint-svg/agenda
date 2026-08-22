@@ -2,7 +2,9 @@ import { useState } from 'react'
 import {
   AdminAppointmentActionError,
   cancelAdminAppointment,
+  processAdminCancellationRefund,
   type AdminCancellationResult,
+  type AdminRefundProcessingResult,
   type CancellationSettlementChoice,
 } from './adminAppointmentActionsApi'
 import { getChangePolicyPreview, type ChangePolicyPreview } from './adminAgendaApi'
@@ -58,13 +60,39 @@ function cancellationError(error: unknown): string {
   return 'Não foi possível cancelar a reserva. Recarregue a prévia antes de tentar novamente.'
 }
 
-function CancellationSuccess({ result }: { result: AdminCancellationResult }) {
+function refundError(error: unknown): string {
+  const code = error instanceof AdminAppointmentActionError ? error.code : ''
+  if (code === 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE') return 'O Mercado Pago não confirmou o estorno agora. A reserva continua cancelada e o estorno pode ser tentado novamente.'
+  if (code === 'MERCADO_PAGO_REFUND_REJECTED') return 'O Mercado Pago recusou o estorno automático. Revise o pagamento antes de tentar novamente.'
+  if (code === 'CANCELLATION_REFUND_NOT_PENDING') return 'Não existe estorno pendente para esta reserva.'
+  return 'Não foi possível processar o estorno automático agora.'
+}
+
+function CancellationSuccess({
+  result,
+  refundResult,
+  processingRefund,
+  refundFailure,
+  onRetryRefund,
+}: {
+  result: AdminCancellationResult
+  refundResult: AdminRefundProcessingResult | null
+  processingRefund: boolean
+  refundFailure: string
+  onRetryRefund: () => void
+}) {
+  const refundPending = result.policy_action_status === 'PENDING_REFUND' && !refundResult?.completed
   return (
     <div className="cancellation-success" role="status">
       <strong>Reserva cancelada e horário liberado.</strong>
-      {result.policy_action_status === 'PENDING_REFUND' ? <p>O estorno foi solicitado e está pendente de confirmação do provedor. Ainda não está marcado como reembolsado.</p> : null}
       {result.policy_action_status === 'CREDIT_ISSUED' ? <p>Crédito emitido{result.coupon?.code ? <>: <strong>{result.coupon.code}</strong></> : null}{result.credit_amount ? ` no valor de ${currency(result.credit_amount)}` : ''}.</p> : null}
       {result.policy_action_status === 'AWAITING_PENALTY_PAYMENT' ? <p>A agenda foi liberada, mas há multa ainda pendente de pagamento: {currency(result.penalty_outstanding)}.</p> : null}
+      {processingRefund ? <p>Processando estorno no Mercado Pago…</p> : null}
+      {refundResult?.completed ? <p><strong>Estorno confirmado.</strong> O financeiro da reserva já foi atualizado.</p> : null}
+      {refundResult && Number(refundResult.manual_refund_cash) > 0 ? <p>Parcela para devolução manual: {currency(refundResult.manual_refund_cash)}.</p> : null}
+      {refundResult && Number(refundResult.remaining_refund_cash) > 0 && Number(refundResult.manual_refund_cash) <= 0 ? <p>Saldo de estorno ainda pendente: {currency(refundResult.remaining_refund_cash)}.</p> : null}
+      {refundFailure ? <div className="refund-failure"><span>{refundFailure}</span>{refundPending && result.policy_action_id ? <button className="secondary" type="button" disabled={processingRefund} onClick={onRetryRefund}>Tentar estorno novamente</button> : null}</div> : null}
+      {refundPending && !processingRefund && !refundFailure && !refundResult ? <p>O estorno está pendente de confirmação do provedor.</p> : null}
       {result.google_sync_enqueued ? <small>A atualização do calendário Google foi enfileirada.</small> : null}
     </div>
   )
@@ -84,6 +112,9 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
   const [acknowledged, setAcknowledged] = useState(false)
   const [executingCancel, setExecutingCancel] = useState(false)
   const [cancelResult, setCancelResult] = useState<AdminCancellationResult | null>(null)
+  const [refundResult, setRefundResult] = useState<AdminRefundProcessingResult | null>(null)
+  const [processingRefund, setProcessingRefund] = useState(false)
+  const [refundFailure, setRefundFailure] = useState('')
 
   const actionable = !['CANCELLED', 'COMPLETED', 'EXPIRED', 'NO_SHOW'].includes(appointmentStatus) && !cancelResult
   if (!actionable && !cancelResult) return null
@@ -92,6 +123,8 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
     setLoading(type)
     setError('')
     setCancelResult(null)
+    setRefundResult(null)
+    setRefundFailure('')
     setAcknowledged(false)
     setSettlement(null)
     try {
@@ -101,6 +134,18 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
       setError('Não foi possível calcular a política deste serviço. Verifique se ela está configurada.')
     } finally {
       setLoading(null)
+    }
+  }
+
+  async function processRefund(policyActionId: string) {
+    setProcessingRefund(true)
+    setRefundFailure('')
+    try {
+      setRefundResult(await processAdminCancellationRefund({ policyActionId, accessToken }))
+    } catch (cause) {
+      setRefundFailure(refundError(cause))
+    } finally {
+      setProcessingRefund(false)
     }
   }
 
@@ -125,6 +170,9 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
       setCancelResult(result)
       setPreview(null)
       await onAppointmentChanged?.(result)
+      if (result.policy_action_status === 'PENDING_REFUND' && result.policy_action_id) {
+        await processRefund(result.policy_action_id)
+      }
     } catch (cause) {
       setError(cancellationError(cause))
       try {
@@ -147,7 +195,15 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
         <div><h3>Alterar reserva</h3><p>Confira a regra financeira antes de executar qualquer alteração.</p></div>
       </div>
 
-      {cancelResult ? <CancellationSuccess result={cancelResult} /> : (
+      {cancelResult ? (
+        <CancellationSuccess
+          result={cancelResult}
+          refundResult={refundResult}
+          processingRefund={processingRefund}
+          refundFailure={refundFailure}
+          onRetryRefund={() => { if (cancelResult.policy_action_id) void processRefund(cancelResult.policy_action_id) }}
+        />
+      ) : (
         <>
           <div className="change-preview-actions">
             <button className="secondary" type="button" disabled={loading !== null || executingCancel} onClick={() => void load('RESCHEDULE')}>{loading === 'RESCHEDULE' ? 'Calculando…' : 'Simular remarcação'}</button>
@@ -161,15 +217,13 @@ export function AppointmentChangePreview({ appointmentId, accessToken, appointme
               {(hasRefund || hasCredit) ? (
                 <fieldset>
                   <legend>Destino do saldo elegível</legend>
-                  {hasRefund ? <label><input type="radio" name={`settlement-${appointmentId}`} checked={settlement === 'REFUND'} onChange={() => setSettlement('REFUND')} /><span><strong>Estorno</strong><small>{currency(cancelPreview.refundable_amount)} — ficará pendente até confirmação real do provedor.</small></span></label> : null}
+                  {hasRefund ? <label><input type="radio" name={`settlement-${appointmentId}`} checked={settlement === 'REFUND'} onChange={() => setSettlement('REFUND')} /><span><strong>Estorno</strong><small>{currency(cancelPreview.refundable_amount)} — o sistema tentará processar automaticamente no Mercado Pago após o cancelamento.</small></span></label> : null}
                   {hasCredit ? <label><input type="radio" name={`settlement-${appointmentId}`} checked={settlement === 'CREDIT'} onChange={() => setSettlement('CREDIT')} /><span><strong>Crédito de uso</strong><small>{currency(cancelPreview.credit_amount)} com validade de {cancelPreview.credit_validity_days} dias.</small></span></label> : null}
                 </fieldset>
               ) : <div className="cancellation-no-settlement">Não há saldo elegível para estorno ou crédito nesta condição.</div>}
 
               <label className="cancellation-reason"><span>Motivo interno (opcional)</span><textarea rows={2} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ex.: solicitação do cliente pelo WhatsApp" /></label>
-
               <label className="cancellation-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /><span>Confirmo que revisei a política acima. Ao continuar, o horário será liberado imediatamente e esta ação ficará registrada no histórico.</span></label>
-
               <button className="danger-action" type="button" disabled={!acknowledged || executingCancel || ((hasRefund || hasCredit) && !settlement)} onClick={() => void executeCancellation()}>{executingCancel ? 'Cancelando…' : 'Confirmar cancelamento da reserva'}</button>
             </div>
           ) : <small className="change-preview-warning">A simulação não altera reserva, pagamento ou horário.</small>}
