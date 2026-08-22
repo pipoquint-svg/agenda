@@ -38,6 +38,28 @@ function brandFilter(url: URL): string | null {
   return brand
 }
 
+function redactFinance(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const data = structuredClone(value as Record<string, unknown>)
+  if (Array.isArray(data.appointments)) {
+    data.appointments = data.appointments.map((item) => {
+      const next = { ...(item as Record<string, unknown>) }
+      delete next.commercial_value
+      delete next.financial
+      delete next.financial_status
+      return next
+    })
+  }
+  if (data.appointment && typeof data.appointment === 'object') {
+    const appointment = { ...(data.appointment as Record<string, unknown>) }
+    for (const key of ['commercial_value','base_price','variable_price_adjustment','extras_total','coupon_discount','financial_status']) delete appointment[key]
+    data.appointment = appointment
+  }
+  delete data.financial
+  delete data.payments
+  return data
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -51,6 +73,7 @@ Deno.serve(async (req) => {
       : 'AGENDA'
     const admin = await requireAdmin(req, moduleKey)
     const client = adminClient()
+    const canSeeFinance = admin.role === 'OWNER' || admin.permissions.FINANCE === true
 
     if (action === 'permissions') {
       const { data, error } = await client.rpc('service_admin_get_permissions', { p_admin_user_id: admin.adminId })
@@ -71,7 +94,7 @@ Deno.serve(async (req) => {
     if (action === 'appointment') {
       const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: appointmentId(url) })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(canSeeFinance ? data : redactFinance(data))
     }
 
     if (action === 'change_preview') {
@@ -87,6 +110,11 @@ Deno.serve(async (req) => {
         p_requested_at: parsedRequestedAt.toISOString(),
       })
       if (error) throw new Error(error.message)
+      if (!canSeeFinance) {
+        const next = { ...(data as Record<string, unknown>) }
+        for (const key of ['contract_value','net_paid','penalty_value','penalty_amount','penalty_due_now','refundable_amount','credit_amount','cancellation_penalty_outstanding']) delete next[key]
+        return json(next)
+      }
       return json(data)
     }
 
@@ -107,7 +135,7 @@ Deno.serve(async (req) => {
       p_end_at: requiredIso(url, 'end_at'),
     })
     if (error) throw new Error(error.message)
-    return json(data)
+    return json(canSeeFinance ? data : redactFinance(data))
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_AGENDA_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
