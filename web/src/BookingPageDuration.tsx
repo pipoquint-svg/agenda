@@ -3,6 +3,8 @@ import type { BookingQuote, BookingSlot, CheckoutHold, ExtraSelection } from './
 import {
   contractedMinutes,
   createDurationBookingHold,
+  durationBasePrice,
+  durationUnitPrice,
   initialDurationBlocks,
   listDurationBookingSlots,
   loadDurationBookingPage,
@@ -12,6 +14,7 @@ import {
   type DurationBookingService,
 } from './bookingDurationApi'
 import './booking.css'
+import './durationRecommendations.css'
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const time = new Intl.DateTimeFormat('pt-BR', {
@@ -70,6 +73,12 @@ function selectedExtras(service: DurationBookingService | null, quantities: Reco
   return service.extras
     .map((extra) => ({ extra_id: extra.id, quantity: quantities[extra.id] ?? 0 }))
     .filter((selection) => selection.quantity > 0)
+}
+
+function hourlyBasePrice(service: DurationBookingService, blocks: number): number {
+  const blockMinutes = service.booking_block_minutes ?? 30
+  if (blockMinutes <= 0) return 0
+  return durationUnitPrice(service, blocks) * (60 / blockMinutes)
 }
 
 export function BookingPageDuration({ slug }: { slug: string }) {
@@ -276,15 +285,57 @@ export function BookingPageDuration({ slug }: { slug: string }) {
               <>
                 {service.duration_mode === 'BLOCKS' ? (
                   <section className="booking-step">
-                    <div className="step-title"><span>2</span><div><h2>Duração</h2><p>A locação é montada em blocos de 30 minutos.</p></div></div>
-                    <select className="people-select" value={durationBlocks ?? ''} onChange={(event) => changeDuration(Number(event.target.value))}>
-                      {Array.from({ length: (service.maximum_booking_blocks ?? 1) - (service.minimum_booking_blocks ?? 1) + 1 }, (_, index) => (service.minimum_booking_blocks ?? 1) + index)
-                        .map((blocks) => {
-                          const minutes = (service.booking_block_minutes ?? 30) * blocks
-                          return <option key={blocks} value={blocks}>{durationLabel(minutes)}</option>
+                    <div className="step-title"><span>2</span><div><h2>Quanto tempo você precisa?</h2><p>Escolha qualquer duração disponível em intervalos de {service.booking_block_minutes ?? 30} minutos. Quanto maior o período, menor pode ficar o valor por hora.</p></div></div>
+
+                    {service.duration_presets?.length > 0 ? (
+                      <div className="duration-preset-grid" aria-label="Tempos recomendados">
+                        {service.duration_presets.map((preset) => {
+                          const minutes = contractedMinutes(service, preset.block_count)
+                          const selected = durationBlocks === preset.block_count
+                          return (
+                            <button
+                              type="button"
+                              key={preset.id}
+                              className={`duration-preset-card ${selected ? 'selected' : ''} ${preset.is_featured ? 'featured' : ''}`}
+                              onClick={() => changeDuration(preset.block_count)}
+                            >
+                              <div className="duration-preset-topline">
+                                <strong>{durationLabel(minutes)}</strong>
+                                {preset.badge ? <span>{preset.badge}</span> : null}
+                              </div>
+                              <h3>{preset.title}</h3>
+                              {preset.description ? <p>{preset.description}</p> : null}
+                              <div className="duration-preset-price">
+                                <strong>{money.format(durationBasePrice(service, preset.block_count))}</strong>
+                                <small>{money.format(hourlyBasePrice(service, preset.block_count))}/h</small>
+                              </div>
+                            </button>
+                          )
                         })}
-                    </select>
-                    {service.buffer_after_minutes > 0 ? <small>O tempo técnico após a locação é reservado internamente e não reduz o período contratado.</small> : null}
+                      </div>
+                    ) : null}
+
+                    <div className="duration-custom-row">
+                      <label>
+                        <span>Duração</span>
+                        <select className="people-select" value={durationBlocks ?? ''} onChange={(event) => changeDuration(Number(event.target.value))}>
+                          {Array.from({ length: (service.maximum_booking_blocks ?? 1) - (service.minimum_booking_blocks ?? 1) + 1 }, (_, index) => (service.minimum_booking_blocks ?? 1) + index)
+                            .map((blocks) => {
+                              const minutes = (service.booking_block_minutes ?? 30) * blocks
+                              return <option key={blocks} value={blocks}>{durationLabel(minutes)}</option>
+                            })}
+                        </select>
+                      </label>
+                      {durationBlocks ? (
+                        <div className="duration-live-price" aria-live="polite">
+                          <small>Valor base para {durationLabel(contractedMinutes(service, durationBlocks))}</small>
+                          <strong>{money.format(durationBasePrice(service, durationBlocks))}</strong>
+                          <span>{money.format(hourlyBasePrice(service, durationBlocks))}/h</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {service.buffer_after_minutes > 0 ? <small className="duration-buffer-note">Você recebe todo o período escolhido. O tempo técnico após a locação é reservado internamente e não é descontado da sua reserva.</small> : null}
                   </section>
                 ) : null}
 
