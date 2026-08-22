@@ -1,12 +1,12 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(12);
+select plan(13);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
 values
   ('12000000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'owner-service-audit@example.test', '', now(), now()),
-  ('12000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000000', 'authenticated', 'authenticated', 'operation-service-audit@example.test', '', now(), now());
+  ('12000000-0000-4000-8000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'operation-service-audit@example.test', '', now(), now());
 
 insert into public.admin_users (id, auth_user_id, display_name, role)
 values
@@ -74,6 +74,22 @@ $q$,
   (select buffer_before_minutes from audit_service_target) + 1,
   (select buffer_after_minutes from audit_service_target)
 ), 'non-finance service manager can change non-financial timing');
+
+select lives_ok(format($q$
+  select public.service_admin_update_timing_audited(
+    %L::uuid, %L, %s, %s, %s, %s, null, null, %s, %s,
+    '22000000-0000-4000-8000-000000000002'::uuid
+  )
+$q$,
+  (select id from audit_service_target),
+  (select duration_mode from audit_service_target),
+  (select base_duration_minutes from audit_service_target),
+  coalesce((select booking_block_minutes from audit_service_target)::text, 'null'),
+  coalesce((select minimum_booking_blocks from audit_service_target)::text, 'null'),
+  coalesce((select maximum_booking_blocks from audit_service_target)::text, 'null'),
+  (select buffer_before_minutes from audit_service_target) + 2,
+  (select buffer_after_minutes from audit_service_target)
+), 'hidden prices can be omitted and are preserved on non-financial timing edits');
 
 select ok(exists(
   select 1 from public.audit_logs
