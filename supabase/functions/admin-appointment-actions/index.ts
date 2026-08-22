@@ -97,10 +97,11 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
-    const admin = await requireAdmin(req)
     const body = await req.json()
     const action = typeof body?.action === 'string' ? body.action.trim().toUpperCase() : ''
+    const admin = await requireAdmin(req, action === 'PROCESS_REFUND' ? 'FINANCE' : 'AGENDA')
     const client = adminClient()
+    const canSeeFinance = admin.role === 'OWNER' || admin.permissions.FINANCE === true
 
     if (action === 'CANCEL') {
       const appointmentId = uuid(body?.appointment_id)
@@ -110,6 +111,7 @@ Deno.serve(async (req) => {
       if (settlement !== null && settlement !== 'REFUND' && settlement !== 'CREDIT') {
         throw new Error('INVALID_CANCELLATION_SETTLEMENT')
       }
+      if (!canSeeFinance && settlement !== null) throw new Error('ADMIN_MODULE_ACCESS_DENIED')
 
       const reason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, 500) : null
       const { data, error } = await client.rpc('service_admin_cancel_appointment', {
@@ -120,6 +122,14 @@ Deno.serve(async (req) => {
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
+      if (!canSeeFinance && data && typeof data === 'object') {
+        return json({
+          appointment_id: (data as Record<string, unknown>).appointment_id,
+          status: (data as Record<string, unknown>).status,
+          cancellation_status: (data as Record<string, unknown>).cancellation_status,
+          google_sync_enqueued: (data as Record<string, unknown>).google_sync_enqueued,
+        })
+      }
       return json(data)
     }
 
@@ -213,6 +223,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_APPOINTMENT_ACTION_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
+      : code === 'ADMIN_MODULE_ACCESS_DENIED' ? 403
       : code.startsWith('MISSING_ENV') ? 503
       : 400
     return json({ error: { code } }, status)
