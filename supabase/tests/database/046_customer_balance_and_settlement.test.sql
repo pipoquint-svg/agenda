@@ -53,13 +53,13 @@ insert into public.appointments(id,public_code,service_id,service_employee_id,st
 values ('60000000-0000-0000-0000-000000000022','BAL-AUTHORSHIP','60000000-0000-0000-0000-000000000012','60000000-0000-0000-0000-000000000013','CONFIRMED','PARTIALLY_PAID','2035-07-10 10:00:00-03','2035-07-10 11:00:00-03',60,1,'60000000-0000-0000-0000-000000000002',700,now());
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
 values ('60000000-0000-0000-0000-000000000022','CHARGE','PIX','MERCADO_PAGO','bal-pay-350','APPROVED',350,350,now(),'CONTRACT');
-perform public.service_admin_cancel_appointment('60000000-0000-0000-0000-000000000022',null,'TEST','2035-07-07 10:00:00-03','CLIENT',null);
+select public.service_admin_cancel_appointment('60000000-0000-0000-0000-000000000022',null,'TEST','2035-07-07 10:00:00-03','CLIENT',null);
 select throws_ok($$select public.service_credit_customer_balance_from_return(
   '60000000-0000-0000-0000-000000000022',
   (select id from public.appointment_policy_actions where appointment_id='60000000-0000-0000-0000-000000000022' and action_type='CANCEL'),
   'CLIENT_TOKEN',null,null,'pgTAP','req-missing-ip',null
 )$$,'P0001','BALANCE_AUTHORSHIP_EVIDENCE_REQUIRED','balance choice without authorship evidence is rejected');
-perform public.service_credit_customer_balance_from_return('60000000-0000-0000-0000-000000000022',(select id from public.appointment_policy_actions where appointment_id='60000000-0000-0000-0000-000000000022' and action_type='CANCEL'),'CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-balance-two',null);
+select public.service_credit_customer_balance_from_return('60000000-0000-0000-0000-000000000022',(select id from public.appointment_policy_actions where appointment_id='60000000-0000-0000-0000-000000000022' and action_type='CANCEL'),'CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-balance-two',null);
 select is((public.service_request_customer_balance_refund('60000000-0000-0000-0000-000000000002','CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-refund-balance',null)->>'amount')::numeric,350::numeric,'customer may convert entire balance to refund at any time');
 select is(public.customer_balance_available('60000000-0000-0000-0000-000000000002'),0::numeric,'pending balance refund reserves the entire liability');
 
