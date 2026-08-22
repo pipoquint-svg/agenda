@@ -16,15 +16,22 @@ values
 insert into public.admin_user_permissions(admin_user_id, permission, is_granted)
 values ('22000000-0000-4000-8000-000000000002', 'SERVICES_MANAGE', true);
 
-create temp table audit_service_target as
-select id, duration_mode, base_duration_minutes, booking_block_minutes, minimum_booking_blocks,
-       maximum_booking_blocks, base_price, price_per_block, buffer_before_minutes, buffer_after_minutes
-from public.services
-where duration_mode = 'BLOCKS'
-order by created_at, id
-limit 1;
+insert into public.categories(id, name, slug)
+values ('97500000-0000-4000-8000-000000000001', 'Audit Service Category', 'audit-service-category');
 
-select ok((select count(*) from audit_service_target) = 1, 'fixture has a block service');
+insert into public.services(
+  id, category_id, name, slug, base_duration_minutes, base_price,
+  buffer_before_minutes, buffer_after_minutes, minimum_people, maximum_people,
+  duration_mode, booking_block_minutes, minimum_booking_blocks, maximum_booking_blocks, price_per_block
+) values (
+  '97500000-0000-4000-8000-000000000002',
+  '97500000-0000-4000-8000-000000000001',
+  'Audit Block Service', 'audit-block-service', 60, 500.00,
+  0, 30, 1, 10,
+  'BLOCKS', 30, 2, 8, 100.00
+);
+
+select ok(exists(select 1 from public.services where id = '97500000-0000-4000-8000-000000000002' and duration_mode = 'BLOCKS'), 'fixture has a block service');
 
 select ok(
   not has_function_privilege('service_role', 'public.service_admin_update_timing(uuid,text,integer,integer,integer,integer,numeric,numeric,integer,integer)', 'EXECUTE'),
@@ -39,80 +46,58 @@ select ok(
   'legacy policy mutation is no longer directly executable by service role'
 );
 
-select throws_ok(format($q$
-  select public.service_admin_update_timing_audited(
-    %L::uuid, %L, %s, %s, %s, %s, %s, %s, %s, %s,
+select throws_ok(
+  $$select public.service_admin_update_timing_audited(
+    '97500000-0000-4000-8000-000000000002'::uuid,
+    'BLOCKS',60,30,2,8,501,100,0,30,
     '22000000-0000-4000-8000-000000000002'::uuid
-  )
-$q$,
-  (select id from audit_service_target),
-  (select duration_mode from audit_service_target),
-  (select base_duration_minutes from audit_service_target),
-  coalesce((select booking_block_minutes from audit_service_target)::text, 'null'),
-  coalesce((select minimum_booking_blocks from audit_service_target)::text, 'null'),
-  coalesce((select maximum_booking_blocks from audit_service_target)::text, 'null'),
-  ((select base_price from audit_service_target) + 1)::text,
-  coalesce((select price_per_block from audit_service_target)::text, 'null'),
-  (select buffer_before_minutes from audit_service_target),
-  (select buffer_after_minutes from audit_service_target)
-), 'P0001', 'ADMIN_PERMISSION_DENIED', 'non-finance service manager cannot change price');
+  )$$,
+  'P0001','ADMIN_PERMISSION_DENIED',
+  'non-finance service manager cannot change price'
+);
 
-select lives_ok(format($q$
-  select public.service_admin_update_timing_audited(
-    %L::uuid, %L, %s, %s, %s, %s, %s, %s, %s, %s,
+select lives_ok(
+  $$select public.service_admin_update_timing_audited(
+    '97500000-0000-4000-8000-000000000002'::uuid,
+    'BLOCKS',60,30,2,8,500,100,1,30,
     '22000000-0000-4000-8000-000000000002'::uuid
-  )
-$q$,
-  (select id from audit_service_target),
-  (select duration_mode from audit_service_target),
-  (select base_duration_minutes from audit_service_target),
-  coalesce((select booking_block_minutes from audit_service_target)::text, 'null'),
-  coalesce((select minimum_booking_blocks from audit_service_target)::text, 'null'),
-  coalesce((select maximum_booking_blocks from audit_service_target)::text, 'null'),
-  (select base_price from audit_service_target),
-  coalesce((select price_per_block from audit_service_target)::text, 'null'),
-  (select buffer_before_minutes from audit_service_target) + 1,
-  (select buffer_after_minutes from audit_service_target)
-), 'non-finance service manager can change non-financial timing');
+  )$$,
+  'non-finance service manager can change non-financial timing'
+);
 
-select lives_ok(format($q$
-  select public.service_admin_update_timing_audited(
-    %L::uuid, %L, %s, %s, %s, %s, null, null, %s, %s,
+select lives_ok(
+  $$select public.service_admin_update_timing_audited(
+    '97500000-0000-4000-8000-000000000002'::uuid,
+    'BLOCKS',60,30,2,8,null,null,2,30,
     '22000000-0000-4000-8000-000000000002'::uuid
-  )
-$q$,
-  (select id from audit_service_target),
-  (select duration_mode from audit_service_target),
-  (select base_duration_minutes from audit_service_target),
-  coalesce((select booking_block_minutes from audit_service_target)::text, 'null'),
-  coalesce((select minimum_booking_blocks from audit_service_target)::text, 'null'),
-  coalesce((select maximum_booking_blocks from audit_service_target)::text, 'null'),
-  (select buffer_before_minutes from audit_service_target) + 2,
-  (select buffer_after_minutes from audit_service_target)
-), 'hidden prices can be omitted and are preserved on non-financial timing edits');
+  )$$,
+  'hidden prices can be omitted and are preserved on non-financial timing edits'
+);
 
 select ok(exists(
   select 1 from public.audit_logs
   where admin_user_id = '22000000-0000-4000-8000-000000000002'
-    and entity_id = (select id from audit_service_target)
+    and entity_id = '97500000-0000-4000-8000-000000000002'
     and action = 'SERVICE_TIMING_UPDATED'
     and before_json is not null and after_json is not null
 ), 'timing change records actor and before/after');
 
 delete from public.service_change_policies
-where service_id = (select id from audit_service_target);
+where service_id = '97500000-0000-4000-8000-000000000002';
 
-select throws_ok(format($q$
-  select public.service_admin_upsert_change_policy_audited(
-    %L::uuid,
+select throws_ok(
+  $$select public.service_admin_upsert_change_policy_audited(
+    '97500000-0000-4000-8000-000000000002'::uuid,
     '{"notice_hours":48}'::jsonb,
     '22000000-0000-4000-8000-000000000001'::uuid
-  )
-$q$, (select id from audit_service_target)), 'P0001', 'CHANGE_POLICY_COMPLETE_CONFIGURATION_REQUIRED', 'first policy cannot be partial');
+  )$$,
+  'P0001','CHANGE_POLICY_COMPLETE_CONFIGURATION_REQUIRED',
+  'first policy cannot be partial'
+);
 
-select lives_ok(format($q$
-  select public.service_admin_upsert_change_policy_audited(
-    %L::uuid,
+select lives_ok(
+  $$select public.service_admin_upsert_change_policy_audited(
+    '97500000-0000-4000-8000-000000000002'::uuid,
     '{
       "notice_hours":48,
       "reschedule_first_penalty_type":"NONE","reschedule_first_penalty_value":0,
@@ -125,28 +110,32 @@ select lives_ok(format($q$
       "cancellation_credit_validity_days":1
     }'::jsonb,
     '22000000-0000-4000-8000-000000000001'::uuid
-  )
-$q$, (select id from audit_service_target)), 'complete first policy is accepted without implicit commercial defaults');
+  )$$,
+  'complete first policy is accepted without implicit commercial defaults'
+);
 
 select ok(exists(
   select 1 from public.audit_logs
   where admin_user_id = '22000000-0000-4000-8000-000000000001'
-    and entity_id = (select id from audit_service_target)
+    and entity_id = '97500000-0000-4000-8000-000000000002'
     and action = 'SERVICE_CHANGE_POLICY_UPDATED'
     and before_json is not null and after_json is not null
 ), 'policy change records actor and before/after');
 
-select lives_ok(format($q$
-  select public.service_admin_replace_duration_configuration_audited(
-    %L::uuid, '[]'::jsonb, '[]'::jsonb,
+select lives_ok(
+  $$select public.service_admin_replace_duration_configuration_audited(
+    '97500000-0000-4000-8000-000000000002'::uuid,
+    '[]'::jsonb,
+    '[]'::jsonb,
     '22000000-0000-4000-8000-000000000001'::uuid
-  )
-$q$, (select id from audit_service_target)), 'finance-authorized admin can replace duration configuration');
+  )$$,
+  'finance-authorized admin can replace duration configuration'
+);
 
 select ok(exists(
   select 1 from public.audit_logs
   where admin_user_id = '22000000-0000-4000-8000-000000000001'
-    and entity_id = (select id from audit_service_target)
+    and entity_id = '97500000-0000-4000-8000-000000000002'
     and action = 'SERVICE_DURATION_CONFIGURATION_UPDATED'
     and before_json is not null and after_json is not null
 ), 'duration configuration records actor and before/after');
