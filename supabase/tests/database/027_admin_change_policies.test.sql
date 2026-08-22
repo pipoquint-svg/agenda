@@ -16,8 +16,8 @@ select ok(
 );
 
 select ok(
-  has_function_privilege('service_role', 'public.service_admin_upsert_change_policy(uuid,jsonb)', 'EXECUTE'),
-  'service role can change service policy after admin authentication'
+  not has_function_privilege('service_role', 'public.service_admin_upsert_change_policy(uuid,jsonb)', 'EXECUTE'),
+  'service role cannot bypass the audited policy wrapper'
 );
 
 insert into public.categories(id, name, slug)
@@ -54,7 +54,7 @@ select lives_ok(
       "cancellation_credit_validity_days":90
     }'::jsonb
   ) $$,
-  'admin can configure no-fee rescheduling and fixed cancellation retention independently'
+  'internal primitive still applies a complete policy inside the database migration/test context'
 );
 
 select is(
@@ -92,13 +92,13 @@ select lives_ok(
     '97400000-0000-0000-0000-000000000002',
     '{"cancellation_early_refund_allowed":true}'::jsonb
   ) $$,
-  'partial admin updates preserve unspecified policy fields'
+  'internal primitive preserves unspecified fields on an existing policy'
 );
 
 select is(
   (select cancellation_early_penalty_value from public.service_change_policies where service_id = '97400000-0000-0000-0000-000000000002'),
   100.00::numeric(12,2),
-  'partial update preserves the configured penalty amount'
+  'partial internal update preserves the configured penalty amount'
 );
 
 select * from finish();
