@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(24);
+select plan(27);
 
 select has_table('public','pre_reservation_access_tokens','opaque token table exists');
 select has_column('public','resource_allocations','pre_reservation_id','allocation owns pre-reservation');
@@ -67,10 +67,14 @@ select ok((select revoked_at is not null from public.pre_reservation_access_toke
 
 create temp table expiring as select public.service_admin_create_pre_reservation('94400000-0000-0000-0000-000000000007','94400000-0000-0000-0000-000000000005','94400000-0000-0000-0000-000000000006','2030-01-01 11:00:00-03','24400000-0000-4000-8000-000000000001',4,'[]',1,null) payload;
 update public.pre_reservations set created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour' where id=(select (payload->>'pre_reservation_id')::uuid from expiring);
-select ok(public.service_expire_pre_reservations()=1 and (select pr.status='EXPIRED' and pr.released_at is not null and pr.released_by_admin_id is null and pr.release_reason='EXPIRED' from public.pre_reservations pr where pr.id=(select (payload->>'pre_reservation_id')::uuid from expiring)) and (select ra.status='EXPIRED' from public.resource_allocations ra where ra.pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from expiring)) and (select count(*)=1 from public.audit_logs where entity_type='PRE_RESERVATION' and entity_id=(select (payload->>'pre_reservation_id')::uuid from expiring) and action='PRE_RESERVATION_EXPIRED'),'expiration releases allocation and is audited');
+create temp table expired_result as select public.service_expire_pre_reservations() as expired_count;
+select is((select expired_count from expired_result),1,'expiration worker expires exactly one due pre-reservation');
+select ok((select pr.status='EXPIRED' and pr.released_at is not null and pr.released_by_admin_id is null and pr.release_reason='EXPIRED' from public.pre_reservations pr where pr.id=(select (payload->>'pre_reservation_id')::uuid from expiring)),'expiration stores release state and system actor semantics');
+select is((select ra.status::text from public.resource_allocations ra where ra.pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from expiring)),'EXPIRED','expiration releases the shared resource allocation');
+select is((select count(*)::integer from public.audit_logs where entity_type='PRE_RESERVATION' and entity_id=(select (payload->>'pre_reservation_id')::uuid from expiring) and action='PRE_RESERVATION_EXPIRED'),1,'expiration is append-only audited');
 
 create temp table cancelling as select public.service_admin_create_pre_reservation('94400000-0000-0000-0000-000000000007','94400000-0000-0000-0000-000000000005','94400000-0000-0000-0000-000000000006','2030-01-01 14:00:00-03','24400000-0000-4000-8000-000000000001',4,'[]',1,null) payload;
-select public.service_admin_cancel_pre_reservation((select (payload->>'pre_reservation_id')::uuid from cancelling),'24400000-0000-4000-8000-000000000001','client requested release');
+create temp table cancelled_result as select public.service_admin_cancel_pre_reservation((select (payload->>'pre_reservation_id')::uuid from cancelling),'24400000-0000-4000-8000-000000000001','client requested release') payload;
 select ok((select pr.status='CANCELLED' and pr.released_at is not null and pr.released_by_admin_id='24400000-0000-4000-8000-000000000001'::uuid and pr.release_reason='client requested release' from public.pre_reservations pr where pr.id=(select (payload->>'pre_reservation_id')::uuid from cancelling)) and (select ra.status='CANCELLED' from public.resource_allocations ra where ra.pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from cancelling)) and (select count(*)=1 from public.audit_logs where entity_type='PRE_RESERVATION' and entity_id=(select (payload->>'pre_reservation_id')::uuid from cancelling) and action='PRE_RESERVATION_CANCELLED'),'manual cancellation records actor, releases allocation and audits');
 
 select * from finish();
