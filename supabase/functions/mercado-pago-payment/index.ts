@@ -1,4 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 import {
   normalizeMercadoPagoPaymentStatus,
   payerIdentification,
@@ -11,8 +12,6 @@ const corsHeaders = {
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-appointment-token',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
-
-const ipBuckets = new Map<string, { count: number; resetAt: number }>()
 
 type PaymentContext = {
   appointment_id: string
@@ -62,18 +61,6 @@ function appointmentToken(req: Request): string {
   const value = req.headers.get('x-appointment-token')?.trim() ?? ''
   if (value.length < 32) throw new Error('APPOINTMENT_TOKEN_INVALID')
   return value
-}
-
-function enforceRateLimit(req: Request): void {
-  const ip = (req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown').split(',')[0].trim()
-  const now = Date.now()
-  const current = ipBuckets.get(ip)
-  if (!current || current.resetAt <= now) {
-    ipBuckets.set(ip, { count: 1, resetAt: now + 10 * 60 * 1000 })
-    return
-  }
-  if (current.count >= 60) throw new Error('RATE_LIMITED')
-  current.count += 1
 }
 
 function providerErrorSnapshot(status: number, raw: unknown): Record<string, unknown> {
@@ -133,9 +120,16 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
 
   try {
-    enforceRateLimit(req)
-    const token = appointmentToken(req)
     const client = adminClient()
+    // Preserve the previous payment policy (60 requests / 10 minutes), but share
+    // one bucket across every Edge instance and count malformed token attempts too.
+    await enforceDistributedPublicRateLimit(client, req, {
+      scope: 'PUBLIC_PAYMENT',
+      limit: 60,
+      windowSeconds: 600,
+    })
+
+    const token = appointmentToken(req)
 
     if (req.method === 'GET') {
       const context = await loadContext(token)
@@ -294,10 +288,10 @@ Deno.serve(async (req) => {
     }, normalized === 'APPROVED' ? 200 : 201)
   } catch (error) {
     const code = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
-    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|MISSING_ENV)/)?.[1] ?? code.split(':')[0]
+    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MISSING_ENV)/)?.[1] ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'PAYMENT_HOLD_EXPIRED' ? 409
-      : publicCode.startsWith('MISSING_ENV') ? 503
+      : publicCode.startsWith('MISSING_ENV') || publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : publicCode.startsWith('APPOINTMENT_TOKEN') || publicCode === 'TOKEN_SCOPE_DENIED' ? 401
       : 400
     return response({ error: { code: publicCode } }, status)
