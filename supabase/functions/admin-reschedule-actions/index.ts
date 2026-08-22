@@ -67,6 +67,21 @@ Deno.serve(async (req) => {
       return json(data)
     }
 
+    if (action === 'REGISTER_PENALTY') {
+      const policyActionId = uuid(body?.policy_action_id, 'POLICY_ACTION_ID_INVALID')
+      const method = typeof body?.method === 'string' ? body.method.trim().toUpperCase() : ''
+      if (!['PIX', 'CARD', 'CASH', 'TRANSFER', 'OTHER'].includes(method)) throw new Error('INVALID_PENALTY_PAYMENT_METHOD')
+      const notes = typeof body?.notes === 'string' ? body.notes.trim().slice(0, 500) : null
+      const { data, error } = await client.rpc('service_admin_register_reschedule_penalty_payment', {
+        p_policy_action_id: policyActionId,
+        p_method: method,
+        p_notes: notes || null,
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
     if (action === 'APPLY') {
       const policyActionId = uuid(body?.policy_action_id, 'POLICY_ACTION_ID_INVALID')
       const { data, error } = await client.rpc('service_admin_apply_reschedule', {
