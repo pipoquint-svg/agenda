@@ -44,6 +44,7 @@ jobs:
           deno check supabase/functions/admin-agenda/index.ts
           deno check supabase/functions/admin-service-settings/index.ts
           deno check supabase/functions/admin-appointment-actions/index.ts
+          deno check supabase/functions/admin-reschedule-actions/index.ts
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1

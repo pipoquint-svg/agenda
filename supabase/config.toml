@@ -67,3 +67,6 @@ verify_jwt = false
 
 [functions.admin-appointment-actions]
 verify_jwt = false
+
+[functions.admin-reschedule-actions]
+verify_jwt = false
