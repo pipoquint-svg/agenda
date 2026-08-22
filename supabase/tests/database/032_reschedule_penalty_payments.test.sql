@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(10);
+select plan(11);
 
 insert into public.customers(id,name) values ('97900000-0000-0000-0000-000000000001','Penalty Customer');
 insert into public.employees(id,name) values ('97900000-0000-0000-0000-000000000002','Penalty Employee');
@@ -33,6 +33,12 @@ select is((select payment_purpose from public.payment_transactions where id=(sel
 select is((public.get_appointment_financial_summary('97900000-0000-0000-0000-000000000010')->>'contract_settled')::numeric,0.00::numeric,'penalty does not settle contract balance');
 select is((public.get_appointment_financial_summary('97900000-0000-0000-0000-000000000010')->>'operational_penalties_cash_received')::numeric,100.00::numeric,'penalty cash remains visible operationally');
 select is((select status from public.appointment_policy_actions where id=(select (data->>'policy_action_id')::uuid from h)),'PREVIEW','paid penalty unlocks reschedule apply state');
+select throws_ok(
+  $$select public.service_admin_create_reschedule_hold('97900000-0000-0000-0000-000000000010',((current_date+11)+time '10:00') at time zone 'America/Sao_Paulo',now(),null)$$,
+  'P0001',
+  'RESCHEDULE_PAID_PROPOSAL_MUST_BE_APPLIED_OR_REVERSED',
+  'paid reschedule proposal cannot be replaced and orphan its penalty payment'
+);
 select is((public.service_admin_apply_reschedule((select (data->>'policy_action_id')::uuid from h),null)->>'status'),'APPLIED','reschedule applies after penalty payment');
 select ok((public.service_admin_register_reschedule_penalty_payment((select (data->>'policy_action_id')::uuid from h),'PIX',null,null)->>'idempotent_replay')::boolean,'penalty payment replay is idempotent');
 
