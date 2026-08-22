@@ -32,3 +32,21 @@
 .cancellation-success small { color: #527258; }
 .refund-failure { display: grid; gap: 7px; margin-top: 4px; padding: 8px; border-radius: 8px; background: #fff7e8; color: #6f4c10; font-size: .76rem; }
 .refund-failure .secondary { justify-self: start; }
+
+.reschedule-execution { display: grid; gap: 10px; padding: 11px; border: 1px solid #d8ddd2; border-radius: 10px; background: #fbfcf9; }
+.reschedule-date-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: end; }
+.reschedule-date-row label { display: grid; gap: 5px; }
+.reschedule-date-row label > span { font-size: .75rem; font-weight: 750; }
+.reschedule-slots { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.reschedule-slots button { border: 1px solid #d9d9d4; border-radius: 8px; background: #fff; padding: 9px; display: grid; gap: 2px; text-align: left; color: inherit; }
+.reschedule-slots button:hover { border-color: #999991; }
+.reschedule-slots small,.reschedule-slots span { color: #6b6b65; font-size: .7rem; }
+.reschedule-hold { display: grid; gap: 8px; }
+.reschedule-hold > small { color: #666660; }
+.reschedule-success { display: grid; gap: 4px; padding: 11px; border: 1px solid #bcd7c1; border-radius: 10px; background: #f0f8f1; color: #285831; }
+.reschedule-success span,.reschedule-success small { font-size: .78rem; }
+
+@media (max-width: 520px) {
+  .reschedule-date-row { grid-template-columns: 1fr; }
+  .reschedule-slots { grid-template-columns: 1fr; }
+}
