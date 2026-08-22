@@ -1,12 +1,11 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
   'access-control-allow-methods': 'POST, OPTIONS',
 }
-
-const ipBuckets = new Map<string, { count: number; resetAt: number }>()
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -19,18 +18,6 @@ function requestIp(req: Request): string | null {
   return (req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? '')
     .split(',')[0]
     .trim() || null
-}
-
-function enforceIpRateLimit(req: Request): void {
-  const ip = requestIp(req) ?? 'unknown'
-  const now = Date.now()
-  const current = ipBuckets.get(ip)
-  if (!current || current.resetAt <= now) {
-    ipBuckets.set(ip, { count: 1, resetAt: now + 10 * 60 * 1000 })
-    return
-  }
-  if (current.count >= 30) throw new Error('RATE_LIMITED')
-  current.count += 1
 }
 
 function stringArray(value: unknown): string[] {
@@ -46,7 +33,13 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return response({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
-    enforceIpRateLimit(req)
+    const client = adminClient()
+    await enforceDistributedPublicRateLimit(client, req, {
+      scope: 'BOOKING_SUBMIT',
+      limit: 30,
+      windowSeconds: 600,
+    })
+
     const body = await req.json()
     const token = typeof body?.checkout_hold_token === 'string' ? body.checkout_hold_token.trim() : ''
     if (token.length < 32) throw new Error('CHECKOUT_HOLD_TOKEN_REQUIRED')
@@ -57,7 +50,6 @@ Deno.serve(async (req) => {
     const ip = requestIp(req)
     const userAgent = (req.headers.get('user-agent') ?? '').slice(0, 500) || null
 
-    const client = adminClient()
     const { data, error } = await client.rpc('service_submit_public_checkout', {
       p_checkout_hold_token: token,
       p_coupon_code: coupon,
@@ -77,6 +69,7 @@ Deno.serve(async (req) => {
     const code = error instanceof Error ? error.message : 'CHECKOUT_SUBMIT_FAILED'
     const publicCode = code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
+      : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : publicCode === 'CHECKOUT_HOLD_NOT_ACTIVE' ? 409
       : 400
     return response({ error: { code: publicCode } }, status)
