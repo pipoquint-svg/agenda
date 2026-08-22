@@ -30,3 +30,5 @@
 .cancellation-success { display: grid; gap: 5px; padding: 11px; border: 1px solid #bcd7c1; border-radius: 10px; background: #f0f8f1; color: #285831; }
 .cancellation-success p { margin: 0; font-size: .8rem; line-height: 1.4; }
 .cancellation-success small { color: #527258; }
+.refund-failure { display: grid; gap: 7px; margin-top: 4px; padding: 8px; border-radius: 8px; background: #fff7e8; color: #6f4c10; font-size: .76rem; }
+.refund-failure .secondary { justify-self: start; }
