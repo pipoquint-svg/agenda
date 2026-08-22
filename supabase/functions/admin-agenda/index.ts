@@ -26,6 +26,12 @@ function requiredIso(url: URL, key: string): string {
   return parsed.toISOString()
 }
 
+function appointmentId(url: URL): string {
+  const id = clean(url.searchParams.get('id'))
+  if (!id || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('APPOINTMENT_ID_INVALID')
+  return id
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -37,9 +43,23 @@ Deno.serve(async (req) => {
     const action = clean(url.searchParams.get('action')) ?? 'agenda'
 
     if (action === 'appointment') {
-      const id = clean(url.searchParams.get('id'))
-      if (!id || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('APPOINTMENT_ID_INVALID')
-      const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: id })
+      const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: appointmentId(url) })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
+    if (action === 'change_preview') {
+      const changeType = clean(url.searchParams.get('change_type'))
+      if (changeType !== 'RESCHEDULE' && changeType !== 'CANCEL') throw new Error('INVALID_CHANGE_ACTION')
+      const requestedAt = clean(url.searchParams.get('requested_at'))
+      const parsedRequestedAt = requestedAt ? new Date(requestedAt) : new Date()
+      if (Number.isNaN(parsedRequestedAt.getTime())) throw new Error('REQUESTED_AT_INVALID')
+
+      const { data, error } = await client.rpc('calculate_appointment_change_policy', {
+        p_appointment_id: appointmentId(url),
+        p_action_type: changeType,
+        p_requested_at: parsedRequestedAt.toISOString(),
+      })
       if (error) throw new Error(error.message)
       return json(data)
     }

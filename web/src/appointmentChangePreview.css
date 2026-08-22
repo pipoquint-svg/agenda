@@ -1,0 +1,13 @@
+.change-preview-section { display: grid; gap: 10px; }
+.change-preview-title h3 { margin-bottom: 2px; }
+.change-preview-title p { margin: 0; color: #6a6a64; font-size: .8rem; }
+.change-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.change-preview-result { border: 1px solid #deded8; border-radius: 10px; padding: 10px; background: #f8f8f5; }
+.change-preview-headline { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 8px; }
+.change-preview-headline span { color: #666660; font-size: .74rem; }
+.change-preview-result dl { margin: 0; display: grid; gap: 5px; }
+.change-preview-result dl > div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e8e8e3; padding-bottom: 4px; }
+.change-preview-result dl > div:last-child { border-bottom: 0; }
+.change-preview-result dt { color: #676761; font-size: .77rem; }
+.change-preview-result dd { margin: 0; text-align: right; font-weight: 700; font-size: .8rem; }
+.change-preview-warning { color: #777770; line-height: 1.4; }
