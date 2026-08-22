@@ -1,4 +1,4 @@
-import { adminClient, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -40,18 +40,42 @@ Deno.serve(async (req) => {
   if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
-    await requireAdmin(req)
+    const admin = await requireAdmin(req)
+    const can = (permission: string) => hasAdminPermission(admin.adminId, permission)
+    const requirePermission = async (permission: string) => {
+      if (!(await can(permission))) throw new Error('ADMIN_PERMISSION_DENIED')
+    }
     const client = adminClient()
 
     if (req.method === 'GET') {
+      await requirePermission('SERVICES_VIEW')
       const { data, error } = await client.rpc('service_admin_list_service_settings')
       if (error) throw new Error(error.message)
       return json({ services: data })
     }
 
+    await requirePermission('SERVICES_MANAGE')
     const body = await req.json()
     const serviceId = uuid(body?.service_id)
     const action = typeof body?.action === 'string' ? body.action : ''
+
+    if (action === 'OPERATION_SCOPE') {
+      const scope = body?.operation_scope === null || body?.operation_scope === undefined
+        ? null
+        : typeof body.operation_scope === 'string'
+          ? body.operation_scope.trim().toUpperCase()
+          : ''
+      if (scope !== null && scope !== '' && scope !== 'BLACKSHEEP' && scope !== 'SABRINA') {
+        throw new Error('SERVICE_OPERATION_SCOPE_INVALID')
+      }
+      const { data, error } = await client.rpc('service_admin_update_operation_scope', {
+        p_service_id: serviceId,
+        p_operation_scope: scope || null,
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
 
     if (action === 'TIMING') {
       const mode = body?.duration_mode === 'BLOCKS' ? 'BLOCKS' : body?.duration_mode === 'FIXED' ? 'FIXED' : null
@@ -102,7 +126,9 @@ Deno.serve(async (req) => {
     throw new Error('SERVICE_SETTINGS_ACTION_INVALID')
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'SERVICE_SETTINGS_FAILED'
-    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401 : 400
+    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED'
+      ? 401
+      : code === 'ADMIN_PERMISSION_DENIED' ? 403 : 400
     return json({ error: { code } }, status)
   }
 })
