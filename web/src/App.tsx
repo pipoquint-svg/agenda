@@ -1,10 +1,12 @@
 import { useEffect } from 'react'
+import { AgendaAdmin } from './AgendaAdmin'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
 import { trackPublicPage } from './tracking'
+import './agendaAdmin.css'
 import './checkout.css'
 
 function PublicBookingRoute({ slug }: { slug: string }) {
@@ -37,17 +39,11 @@ function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: strin
 export function App() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/'
 
-  if (path.startsWith('/admin/demand')) {
-    return <DemandCaptureAdmin />
-  }
+  if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
+  if (path.startsWith('/admin/demand')) return <DemandCaptureAdmin />
 
-  if (path === '/agendar/sabrina') {
-    return <PublicBookingRoute slug="sabrina" />
-  }
-
-  if (path === '/agendar/blacksheep') {
-    return <PublicBookingRoute slug="blacksheep" />
-  }
+  if (path === '/agendar/sabrina') return <PublicBookingRoute slug="sabrina" />
+  if (path === '/agendar/blacksheep') return <PublicBookingRoute slug="blacksheep" />
 
   const params = new URLSearchParams(window.location.search)
   return (
