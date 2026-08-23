@@ -3,7 +3,7 @@ import { customerFinancialTermsChanged } from './customerTermsPermission.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
+  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
 
@@ -86,6 +86,34 @@ function parseNewContractValue(url: URL, required: boolean): number | null {
   const value = Number(raw)
   if (!Number.isFinite(value) || value < 0) throw new Error('NEW_CONTRACT_VALUE_INVALID')
   return Math.round(value * 100) / 100
+}
+
+function requestEvidence(req: Request) {
+  const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
+  const userAgent = (req.headers.get('user-agent') ?? '').trim()
+  const requestId = (req.headers.get('x-request-id') ?? crypto.randomUUID()).trim()
+  if (!ip || !userAgent || !requestId) throw new Error('AUTHORSHIP_ADMIN_EVIDENCE_REQUIRED')
+  return { ip, userAgent, requestId }
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  return `"${text.replaceAll('"', '""')}"`
+}
+
+function timelineCsv(payload: unknown): string {
+  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+  const events = Array.isArray(root.events) ? root.events as Array<Record<string, unknown>> : []
+  const columns = [
+    'occurred_at', 'origin', 'action', 'summary', 'actor_name', 'actor_role', 'actor_permissions',
+    'reason', 'ip_address', 'user_agent', 'request_id', 'token_scope', 'destination_masked', 'provider',
+    'before', 'after',
+  ]
+  return [
+    columns.join(','),
+    ...events.map((event) => columns.map((column) => csvCell(event[column])).join(',')),
+  ].join('\n')
 }
 
 Deno.serve(async (req) => {
@@ -186,6 +214,25 @@ Deno.serve(async (req) => {
         return json(data)
       }
 
+      if (action === 'unlock_token_verification') {
+        await requirePermission('AGENDA_MANAGE')
+        await requirePermission('AUDIT_VIEW')
+        const evidence = requestEvidence(req)
+        const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : ''
+        if (!reason) throw new Error('UNLOCK_REASON_REQUIRED')
+        const { data, error } = await client.rpc('service_admin_unlock_appointment_token_verification', {
+          p_appointment_id: uuid(body.appointment_id, 'APPOINTMENT_ID_INVALID'),
+          p_admin_id: admin.adminId,
+          p_reason: reason,
+          p_ip: evidence.ip,
+          p_user_agent: evidence.userAgent,
+          p_request_id: evidence.requestId,
+          p_session_id: null,
+        })
+        if (error) throw new Error(error.message)
+        return json(data)
+      }
+
       throw new Error('ADMIN_ACTION_INVALID')
     }
 
@@ -202,6 +249,28 @@ Deno.serve(async (req) => {
       const { data, error } = await client.rpc('service_admin_get_appointment', { p_appointment_id: appointmentId(url) })
       if (error) throw new Error(error.message)
       return json(canViewFinance ? data : redactFinance(data))
+    }
+
+    if (action === 'timeline' || action === 'timeline_export') {
+      await requirePermission('AUDIT_VIEW')
+      const id = appointmentId(url)
+      const { data, error } = await client.rpc('service_admin_get_appointment_timeline', {
+        p_appointment_id: id,
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      const safeData = canViewFinance ? data : redactFinance(data)
+      if (action === 'timeline_export') {
+        return new Response(timelineCsv(safeData), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': `attachment; filename="agenda-${id}-timeline.csv"`,
+          },
+        })
+      }
+      return json(safeData)
     }
 
     if (action === 'change_preview') {
