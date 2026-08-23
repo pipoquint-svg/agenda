@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(7);
+select plan(8);
 
 insert into public.resources (id, name, resource_type)
 values ('20000000-0000-0000-0000-000000000001', 'AVAIL TEST STUDIO', 'PHYSICAL');
@@ -151,6 +151,28 @@ update public.checkout_holds
 set created_at = now() - interval '2 minutes',
     expires_at = now() - interval '1 minute'
 where id = ((select payload->>'checkout_hold_id' from created_hold))::uuid;
+
+select ok(
+  (
+    select count(*) = 1
+    from public.resource_allocations ra
+    where ra.checkout_hold_id = ((select payload->>'checkout_hold_id' from created_hold))::uuid
+      and ra.status = 'HELD'
+  )
+  and exists (
+    select 1
+    from public.list_available_slots(
+      '20000000-0000-0000-0000-000000000030',
+      '20000000-0000-0000-0000-000000000040',
+      '[]'::jsonb,
+      1,
+      '2035-01-15'::date,
+      null
+    )
+    where slot_start_at = '2035-01-15 09:00:00-03'::timestamptz
+  ),
+  'expired checkout hold is reoffered immediately even before physical HELD allocation cleanup'
+);
 
 select public.expire_due_checkout_holds();
 
