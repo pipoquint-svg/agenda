@@ -39,8 +39,17 @@ function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: strin
   )
 }
 
+function applicationPath(): string {
+  const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
+  let path = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (base && base !== '/' && (path === base || path.startsWith(`${base}/`))) {
+    path = path.slice(base.length) || '/'
+  }
+  return path
+}
+
 export function App() {
-  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+  const path = applicationPath()
 
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes')) return <ServiceSettingsAdmin />
