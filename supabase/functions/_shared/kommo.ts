@@ -30,7 +30,12 @@ export function normalizeEmail(value: unknown): string | null {
 export function normalizePhone(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const digits = value.replace(/\D+/g, '')
-  return digits || null
+  if (!digits) return null
+
+  // BlackSheep operates in BR. Treat local DDD+number and +55 forms as the same
+  // customer identity while preserving already international-looking numbers.
+  if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) return `55${digits}`
+  return digits
 }
 
 function fieldValues(contact: KommoContact, code: string): string[] {
@@ -50,8 +55,8 @@ export function contactMatchesExactly(
   const emails = fieldValues(contact, 'EMAIL').map(normalizeEmail).filter(Boolean)
   const phones = fieldValues(contact, 'PHONE').map(normalizePhone).filter(Boolean)
 
-  if (emailNeedle && emails.includes(emailNeedle)) return true
   if (phoneNeedle && phones.includes(phoneNeedle)) return true
+  if (emailNeedle && emails.includes(emailNeedle)) return true
   return false
 }
 
