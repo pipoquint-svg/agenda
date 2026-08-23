@@ -137,6 +137,20 @@ export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): Mercad
   }
 }
 
+export function mercadoPagoPaymentStorageSnapshot(snapshot: MercadoPagoPaymentSnapshot): Record<string, unknown> {
+  return {
+    id: snapshot.id,
+    status: snapshot.status,
+    status_detail: snapshot.status_detail,
+    payment_method_id: snapshot.payment_method_id,
+    payment_type_id: snapshot.payment_type_id,
+    transaction_amount: snapshot.transaction_amount,
+    external_reference: snapshot.external_reference,
+    date_approved: snapshot.date_approved,
+    date_created: snapshot.date_created,
+  }
+}
+
 export function assertMercadoPagoPaymentMatchesIntent(
   snapshot: MercadoPagoPaymentSnapshot,
   expected: MercadoPagoExpectedIntent,
