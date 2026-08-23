@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CardPayment, initMercadoPago } from '@mercadopago/sdk-react'
 import {
   createCardPayment,
@@ -38,9 +38,7 @@ function randomRequestKey(): string {
   return crypto.randomUUID()
 }
 
-function ThreeDSChallenge({ externalResourceUrl, creq }: { externalResourceUrl: string; creq: string }) {
-  const formRef = useRef<HTMLFormElement>(null)
-  const frameName = useMemo(() => `mp-3ds-${crypto.randomUUID()}`, [])
+function ThreeDSChallenge({ externalResourceUrl }: { externalResourceUrl: string }) {
   const challengeUrl = useMemo(() => {
     try {
       const parsed = new URL(externalResourceUrl)
@@ -50,12 +48,7 @@ function ThreeDSChallenge({ externalResourceUrl, creq }: { externalResourceUrl: 
     }
   }, [externalResourceUrl])
 
-  useEffect(() => {
-    if (!challengeUrl || !creq) return
-    formRef.current?.submit()
-  }, [challengeUrl, creq])
-
-  if (!challengeUrl || !creq) {
+  if (!challengeUrl) {
     return <div className="form-alert error">Não foi possível iniciar a autenticação segura do cartão.</div>
   }
 
@@ -65,10 +58,7 @@ function ThreeDSChallenge({ externalResourceUrl, creq }: { externalResourceUrl: 
         <strong>Confirme o pagamento com seu banco</strong>
         <p>Conclua a autenticação abaixo. A reserva só será confirmada após o Mercado Pago validar o resultado.</p>
       </div>
-      <iframe name={frameName} title="Autenticação 3DS do cartão" className="three-ds-frame" />
-      <form ref={formRef} target={frameName} method="post" action={challengeUrl} className="three-ds-form" aria-hidden="true">
-        <input type="hidden" name="creq" value={creq} />
-      </form>
+      <iframe src={challengeUrl} title="Autenticação 3DS do cartão" className="three-ds-frame" />
     </div>
   )
 }
@@ -95,8 +85,8 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     }
   }
 
-  async function syncCurrentPayment(providerPaymentId: string) {
-    const synced = await syncProviderPayment(accessToken, providerPaymentId)
+  async function syncCurrentPayment(providerOrderId: string) {
+    const synced = await syncProviderPayment(accessToken, providerOrderId)
     setPayment((current) => current ? ({ ...current, ...synced }) : synced)
     if (synced.state?.appointment_status === 'CONFIRMED' || synced.provider?.status === 'approved') {
       setConfirmed(true)
@@ -111,7 +101,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
   }, [accessToken])
 
   const providerId = payment?.provider?.id || null
-  const providerPending = payment?.provider?.status != null && ['pending', 'in_process', 'authorized', 'in_mediation'].includes(payment.provider.status)
+  const providerPending = payment?.provider?.status === 'pending'
   const challenge = payment?.provider?.status === 'pending' && payment.provider.status_detail === 'pending_challenge'
     ? payment.provider.three_ds_info
     : null
@@ -134,16 +124,16 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
   }, [accessToken, providerId, providerPending, confirmed])
 
   useEffect(() => {
-    if (!providerId || !challenge || confirmed) return
+    if (!providerId || !challenge?.external_resource_url || confirmed) return
     const onMessage = (event: MessageEvent) => {
       const data = event.data && typeof event.data === 'object' ? event.data as Record<string, unknown> : null
       if (data?.status !== 'COMPLETE') return
-      // The iframe event is only a signal; provider state is always re-fetched server-side.
+      // The iframe event is only a signal; provider Order state is always re-fetched server-side.
       syncCurrentPayment(providerId).catch(() => undefined)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [accessToken, providerId, challenge, confirmed])
+  }, [accessToken, providerId, challenge?.external_resource_url, confirmed])
 
   const contractAmount = useMemo(() => {
     if (!context) return 0
@@ -280,8 +270,8 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
             <strong>{money.format(cardAmount)}</strong>
             <small>Os dados do cartão são processados pelo formulário seguro do Mercado Pago.</small>
           </div>
-          {challenge?.external_resource_url && challenge.creq ? (
-            <ThreeDSChallenge externalResourceUrl={challenge.external_resource_url} creq={challenge.creq} />
+          {challenge?.external_resource_url ? (
+            <ThreeDSChallenge externalResourceUrl={challenge.external_resource_url} />
           ) : !publicKey ? (
             <div className="form-alert error">Cartão será habilitado assim que a Public Key do Mercado Pago for configurada no ambiente.</div>
           ) : (
