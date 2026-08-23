@@ -7,6 +7,8 @@ import {
   normalizedEmail,
 } from '../_shared/transactional-email.ts'
 
+const PROVIDER_TIMEOUT_MS = 15_000
+
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
@@ -50,6 +52,44 @@ function senderForScope(scope: string): { brandName: string; from: string; reply
   return null
 }
 
+async function sendWithResend(apiKey: string, payload: Record<string, unknown>, idempotencyKey: string): Promise<string | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+        'idempotency-key': idempotencyKey,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('EMAIL_PROVIDER_TIMEOUT')
+    throw new Error('EMAIL_PROVIDER_NETWORK_ERROR')
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  const responseText = await response.text()
+  if (!response.ok) {
+    // Provider bodies can contain addresses, IDs and diagnostic context. Never persist
+    // them into Edge logs or integration_jobs.last_error.
+    throw new Error(`EMAIL_PROVIDER_HTTP_${response.status}`)
+  }
+
+  if (!responseText) return null
+  try {
+    const parsed = JSON.parse(responseText)
+    return typeof parsed?.id === 'string' ? parsed.id : null
+  } catch {
+    throw new Error('EMAIL_PROVIDER_INVALID_RESPONSE')
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
@@ -74,7 +114,7 @@ Deno.serve(async (req) => {
       .eq('id', appointmentId)
       .maybeSingle()
 
-    if (appointmentError) throw new Error(`APPOINTMENT_LOOKUP_FAILED:${appointmentError.message}`)
+    if (appointmentError) throw new Error('APPOINTMENT_LOOKUP_FAILED')
     if (!appointment) throw new Error('APPOINTMENT_NOT_FOUND')
 
     const currentVersion = Number(appointment.version)
@@ -136,7 +176,7 @@ Deno.serve(async (req) => {
     const { data: financial, error: financialError } = await client.rpc('get_appointment_financial_summary', {
       p_appointment_id: appointmentId,
     })
-    if (financialError) throw new Error(`FINANCIAL_SUMMARY_FAILED:${financialError.message}`)
+    if (financialError) throw new Error('FINANCIAL_SUMMARY_FAILED')
 
     const message = buildConfirmationEmail({
       brandName: sender.brandName,
@@ -163,30 +203,7 @@ Deno.serve(async (req) => {
     if (sender.replyTo) providerPayload.reply_to = sender.replyTo
 
     const idempotencyKey = `appointment-confirmed-email:${appointmentId}:v${entityVersion}`
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-        'idempotency-key': idempotencyKey,
-      },
-      body: JSON.stringify(providerPayload),
-    })
-
-    const responseText = await response.text()
-    if (!response.ok) {
-      throw new Error(`EMAIL_PROVIDER_ERROR:${response.status}:${responseText.slice(0, 500)}`)
-    }
-
-    let providerMessageId: string | null = null
-    if (responseText) {
-      try {
-        const parsed = JSON.parse(responseText)
-        if (typeof parsed?.id === 'string') providerMessageId = parsed.id
-      } catch {
-        throw new Error('EMAIL_PROVIDER_INVALID_RESPONSE')
-      }
-    }
+    const providerMessageId = await sendWithResend(apiKey, providerPayload, idempotencyKey)
 
     return jsonResponse({
       stale: false,
