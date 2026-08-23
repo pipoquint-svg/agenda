@@ -194,23 +194,12 @@ async function recoverInitialLeadForContact(
   return matches[0] ?? null
 }
 
-async function ensureLeadContactLink(baseUrl: string, token: string, leadId: number, contactId: number): Promise<void> {
-  const filter = `filter[to_entity_id]=${contactId}&filter[to_entity_type]=contacts`
-  const payload = await kommoJson<any>(baseUrl, token, `/leads/${leadId}/links?${filter}`)
-  const links = payload?._embedded?.links ?? []
-  const alreadyLinked = links.some((link: any) =>
-    Number(link?.to_entity_id) === contactId && String(link?.to_entity_type ?? '') === 'contacts'
-  )
-  if (alreadyLinked) return
-
-  await kommoJson(baseUrl, token, `/leads/${leadId}/link`, {
-    method: 'POST',
-    body: JSON.stringify([{
-      to_entity_id: contactId,
-      to_entity_type: 'contacts',
-      metadata: { main_contact: true },
-    }]),
-  })
+async function assertLeadContactLink(baseUrl: string, token: string, leadId: number, contactId: number): Promise<void> {
+  const lead = await kommoJson<any>(baseUrl, token, `/leads/${leadId}?with=contacts`)
+  const contacts = lead?._embedded?.contacts ?? []
+  if (!contacts.some((contact: any) => Number(contact?.id) === contactId)) {
+    throw new Error('KOMMO_LEAD_CONTACT_MISMATCH')
+  }
 }
 
 Deno.serve(async (req) => {
@@ -280,20 +269,26 @@ Deno.serve(async (req) => {
     }
 
     if (leadId) {
+      await assertLeadContactLink(baseUrl, token, leadId, contactId)
       await kommoJson(baseUrl, token, `/leads/${leadId}`, {
         method: 'PATCH',
         body: JSON.stringify(leadBody),
       })
     } else {
+      // Kommo's documented duplicate-control flow supports creating a lead already linked
+      // to an existing contact by embedding only the contact id. This avoids a second
+      // provider mutation and keeps contact identity/reservation identity separate.
       const created = await kommoJson<any>(baseUrl, token, '/leads', {
         method: 'POST',
-        body: JSON.stringify([leadBody]),
+        body: JSON.stringify([{
+          ...leadBody,
+          _embedded: { contacts: [{ id: contactId }] },
+        }]),
       })
       leadId = created?._embedded?.leads?.[0]?.id ?? null
       if (!Number.isInteger(leadId) || Number(leadId) <= 0) throw new Error('KOMMO_LEAD_CREATE_INVALID_RESPONSE')
+      await assertLeadContactLink(baseUrl, token, Number(leadId), contactId)
     }
-
-    await ensureLeadContactLink(baseUrl, token, Number(leadId), contactId)
 
     const now = new Date().toISOString()
     const { error: appointmentLinkError } = await client.from('kommo_appointment_links').upsert({

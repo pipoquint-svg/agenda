@@ -10,6 +10,13 @@ export type KommoContact = {
   custom_fields_values?: KommoFieldValue[] | null
 }
 
+export type KommoCustomField = {
+  id?: number | null
+  name?: string | null
+  code?: string | null
+  type?: string | null
+}
+
 export type KommoPipelineSettings = {
   pipeline_id: number | null
   stage_awaiting_payment_id: number | null
@@ -98,6 +105,39 @@ export function kommoLeadName(serviceName: string | null | undefined, publicCode
   const service = (serviceName ?? 'Reserva BlackSheep').trim() || 'Reserva BlackSheep'
   const code = (publicCode ?? '').trim()
   return code ? `${service} · ${code}` : service
+}
+
+export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
+  const needle = expectedName.trim().toLocaleLowerCase('pt-BR')
+  const named = fields.filter((field) => (field.name ?? '').trim().toLocaleLowerCase('pt-BR') === needle)
+  if (named.length !== 1) throw new Error(named.length === 0 ? 'KOMMO_RESERVATION_DATE_FIELD_MISSING' : 'KOMMO_RESERVATION_DATE_FIELD_AMBIGUOUS')
+
+  const field = named[0]
+  const type = (field.type ?? '').trim().toLowerCase()
+  if (type !== 'date' && type !== 'date_time') throw new Error('KOMMO_RESERVATION_DATE_FIELD_INVALID_TYPE')
+  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_RESERVATION_DATE_FIELD_INVALID_ID')
+  return Number(field.id)
+}
+
+export function kommoReservationDateValue(startAt: string | null | undefined): string {
+  if (!startAt) throw new Error('KOMMO_RESERVATION_START_REQUIRED')
+  const instant = new Date(startAt)
+  if (Number.isNaN(instant.getTime())) throw new Error('KOMMO_RESERVATION_START_INVALID')
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(instant)
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+  if (!year || !month || !day) throw new Error('KOMMO_RESERVATION_DATE_FORMAT_FAILED')
+
+  // Kommo accepts RFC-3339 for date/date_time custom fields. Noon in the business
+  // timezone avoids date-boundary shifts while the CRM renders the field as a date.
+  return `${year}-${month}-${day}T12:00:00-03:00`
 }
 
 export function buildContactCustomFields(

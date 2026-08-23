@@ -2,7 +2,9 @@ import {
   buildContactCustomFields,
   contactMatchesExactly,
   exactContactCandidates,
+  findUniqueLeadDateFieldId,
   kommoLeadName,
+  kommoReservationDateValue,
   normalizePhone,
   stageIdForAppointment,
 } from './kommo.ts'
@@ -86,4 +88,25 @@ Deno.test('contact field payload uses provider field ids only', () => {
 
 Deno.test('lead name carries public code for recovery/idempotency', () => {
   if (kommoLeadName('Locação', 'BS-123') !== 'Locação · BS-123') throw new Error('lead name mismatch')
+})
+
+Deno.test('reservation Data field is resolved uniquely and must be date-compatible', () => {
+  const id = findUniqueLeadDateFieldId([
+    { id: 10, name: 'Pai', type: 'text' },
+    { id: 20, name: 'Data', type: 'date' },
+  ])
+  if (id !== 20) throw new Error('Data field id mismatch')
+
+  let failed = false
+  try {
+    findUniqueLeadDateFieldId([{ id: 30, name: 'Data', type: 'text' }])
+  } catch (error) {
+    failed = error instanceof Error && error.message === 'KOMMO_RESERVATION_DATE_FIELD_INVALID_TYPE'
+  }
+  if (!failed) throw new Error('non-date Data field should fail closed')
+})
+
+Deno.test('reservation date is derived in America/Sao_Paulo and encoded as RFC3339', () => {
+  const value = kommoReservationDateValue('2026-08-24T01:00:00Z')
+  if (value !== '2026-08-23T12:00:00-03:00') throw new Error(`reservation date timezone mismatch: ${value}`)
 })
