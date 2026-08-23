@@ -7,11 +7,12 @@ import {
   stageIdForAppointment,
 } from './kommo.ts'
 
-Deno.test('normalizePhone keeps only digits', () => {
-  if (normalizePhone('+55 (48) 99999-0000') !== '5548999990000') throw new Error('phone normalization failed')
+Deno.test('normalizePhone canonicalizes Brazilian local and +55 formats', () => {
+  if (normalizePhone('+55 (48) 99999-0000') !== '5548999990000') throw new Error('international phone normalization failed')
+  if (normalizePhone('(48) 99999-0000') !== '5548999990000') throw new Error('local BR phone normalization failed')
 })
 
-Deno.test('contact exact match accepts email or phone', () => {
+Deno.test('contact exact match can be restricted to phone identity', () => {
   const contact = {
     id: 1,
     custom_fields_values: [
@@ -19,17 +20,25 @@ Deno.test('contact exact match accepts email or phone', () => {
       { field_code: 'PHONE', values: [{ value: '+55 48 99999-0000' }] },
     ],
   }
-  if (!contactMatchesExactly(contact, 'cliente@teste.com', null)) throw new Error('email should match')
-  if (!contactMatchesExactly(contact, null, '5548999990000')) throw new Error('phone should match')
-  if (contactMatchesExactly(contact, 'outro@teste.com', '5511999999999')) throw new Error('unrelated contact matched')
+  if (!contactMatchesExactly(contact, null, '48999990000')) throw new Error('phone should match across BR formatting')
+  if (contactMatchesExactly(contact, null, '5511999999999')) throw new Error('unrelated phone matched')
+  if (exactContactCandidates([contact], null, '48999990000').length !== 1) throw new Error('phone-only candidate lookup failed')
 })
 
-Deno.test('ambiguous exact contacts remain visible to caller', () => {
+Deno.test('email alone does not match when caller requests phone-only identity', () => {
+  const contact = {
+    id: 1,
+    custom_fields_values: [{ field_code: 'EMAIL', values: [{ value: 'a@b.com' }] }],
+  }
+  if (exactContactCandidates([contact], null, '48999990000').length !== 0) throw new Error('email must not substitute missing phone')
+})
+
+Deno.test('ambiguous phone contacts remain visible to caller', () => {
   const contacts = [
-    { id: 1, custom_fields_values: [{ field_code: 'EMAIL', values: [{ value: 'a@b.com' }] }] },
-    { id: 2, custom_fields_values: [{ field_code: 'EMAIL', values: [{ value: 'a@b.com' }] }] },
+    { id: 1, custom_fields_values: [{ field_code: 'PHONE', values: [{ value: '+55 48 99999-0000' }] }] },
+    { id: 2, custom_fields_values: [{ field_code: 'PHONE', values: [{ value: '(48) 99999-0000' }] }] },
   ]
-  if (exactContactCandidates(contacts, 'a@b.com', null).length !== 2) throw new Error('ambiguity must not be hidden')
+  if (exactContactCandidates(contacts, null, '48999990000').length !== 2) throw new Error('phone ambiguity must not be hidden')
 })
 
 Deno.test('stage mapping prioritizes reschedule event then appointment status', () => {
