@@ -4,6 +4,7 @@ import {
   exactContactCandidates,
   kommoJson,
   kommoLeadName,
+  normalizePhone,
   stageIdForAppointment,
   type KommoContact,
 } from '../_shared/kommo.ts'
@@ -33,6 +34,7 @@ type Settings = {
   enabled: boolean
   account_subdomain: string | null
   pipeline_id: number | null
+  stage_initial_contact_id: number | null
   stage_awaiting_payment_id: number | null
   stage_confirmed_id: number | null
   stage_rescheduled_id: number | null
@@ -50,14 +52,17 @@ async function contactFieldIds(baseUrl: string, token: string): Promise<{ email:
   return { email: Number.isInteger(email) ? email : null, phone: Number.isInteger(phone) ? phone : null }
 }
 
-async function searchContacts(
+async function searchContactsByPhone(
   baseUrl: string,
   token: string,
-  email: string | null,
-  phone: string | null,
+  phone: string,
 ): Promise<KommoContact[]> {
+  const normalized = normalizePhone(phone)
+  if (!normalized) throw new Error('KOMMO_PHONE_REQUIRED')
+
   const byId = new Map<number, KommoContact>()
-  for (const query of [email, phone].filter((value): value is string => Boolean(value?.trim()))) {
+  const queries = [...new Set([phone.trim(), normalized].filter(Boolean))]
+  for (const query of queries) {
     const payload = await kommoJson<any>(baseUrl, token, `/contacts?query=${encodeURIComponent(query)}&limit=50`)
     for (const contact of payload?._embedded?.contacts ?? []) {
       if (Number.isInteger(contact?.id)) byId.set(contact.id, contact)
@@ -73,6 +78,8 @@ async function ensureContact(
   customer: NonNullable<DesiredState['customer']>,
 ): Promise<number> {
   if (!customer.id) throw new Error('KOMMO_CUSTOMER_ID_REQUIRED')
+  const phone = customer.phone?.trim() ?? ''
+  if (!normalizePhone(phone)) throw new Error('KOMMO_PHONE_REQUIRED')
 
   const { data: existingLink, error: existingLinkError } = await client
     .from('kommo_customer_links')
@@ -80,29 +87,39 @@ async function ensureContact(
     .eq('customer_id', customer.id)
     .maybeSingle()
   if (existingLinkError) throw new Error('KOMMO_CUSTOMER_LINK_LOOKUP_FAILED')
-  if (existingLink?.kommo_contact_id) return Number(existingLink.kommo_contact_id)
 
+  if (existingLink?.kommo_contact_id) {
+    const linkedContact = await kommoJson<KommoContact>(baseUrl, token, `/contacts/${Number(existingLink.kommo_contact_id)}`)
+    if (exactContactCandidates([linkedContact], null, phone).length !== 1) {
+      throw new Error('KOMMO_LINK_PHONE_MISMATCH')
+    }
+    return Number(existingLink.kommo_contact_id)
+  }
+
+  // Provider lookup by phone is mandatory before creating any new Kommo contact.
+  // E-mail is deliberately not an identity key for this integration.
   const candidates = exactContactCandidates(
-    await searchContacts(baseUrl, token, customer.email ?? null, customer.phone ?? null),
-    customer.email ?? null,
-    customer.phone ?? null,
+    await searchContactsByPhone(baseUrl, token, phone),
+    null,
+    phone,
   )
-  if (candidates.length > 1) throw new Error('KOMMO_CONTACT_AMBIGUOUS')
+  if (candidates.length > 1) throw new Error('KOMMO_CONTACT_PHONE_AMBIGUOUS')
 
   let contactId = candidates[0]?.id ?? null
   if (!contactId) {
     const fieldIds = await contactFieldIds(baseUrl, token)
+    if (!Number.isInteger(fieldIds.phone) || Number(fieldIds.phone) <= 0) throw new Error('KOMMO_PHONE_FIELD_UNAVAILABLE')
     const customFields = buildContactCustomFields(
       fieldIds.email,
       fieldIds.phone,
       customer.email ?? null,
-      customer.phone ?? null,
+      phone,
     )
     const payload = await kommoJson<any>(baseUrl, token, '/contacts', {
       method: 'POST',
       body: JSON.stringify([{
         name: customer.name?.trim() || 'Cliente BlackSheep',
-        custom_fields_values: customFields.length ? customFields : undefined,
+        custom_fields_values: customFields,
       }]),
     })
     contactId = payload?._embedded?.contacts?.[0]?.id ?? null
@@ -116,7 +133,7 @@ async function ensureContact(
     updated_at: new Date().toISOString(),
   }, { onConflict: 'customer_id' })
   if (linkError) throw new Error('KOMMO_CUSTOMER_LINK_SAVE_FAILED')
-  return contactId
+  return Number(contactId)
 }
 
 async function recoverLeadByName(baseUrl: string, token: string, expectedName: string): Promise<number | null> {
@@ -125,6 +142,39 @@ async function recoverLeadByName(baseUrl: string, token: string, expectedName: s
   if (exact.length > 1) throw new Error('KOMMO_LEAD_AMBIGUOUS')
   const id = exact[0]?.id ?? null
   return Number.isInteger(id) && id > 0 ? id : null
+}
+
+async function recoverInitialLeadForContact(
+  baseUrl: string,
+  token: string,
+  contactId: number,
+  settings: Settings,
+): Promise<number | null> {
+  if (!Number.isInteger(settings.pipeline_id) || Number(settings.pipeline_id) <= 0) throw new Error('KOMMO_PIPELINE_NOT_CONFIGURED')
+  if (!Number.isInteger(settings.stage_initial_contact_id) || Number(settings.stage_initial_contact_id) <= 0) {
+    throw new Error('KOMMO_INITIAL_STAGE_NOT_CONFIGURED')
+  }
+
+  const contact = await kommoJson<any>(baseUrl, token, `/contacts/${contactId}?with=leads`)
+  const leadIds = [...new Set(
+    (contact?._embedded?.leads ?? [])
+      .map((lead: any) => Number(lead?.id))
+      .filter((id: number) => Number.isInteger(id) && id > 0),
+  )]
+
+  const matches: number[] = []
+  for (const leadId of leadIds) {
+    const lead = await kommoJson<any>(baseUrl, token, `/leads/${leadId}`)
+    if (
+      Number(lead?.pipeline_id) === Number(settings.pipeline_id) &&
+      Number(lead?.status_id) === Number(settings.stage_initial_contact_id)
+    ) {
+      matches.push(leadId)
+    }
+  }
+
+  if (matches.length > 1) throw new Error('KOMMO_INITIAL_LEAD_AMBIGUOUS')
+  return matches[0] ?? null
 }
 
 async function ensureLeadContactLink(baseUrl: string, token: string, leadId: number, contactId: number): Promise<void> {
@@ -175,10 +225,11 @@ Deno.serve(async (req) => {
     if (!desired.eligible) return jsonResponse({ stale: false, skipped: true, reason: desired.reason ?? 'KOMMO_NOT_ELIGIBLE' })
     if (desired.operation_scope !== 'BLACKSHEEP') throw new Error('KOMMO_OPERATION_SCOPE_DENIED')
     if (!desired.customer?.id) throw new Error('KOMMO_CUSTOMER_REQUIRED')
+    if (!normalizePhone(desired.customer.phone ?? null)) throw new Error('KOMMO_PHONE_REQUIRED')
 
     const { data: settingsData, error: settingsError } = await client
       .from('kommo_integration_settings')
-      .select('enabled, account_subdomain, pipeline_id, stage_awaiting_payment_id, stage_confirmed_id, stage_rescheduled_id, stage_cancelled_id, stage_completed_id, stage_no_show_id, stage_expired_id')
+      .select('enabled, account_subdomain, pipeline_id, stage_initial_contact_id, stage_awaiting_payment_id, stage_confirmed_id, stage_rescheduled_id, stage_cancelled_id, stage_completed_id, stage_no_show_id, stage_expired_id')
       .eq('id', 1)
       .maybeSingle()
     if (settingsError || !settingsData) throw new Error('KOMMO_SETTINGS_UNAVAILABLE')
@@ -200,6 +251,7 @@ Deno.serve(async (req) => {
     if (existingLeadLinkError) throw new Error('KOMMO_APPOINTMENT_LINK_LOOKUP_FAILED')
 
     let leadId = existingLeadLink?.kommo_lead_id ? Number(existingLeadLink.kommo_lead_id) : null
+    if (!leadId) leadId = await recoverInitialLeadForContact(baseUrl, token, contactId, settings)
     if (!leadId) leadId = await recoverLeadByName(baseUrl, token, leadName)
 
     const leadBody = {
