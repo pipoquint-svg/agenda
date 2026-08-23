@@ -12,7 +12,7 @@ Deno.test('normalizePhone canonicalizes Brazilian local and +55 formats', () => 
   if (normalizePhone('(48) 99999-0000') !== '5548999990000') throw new Error('local BR phone normalization failed')
 })
 
-Deno.test('contact exact match can be restricted to phone identity', () => {
+Deno.test('global Kommo contact identity is exact phone match, independent of lead stage', () => {
   const contact = {
     id: 1,
     custom_fields_values: [
