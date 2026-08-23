@@ -3,17 +3,17 @@ create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 select plan(12);
 
-select like(
-  (select qual from pg_policies where schemaname='public' and tablename='admin_users' and policyname='admin_users_self_select'),
-  '%SELECT auth.uid()%','admin self RLS evaluates auth.uid once'
+select ok(
+  coalesce((select qual like '%SELECT auth.uid()%' from pg_policies where schemaname='public' and tablename='admin_users' and policyname='admin_users_self_select'),false),
+  'admin self RLS evaluates auth.uid once'
 );
-select like(
-  (select qual from pg_policies where schemaname='public' and tablename='legacy_amelia_bookings' and policyname='legacy_amelia_bookings_admin_select'),
-  '%SELECT auth.uid()%','Amelia booking RLS evaluates auth.uid once'
+select ok(
+  coalesce((select qual like '%SELECT auth.uid()%' from pg_policies where schemaname='public' and tablename='legacy_amelia_bookings' and policyname='legacy_amelia_bookings_admin_select'),false),
+  'Amelia booking RLS evaluates auth.uid once'
 );
-select like(
-  (select qual from pg_policies where schemaname='public' and tablename='legacy_amelia_import_batches' and policyname='legacy_amelia_import_batches_admin_select'),
-  '%SELECT auth.uid()%','Amelia import RLS evaluates auth.uid once'
+select ok(
+  coalesce((select qual like '%SELECT auth.uid()%' from pg_policies where schemaname='public' and tablename='legacy_amelia_import_batches' and policyname='legacy_amelia_import_batches_admin_select'),false),
+  'Amelia import RLS evaluates auth.uid once'
 );
 
 select has_index('public','appointments','appointments_service_id_idx','appointments service FK has covering index');
