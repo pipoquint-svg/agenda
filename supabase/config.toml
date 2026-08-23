@@ -74,10 +74,18 @@ verify_jwt = false
 verify_jwt = false
 
 # Admin endpoints validate the Supabase Auth bearer token against admin_users manually.
+# JWT verification is intentionally performed inside the function so CORS preflight and
+# error envelopes remain under the same application boundary.
 [functions.demand-capture-admin]
 verify_jwt = false
 
 [functions.admin-agenda]
+verify_jwt = false
+
+[functions.admin-dashboard]
+verify_jwt = false
+
+[functions.admin-operation-settings]
 verify_jwt = false
 
 [functions.admin-service-settings]
