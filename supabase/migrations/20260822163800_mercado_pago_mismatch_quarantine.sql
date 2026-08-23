@@ -1,7 +1,7 @@
 -- A provider-accepted payment that does not match the internal intent must never
 -- confirm a reservation, but it also must not be discarded as a normal rejection.
--- Keep the internal charge PENDING, link the observed provider payment when safe,
--- and open an incident for manual investigation/refund if money moved externally.
+-- Keep the internal charge PENDING, link the observed provider payment only when
+-- that identifier is not already owned elsewhere, and open an incident for review.
 
 alter table public.payment_incidents
   drop constraint if exists payment_incidents_incident_type_check;
@@ -26,10 +26,9 @@ declare
   v_tx public.payment_transactions%rowtype;
   v_incident_id uuid;
   v_observed_provider_id text;
+  v_linked_provider_id text;
+  v_provider_id_owned_elsewhere boolean := false;
 begin
-  if p_provider_payment_id is null or btrim(p_provider_payment_id) = '' then
-    raise exception using errcode='P0001', message='PROVIDER_PAYMENT_ID_REQUIRED';
-  end if;
   if p_reason not in (
     'MERCADO_PAGO_PAYMENT_ID_MISSING',
     'MERCADO_PAGO_PAYMENT_ID_MISMATCH',
@@ -41,7 +40,7 @@ begin
     raise exception using errcode='P0001', message='PROVIDER_INTENT_MISMATCH_REASON_INVALID';
   end if;
 
-  v_observed_provider_id := btrim(p_provider_payment_id);
+  v_observed_provider_id := nullif(btrim(coalesce(p_provider_payment_id,'')),'');
 
   select * into v_tx
   from public.payment_transactions
@@ -55,8 +54,24 @@ begin
     raise exception using errcode='P0001', message='PAYMENT_TRANSACTION_NOT_MERCADO_PAGO_CHARGE';
   end if;
 
+  if v_observed_provider_id is not null then
+    select exists(
+      select 1
+      from public.payment_transactions pt
+      where pt.provider='MERCADO_PAGO'
+        and pt.transaction_type='CHARGE'
+        and pt.provider_payment_id=v_observed_provider_id
+        and pt.id<>v_tx.id
+    ) into v_provider_id_owned_elsewhere;
+  end if;
+
+  v_linked_provider_id := v_tx.provider_payment_id;
+  if v_linked_provider_id is null and v_observed_provider_id is not null and not v_provider_id_owned_elsewhere then
+    v_linked_provider_id := v_observed_provider_id;
+  end if;
+
   update public.payment_transactions
-  set provider_payment_id = coalesce(provider_payment_id, v_observed_provider_id),
+  set provider_payment_id = v_linked_provider_id,
       provider_payload_json = coalesce(p_payload_json, '{}'::jsonb),
       updated_at = now()
   where id = v_tx.id;
@@ -75,7 +90,8 @@ begin
     jsonb_build_object(
       'provider','MERCADO_PAGO',
       'observed_provider_payment_id',v_observed_provider_id,
-      'linked_provider_payment_id',coalesce(v_tx.provider_payment_id,v_observed_provider_id),
+      'linked_provider_payment_id',v_linked_provider_id,
+      'provider_payment_id_owned_elsewhere',v_provider_id_owned_elsewhere,
       'reason',p_reason,
       'provider_snapshot',coalesce(p_payload_json,'{}'::jsonb)
     )
@@ -102,8 +118,9 @@ begin
     ),
     jsonb_build_object(
       'status',v_tx.status,
-      'provider_payment_id',coalesce(v_tx.provider_payment_id,v_observed_provider_id),
+      'provider_payment_id',v_linked_provider_id,
       'observed_provider_payment_id',v_observed_provider_id,
+      'provider_payment_id_owned_elsewhere',v_provider_id_owned_elsewhere,
       'incident_id',v_incident_id,
       'reason',p_reason
     ),
@@ -114,7 +131,9 @@ begin
     'transaction_id',v_tx.id,
     'appointment_id',v_tx.appointment_id,
     'transaction_status',v_tx.status,
-    'provider_payment_id',coalesce(v_tx.provider_payment_id,v_observed_provider_id),
+    'provider_payment_id',v_linked_provider_id,
+    'observed_provider_payment_id',v_observed_provider_id,
+    'provider_payment_id_owned_elsewhere',v_provider_id_owned_elsewhere,
     'incident_id',v_incident_id,
     'incident_status','OPEN',
     'reason',p_reason
