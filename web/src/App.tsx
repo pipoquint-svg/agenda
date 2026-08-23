@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { AdminDashboard } from './AdminDashboard'
 import { AgendaAdmin } from './AgendaAdmin'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
@@ -41,6 +42,7 @@ function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: strin
 export function App() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/'
 
+  if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
   if (path.startsWith('/admin/demand')) return <DemandCaptureAdmin />
