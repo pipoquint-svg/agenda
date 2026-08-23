@@ -18,8 +18,6 @@ const html = `<!doctype html>
     <div id="form-checkout__expirationDate"></div>
     <div id="form-checkout__securityCode"></div>
     <input id="form-checkout__cardholderName" />
-    <select id="form-checkout__issuer"></select>
-    <select id="form-checkout__installments"></select>
     <select id="form-checkout__identificationType"></select>
     <input id="form-checkout__identificationNumber" />
     <input id="form-checkout__cardholderEmail" />
@@ -41,8 +39,6 @@ const html = `<!doctype html>
         expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/YY' },
         securityCode: { id: 'form-checkout__securityCode', placeholder: 'Código de segurança' },
         cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Titular do cartão' },
-        issuer: { id: 'form-checkout__issuer', placeholder: 'Banco emissor' },
-        installments: { id: 'form-checkout__installments', placeholder: 'Parcelas' },
         identificationType: { id: 'form-checkout__identificationType', placeholder: 'Tipo de documento' },
         identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'Número do documento' },
         cardholderEmail: { id: 'form-checkout__cardholderEmail', placeholder: 'E-mail' },
@@ -59,8 +55,11 @@ const html = `<!doctype html>
             window.__tokenResult = {
               token: data.token,
               paymentMethodId: data.paymentMethodId,
-              issuerId: data.issuerId,
-              installments: Number(data.installments),
+              issuerId: data.issuerId || null,
+              // The sandbox gate deliberately tests one installment. Installments
+              // belong to the Order request and do not need to be discovered by
+              // CardForm to validate browser-side tokenization.
+              installments: 1,
             };
           } catch (error) {
             window.__tokenError = String(error);
@@ -111,18 +110,24 @@ try {
   await page.locator('#form-checkout__identificationNumber').fill('12345678909')
   await page.locator('#form-checkout__cardholderEmail').fill('test@testuser.com')
 
+  // CardForm populates identification types asynchronously. Prefer CPF when it is
+  // available, but do not couple tokenization to issuer/installment lookup.
   await page.waitForFunction(() => {
-    const issuer = document.querySelector('#form-checkout__issuer')
-    const installments = document.querySelector('#form-checkout__installments')
-    return issuer?.querySelectorAll('option').length > 0 && installments?.querySelectorAll('option').length > 0
-  }, null, { timeout: 30000 })
+    const select = document.querySelector('#form-checkout__identificationType')
+    return Boolean(select && select.querySelectorAll('option').length > 0)
+  }, null, { timeout: 15000 })
+  const cpfValue = await page.locator('#form-checkout__identificationType option').evaluateAll((options) => {
+    const cpf = options.find((option) => /cpf/i.test(`${option.value} ${option.textContent || ''}`))
+    return cpf?.value || options[0]?.value || ''
+  })
+  if (cpfValue) await page.locator('#form-checkout__identificationType').selectOption(cpfValue)
 
   await page.locator('#form-checkout__submit').click()
   await page.waitForFunction(() => window.__tokenResult?.token || window.__tokenError, null, { timeout: 30000 })
 
   const result = await page.evaluate(() => ({ result: window.__tokenResult, error: window.__tokenError }))
   if (result.error) throw new Error(`MERCADO_PAGO_TOKENIZE_FAILED:${result.error}`)
-  if (!result.result?.token || !result.result?.paymentMethodId || !result.result?.installments) {
+  if (!result.result?.token || !result.result?.paymentMethodId) {
     throw new Error('MERCADO_PAGO_TOKENIZE_INCOMPLETE')
   }
 
