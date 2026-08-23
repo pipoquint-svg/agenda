@@ -1,4 +1,4 @@
-name: Mercado Pago Sandbox Card Gate
+name: Mercado Pago Sandbox Card Provider Gate
 
 on:
   workflow_dispatch:
@@ -12,18 +12,17 @@ permissions:
   contents: read
 
 jobs:
-  card-gate:
-    name: Cartão teste Orders API
+  card-provider-gate:
+    name: Cartão provider sandbox Orders API
     runs-on: ubuntu-latest
     environment: sandbox
-    timeout-minutes: 25
+    timeout-minutes: 12
     env:
       APP_ENV: staging
       MERCADO_PAGO_ENV: sandbox
       ALLOW_REAL_CHARGES: "false"
       ALLOW_REAL_CUSTOMER_DATA: "false"
       MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
-      MERCADO_PAGO_PUBLIC_KEY: ${{ secrets.MERCADO_PAGO_PUBLIC_KEY }}
 
     steps:
       - name: Require explicit sandbox confirmation
@@ -33,188 +32,147 @@ jobs:
           [[ "${{ inputs.confirmation }}" == "SANDBOX" ]] || { echo "Confirmação inválida." >&2; exit 1; }
           [[ "$APP_ENV" == "staging" && "$MERCADO_PAGO_ENV" == "sandbox" ]]
           [[ "$ALLOW_REAL_CHARGES" == "false" && "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]]
-
-      - name: Require test credentials
-        shell: bash
-        run: |
-          set -euo pipefail
           [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]] || { echo "Secret MERCADO_PAGO_ACCESS_TOKEN ausente." >&2; exit 1; }
-          [[ -n "${MERCADO_PAGO_PUBLIC_KEY:-}" ]] || { echo "Secret MERCADO_PAGO_PUBLIC_KEY ausente." >&2; exit 1; }
-          echo "Credenciais de sandbox presentes; valores não serão exibidos."
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install isolated browser harness
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/mp-card-run
-          cp scripts/mp-card-tokenize.mjs /tmp/mp-card-run/mp-card-tokenize.mjs
-          cd /tmp/mp-card-run
-          npm init -y >/dev/null 2>&1
-          npm install --silent playwright@1.55.0
-          npx playwright install --with-deps chromium >/dev/null
-
-      - name: Approved card — tokenize and create Order
+      - name: Approved card APRO — create token and Order
         id: approved
         shell: bash
-        env:
-          CARDHOLDER_NAME: APRO
-          OUTPUT_PATH: /tmp/mp-approved-token.json
         run: |
           set -euo pipefail
-          cd /tmp/mp-card-run
-          node mp-card-tokenize.mjs
+          token_body="$(mktemp)"
+          token_response="$(mktemp)"
+          order_body="$(mktemp)"
+          order_response="$(mktemp)"
+          trap 'rm -f "$token_body" "$token_response" "$order_body" "$order_response"' EXIT
 
-          token="$(jq -r '.token' "$OUTPUT_PATH")"
-          method="$(jq -r '.paymentMethodId' "$OUTPUT_PATH")"
-          installments="$(jq -r '.installments // 1' "$OUTPUT_PATH")"
-          [[ -n "$token" && "$token" != "null" && -n "$method" && "$method" != "null" ]]
+          jq -n '{
+            card_number:"5480832801033311",
+            expiration_month:11,
+            expiration_year:2030,
+            security_code:"123",
+            cardholder:{name:"APRO",identification:{type:"CPF",number:"12345678909"}}
+          }' > "$token_body"
+
+          token_http="$(curl --silent --show-error --output "$token_response" --write-out '%{http_code}' \
+            --request POST 'https://api.mercadopago.com/v1/card_tokens' \
+            --header "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$token_body")"
+          [[ "$token_http" == "200" || "$token_http" == "201" ]] || {
+            echo "Token APRO falhou: HTTP $token_http" >&2
+            jq '{message,error,cause}' "$token_response" >&2 || true
+            exit 1
+          }
+          token="$(jq -r '.id // empty' "$token_response")"
+          [[ -n "$token" ]]
 
           external_ref="sandbox-card-approved-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          idem="sandbox-card-approved-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          body_file="$(mktemp)"
-          response_file="$(mktemp)"
+          jq -n --arg external "$external_ref" --arg token "$token" '{
+            type:"online",
+            processing_mode:"automatic",
+            capture_mode:"automatic",
+            external_reference:$external,
+            total_amount:"50.00",
+            payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},
+            transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$token,installments:1}}]}
+          }' > "$order_body"
 
-          jq -n \
-            --arg external "$external_ref" \
-            --arg token "$token" \
-            --arg method "$method" \
-            --argjson installments "$installments" \
-            '{
-              type:"online",
-              processing_mode:"automatic",
-              capture_mode:"automatic",
-              external_reference:$external,
-              total_amount:"50.00",
-              payer:{email:"test@testuser.com"},
-              transactions:{payments:[{amount:"50.00",payment_method:{id:$method,type:"credit_card",token:$token,installments:$installments}}]}
-            }' > "$body_file"
-
-          http="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' \
+          order_http="$(curl --silent --show-error --output "$order_response" --write-out '%{http_code}' \
             --request POST 'https://api.mercadopago.com/v1/orders' \
             --header "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" \
             --header 'Content-Type: application/json' \
-            --header "X-Idempotency-Key: $idem" \
-            --data-binary "@$body_file")"
-
-          rm -f "$body_file" "$OUTPUT_PATH"
-          if [[ "$http" != "200" && "$http" != "201" ]]; then
-            echo "Order aprovada não criada: HTTP $http" >&2
-            jq '{status,status_detail,errors}' "$response_file" >&2 || true
+            --header "X-Idempotency-Key: $external_ref" \
+            --data-binary "@$order_body")"
+          [[ "$order_http" == "200" || "$order_http" == "201" ]] || {
+            echo "Order APRO falhou: HTTP $order_http" >&2
+            jq '{status,status_detail,errors}' "$order_response" >&2 || true
             exit 1
-          fi
+          }
 
-          order_id="$(jq -r '.id // empty' "$response_file")"
-          status="$(jq -r '.status // .transactions.payments[0].status // empty' "$response_file")"
-          detail="$(jq -r '.status_detail // .transactions.payments[0].status_detail // empty' "$response_file")"
+          order_id="$(jq -r '.id // empty' "$order_response")"
+          status="$(jq -r '.status // .transactions.payments[0].status // empty' "$order_response")"
+          detail="$(jq -r '.status_detail // .transactions.payments[0].status_detail // empty' "$order_response")"
           [[ -n "$order_id" ]]
           [[ "$status" == "processed" ]]
           [[ "$detail" == "accredited" ]]
 
-          get_file="$(mktemp)"
-          get_http="$(curl --silent --show-error --output "$get_file" --write-out '%{http_code}' \
-            --header "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" \
-            "https://api.mercadopago.com/v1/orders/${order_id}")"
-          [[ "$get_http" == "200" ]]
-          [[ "$(jq -r '.id' "$get_file")" == "$order_id" ]]
-          [[ "$(jq -r '.status // .transactions.payments[0].status' "$get_file")" == "processed" ]]
-
           echo "order_id=$order_id" >> "$GITHUB_OUTPUT"
-          rm -f "$response_file" "$get_file"
-          echo "Approved card PASS; token never logged."
+          echo "APRO PASS: processed/accredited; token e cartão não foram impressos."
 
-      - name: Rejected card — tokenize and create Order
-        id: rejected
+      - name: Rejected card OTHE — create token and require provider rejection
         shell: bash
-        env:
-          CARDHOLDER_NAME: OTHE
-          OUTPUT_PATH: /tmp/mp-rejected-token.json
         run: |
           set -euo pipefail
-          cd /tmp/mp-card-run
-          node mp-card-tokenize.mjs
+          token_body="$(mktemp)"
+          token_response="$(mktemp)"
+          order_body="$(mktemp)"
+          order_response="$(mktemp)"
+          trap 'rm -f "$token_body" "$token_response" "$order_body" "$order_response"' EXIT
 
-          token="$(jq -r '.token' "$OUTPUT_PATH")"
-          method="$(jq -r '.paymentMethodId' "$OUTPUT_PATH")"
-          installments="$(jq -r '.installments // 1' "$OUTPUT_PATH")"
-          [[ -n "$token" && "$token" != "null" && -n "$method" && "$method" != "null" ]]
+          jq -n '{
+            card_number:"5480832801033311",
+            expiration_month:11,
+            expiration_year:2030,
+            security_code:"123",
+            cardholder:{name:"OTHE",identification:{type:"CPF",number:"12345678909"}}
+          }' > "$token_body"
+
+          token_http="$(curl --silent --show-error --output "$token_response" --write-out '%{http_code}' \
+            --request POST 'https://api.mercadopago.com/v1/card_tokens' \
+            --header "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$token_body")"
+          [[ "$token_http" == "200" || "$token_http" == "201" ]] || {
+            echo "Token OTHE falhou antes da prova de recusa: HTTP $token_http" >&2
+            jq '{message,error,cause}' "$token_response" >&2 || true
+            exit 1
+          }
+          token="$(jq -r '.id // empty' "$token_response")"
+          [[ -n "$token" ]]
 
           external_ref="sandbox-card-rejected-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          idem="sandbox-card-rejected-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          body_file="$(mktemp)"
-          response_file="$(mktemp)"
+          jq -n --arg external "$external_ref" --arg token "$token" '{
+            type:"online",
+            processing_mode:"automatic",
+            capture_mode:"automatic",
+            external_reference:$external,
+            total_amount:"50.00",
+            payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},
+            transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$token,installments:1}}]}
+          }' > "$order_body"
 
-          jq -n \
-            --arg external "$external_ref" \
-            --arg token "$token" \
-            --arg method "$method" \
-            --argjson installments "$installments" \
-            '{
-              type:"online",
-              processing_mode:"automatic",
-              capture_mode:"automatic",
-              external_reference:$external,
-              total_amount:"50.00",
-              payer:{email:"test@testuser.com"},
-              transactions:{payments:[{amount:"50.00",payment_method:{id:$method,type:"credit_card",token:$token,installments:$installments}}]}
-            }' > "$body_file"
-
-          http="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' \
+          order_http="$(curl --silent --show-error --output "$order_response" --write-out '%{http_code}' \
             --request POST 'https://api.mercadopago.com/v1/orders' \
             --header "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" \
             --header 'Content-Type: application/json' \
-            --header "X-Idempotency-Key: $idem" \
-            --data-binary "@$body_file")"
+            --header "X-Idempotency-Key: $external_ref" \
+            --data-binary "@$order_body")"
 
-          rm -f "$body_file" "$OUTPUT_PATH"
-          if [[ "$http" != "200" && "$http" != "201" ]]; then
-            echo "Order de recusa não criada: HTTP $http" >&2
-            jq '{status,status_detail,errors}' "$response_file" >&2 || true
+          [[ "$order_http" == "402" ]] || {
+            echo "OTHE deveria ser recusado com HTTP 402; recebido HTTP $order_http" >&2
+            jq '{id,status,status_detail,errors}' "$order_response" >&2 || true
             exit 1
-          fi
+          }
+          jq -e '.errors[]? | select(.code == "failed")' "$order_response" >/dev/null || {
+            echo "OTHE foi recusado, mas sem o erro esperado 'failed'." >&2
+            jq '{errors}' "$order_response" >&2 || true
+            exit 1
+          }
+          echo "OTHE PASS: recusa esperada HTTP 402 / failed."
 
-          order_id="$(jq -r '.id // empty' "$response_file")"
-          status="$(jq -r '.status // .transactions.payments[0].status // empty' "$response_file")"
-          detail="$(jq -r '.status_detail // .transactions.payments[0].status_detail // empty' "$response_file")"
-          [[ -n "$order_id" ]]
-          [[ "$status" == "failed" ]]
-          [[ "$detail" == "failed" ]]
-
-          get_file="$(mktemp)"
-          get_http="$(curl --silent --show-error --output "$get_file" --write-out '%{http_code}' \
-            --header "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" \
-            "https://api.mercadopago.com/v1/orders/${order_id}")"
-          [[ "$get_http" == "200" ]]
-          [[ "$(jq -r '.id' "$get_file")" == "$order_id" ]]
-          [[ "$(jq -r '.status // .transactions.payments[0].status' "$get_file")" == "failed" ]]
-
-          echo "order_id=$order_id" >> "$GITHUB_OUTPUT"
-          rm -f "$response_file" "$get_file"
-          echo "Rejected card PASS; token never logged."
-
-      - name: Record sandbox card evidence
+      - name: Record provider-level card evidence
         shell: bash
         run: |
-          set -euo pipefail
           {
-            echo '## Mercado Pago Sandbox Card Gate'
+            echo '## Mercado Pago Sandbox Card Provider Gate'
             echo
             echo '- Environment: `sandbox`'
-            echo '- Real charges allowed: `false`'
-            echo '- Real customer data allowed: `false`'
-            echo '- Card Payment Brick tokenization with test Public Key: `PASS`'
-            echo '- Approved card (`APRO`) via Orders API: `PASS`'
-            echo '- Rejected card (`OTHE`) via Orders API: `PASS`'
+            echo '- Provider card token endpoint: `PASS`'
+            echo '- Approved card (`APRO`) Orders API: `processed/accredited` — `PASS`'
+            echo '- Rejected card (`OTHE`) Orders API: `HTTP 402 / failed` — `PASS`'
             echo '- Approved Order ID: `${{ steps.approved.outputs.order_id }}`'
-            echo '- Rejected Order ID: `${{ steps.rejected.outputs.order_id }}`'
-            echo '- Card token / raw card data persisted or printed: `NO`'
+            echo '- Raw card/token printed: `NO`'
+            echo '- Real charges/customer data: `NO`'
             echo
-            echo 'Este gate valida cartão comum sem 3DS. Challenge 3DS é testado em gate separado.'
+            echo '> Scope: PROVIDER_SANDBOX. This does not approve browser tokenization, 3DS or full client journey.'
           } >> "$GITHUB_STEP_SUMMARY"
