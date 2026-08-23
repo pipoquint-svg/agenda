@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     const secret = requireInternal(req)
     const client = adminClient()
     const workerId = `edge:${crypto.randomUUID()}`
-    const transactionalEmailEnabled = (Deno.env.get('TRANSACTIONAL_EMAIL_ENABLED') ?? '').trim().toLowerCase() === 'true'
+    const transactionalEmailWorkerEnabled = (Deno.env.get('TRANSACTIONAL_EMAIL_WORKER_ENABLED') ?? '').trim().toLowerCase() === 'true'
 
     await client.rpc('release_stale_integration_jobs', { p_stale_after_seconds: 300 })
 
@@ -101,10 +101,10 @@ Deno.serve(async (req) => {
       'GOOGLE_APPOINTMENT_SYNC',
       'KOMMO_APPOINTMENT_SYNC',
     ]
-    // Confirmation-message jobs already exist in the outbox. Do not claim them until
-    // transactional email is explicitly enabled, otherwise a disabled provider could
-    // consume a notification that still needs to be delivered later.
-    if (transactionalEmailEnabled) claimJobTypes.push('APPOINTMENT_CONFIRMED_MESSAGE')
+    // Provider availability and worker consumption are intentionally separate gates.
+    // This lets us prove one synthetic allowlisted email by calling email-send directly
+    // while leaving all pending confirmation jobs untouched in the outbox.
+    if (transactionalEmailWorkerEnabled) claimJobTypes.push('APPOINTMENT_CONFIRMED_MESSAGE')
 
     const { data: jobs, error: claimError } = await client.rpc('claim_integration_jobs', {
       p_worker_id: workerId,
