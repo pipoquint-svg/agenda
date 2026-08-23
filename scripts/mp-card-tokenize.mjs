@@ -73,7 +73,7 @@ const html = `<!doctype html>
 </body>
 </html>`
 
-const server = http.createServer((req, res) => {
+const server = http.createServer((_req, res) => {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
   res.end(html)
 })
@@ -81,6 +81,17 @@ const server = http.createServer((req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const address = server.address()
 if (!address || typeof address === 'string') throw new Error('LOCAL_SERVER_FAILED')
+
+async function fillSecureFrame(page, containerId, value) {
+  const iframe = page.locator(`#${containerId} iframe`).first()
+  await iframe.waitFor({ state: 'attached', timeout: 30000 })
+  const frame = iframe.contentFrame()
+  const input = frame.locator('input:visible').first()
+  await input.waitFor({ state: 'visible', timeout: 30000 })
+  await input.click()
+  await input.pressSequentially(value, { delay: 20 })
+  await input.press('Tab').catch(() => undefined)
+}
 
 const browser = await chromium.launch({ headless: true })
 try {
@@ -90,36 +101,11 @@ try {
   const mountError = await page.evaluate(() => window.__tokenError)
   if (mountError) throw new Error(`MERCADO_PAGO_FORM_MOUNT_FAILED:${mountError}`)
 
-  const secureValues = [
-    { hints: ['Número do cartão', 'card number', 'cardNumber'], value: '5480832801033311' },
-    { hints: ['MM/YY', 'expiration', 'expirationDate'], value: '11/30' },
-    { hints: ['Código de segurança', 'security', 'securityCode', 'CVV'], value: '123' },
-  ]
-
-  for (const secure of secureValues) {
-    let filled = false
-    for (let attempt = 0; attempt < 40 && !filled; attempt += 1) {
-      for (const frame of page.frames()) {
-        const inputs = frame.locator('input')
-        const count = await inputs.count().catch(() => 0)
-        for (let index = 0; index < count; index += 1) {
-          const input = inputs.nth(index)
-          const placeholder = (await input.getAttribute('placeholder').catch(() => '')) || ''
-          const name = (await input.getAttribute('name').catch(() => '')) || ''
-          const id = (await input.getAttribute('id').catch(() => '')) || ''
-          const haystack = `${placeholder} ${name} ${id}`.toLowerCase()
-          if (secure.hints.some((hint) => haystack.includes(hint.toLowerCase()))) {
-            await input.fill(secure.value)
-            filled = true
-            break
-          }
-        }
-        if (filled) break
-      }
-      if (!filled) await page.waitForTimeout(250)
-    }
-    if (!filled) throw new Error(`SECURE_CARD_FIELD_NOT_FOUND:${secure.hints[0]}`)
-  }
+  // Target the SDK-owned iframe inside each explicit field container. Never scan
+  // generic inputs: MercadoPago.js also creates hidden expirationMonth/year inputs.
+  await fillSecureFrame(page, 'form-checkout__cardNumber', '5480832801033311')
+  await fillSecureFrame(page, 'form-checkout__expirationDate', '1130')
+  await fillSecureFrame(page, 'form-checkout__securityCode', '123')
 
   await page.locator('#form-checkout__cardholderName').fill(cardholderName)
   await page.locator('#form-checkout__identificationNumber').fill('12345678909')
