@@ -49,6 +49,33 @@ jobs:
         with:
           version: 2.111.0
 
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Reject known non-authoritative migration versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          legacy_versions=(
+            20260823041755
+            20260823041955
+            20260823042303
+            20260823042438
+            20260823043540
+            20260823043647
+            20260823043717
+            20260823111016
+          )
+          for version in "${legacy_versions[@]}"; do
+            if [[ "$(psql "$SANDBOX_DATABASE_URL" -Atqc "select count(*) from supabase_migrations.schema_migrations where version='${version}'")" != "0" ]]; then
+              echo "Migration version drift detected in sandbox: ${version}" >&2
+              exit 1
+            fi
+          done
+
       - name: Dry-run migrations
         shell: bash
         run: supabase db push --db-url "$SANDBOX_DATABASE_URL" --include-all --dry-run
@@ -56,6 +83,20 @@ jobs:
       - name: Apply migrations
         shell: bash
         run: supabase db push --db-url "$SANDBOX_DATABASE_URL" --include-all
+
+      - name: Verify repository migrations are recorded remotely
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r file; do
+            version="$(basename "$file" | cut -d_ -f1)"
+            if [[ "$(psql "$SANDBOX_DATABASE_URL" -Atqc "select count(*) from supabase_migrations.schema_migrations where version='${version}'")" != "1" ]]; then
+              echo "Migration not recorded in sandbox: ${version} ($(basename "$file"))" >&2
+              missing=1
+            fi
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+          test "$missing" = 0
 
       - name: Deploy V1 core Edge Functions
         shell: bash
@@ -120,6 +161,7 @@ jobs:
             echo "- Project: \`${SUPABASE_PROJECT_REF}\`"
             echo '- Dados reais permitidos: `false`'
             echo '- Cobranças reais permitidas: `false`'
+            echo '- Migration history: validado contra versões de `main`'
             echo '- Google provider: não implantado por este workflow'
             echo '- Kommo provider: não habilitado por este workflow'
             echo '- Mercado Pago provider: não alterado por este workflow'
