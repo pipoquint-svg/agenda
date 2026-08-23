@@ -5,7 +5,6 @@ import {
   listCheckoutPackages,
   loadCheckoutContext,
   selectCheckoutPackage,
-  setBookingRecoveryContact,
   submitBookingCheckout,
   type AppointmentCheckoutResult,
   type BookingField,
@@ -118,7 +117,6 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [taxId, setTaxId] = useState('')
-  const [recoveryEnabled, setRecoveryEnabled] = useState(true)
   const [binding, setBinding] = useState(false)
   const [customerBound, setCustomerBound] = useState(false)
   const [packages, setPackages] = useState<CheckoutPackage[]>([])
@@ -141,14 +139,6 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
       .finally(() => active && setLoading(false))
     return () => { active = false }
   }, [hold.checkout_hold_token])
-
-  useEffect(() => {
-    if (!recoveryEnabled || digits(phone).length < 10 || result) return
-    const timer = window.setTimeout(() => {
-      setBookingRecoveryContact(hold.checkout_hold_token, phone, true).catch(() => undefined)
-    }, 600)
-    return () => window.clearTimeout(timer)
-  }, [hold.checkout_hold_token, phone, recoveryEnabled, result])
 
   const requiredAnswersReady = useMemo(() => {
     if (!context) return false
@@ -175,7 +165,7 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
         email,
         phone,
         taxId,
-        recoveryEnabled,
+        recoveryEnabled: false,
       })
       setCustomerBound(true)
       const available = await listCheckoutPackages(hold.checkout_hold_token)
@@ -266,12 +256,8 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
           <label>WhatsApp *<input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" autoComplete="tel" /></label>
           <label>CPF/CNPJ{context.require_tax_id ? ' *' : ''}<input value={taxId} onChange={(event) => setTaxId(event.target.value)} inputMode="numeric" /></label>
         </div>
-        <label className="checkout-checkbox recovery-optin">
-          <input type="checkbox" checked={recoveryEnabled} onChange={(event) => setRecoveryEnabled(event.target.checked)} />
-          <span>Se eu não concluir, pode me enviar pelo WhatsApp um link para retomar minha escolha.</span>
-        </label>
         {!customerBound ? (
-          <button className="primary" type="button" disabled={binding} onClick={saveCustomer}>{binding ? 'Salvando…' : 'Continuar'}</button>
+          <button className="primary" type="button" disabled={binding || digits(phone).length < 10} onClick={saveCustomer}>{binding ? 'Salvando…' : 'Continuar'}</button>
         ) : <div className="form-alert success">Dados vinculados ao horário protegido.</div>}
       </div>
 
