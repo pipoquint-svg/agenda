@@ -59,6 +59,101 @@ function sanitizeOrder(raw: Record<string, unknown>) {
   }
 }
 
+async function createOrderFromToken(token: string) {
+  const externalReference = `blacksheep-card-staging-${crypto.randomUUID()}`
+  const orderBody = {
+    type: 'online',
+    processing_mode: 'automatic',
+    capture_mode: 'automatic',
+    external_reference: externalReference,
+    total_amount: '50.00',
+    payer: {
+      email: 'test@testuser.com',
+      identification: { type: 'CPF', number: '12345678909' },
+    },
+    transactions: {
+      payments: [{
+        amount: '50.00',
+        payment_method: {
+          id: 'master',
+          type: 'credit_card',
+          token,
+          installments: 1,
+        },
+      }],
+    },
+  }
+
+  const providerResponse = await fetch('https://api.mercadopago.com/v1/orders', {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
+      'content-type': 'application/json',
+      'accept': 'application/json',
+      'x-idempotency-key': externalReference,
+    },
+    body: JSON.stringify(orderBody),
+  })
+
+  const providerRaw = await providerResponse.json().catch(() => ({})) as Record<string, unknown>
+  if (!providerResponse.ok) {
+    return {
+      ok: false,
+      http_status: 422,
+      error: { code: 'MERCADO_PAGO_ORDER_REJECTED', provider: safeProviderError(providerResponse.status, providerRaw) },
+    }
+  }
+
+  return { ok: true, http_status: 200, provider: sanitizeOrder(providerRaw) }
+}
+
+async function runServerSideCardProbe(scenario: 'APRO' | 'OTHE') {
+  const tokenBody = {
+    card_number: '5480832801033311',
+    expiration_month: 11,
+    expiration_year: 2030,
+    security_code: '123',
+    cardholder: {
+      name: scenario,
+      identification: { type: 'CPF', number: '12345678909' },
+    },
+  }
+
+  const tokenResponse = await fetch('https://api.mercadopago.com/v1/card_tokens', {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
+      'content-type': 'application/json',
+      'accept': 'application/json',
+    },
+    body: JSON.stringify(tokenBody),
+  })
+
+  const tokenRaw = await tokenResponse.json().catch(() => ({})) as Record<string, unknown>
+  if (!tokenResponse.ok) {
+    return {
+      ok: false,
+      stage: 'card_token',
+      error: safeProviderError(tokenResponse.status, tokenRaw),
+    }
+  }
+
+  const tokenId = typeof tokenRaw.id === 'string' ? tokenRaw.id : ''
+  if (!tokenId) return { ok: false, stage: 'card_token', error: { code: 'TOKEN_ID_MISSING' } }
+
+  const orderResult = await createOrderFromToken(tokenId)
+  return {
+    ...orderResult,
+    probe: {
+      scenario,
+      token_created: true,
+      raw_card_logged: false,
+      amount: '50.00',
+      payment_method_id: 'master',
+    },
+  }
+}
+
 Deno.serve(async (req: Request) => {
   try {
     assertSandbox()
@@ -67,6 +162,18 @@ Deno.serve(async (req: Request) => {
 
     const url = new URL(req.url)
     const api = url.searchParams.get('api')
+
+    if (req.method === 'GET' && api === 'probe-card') {
+      if (url.searchParams.get('confirmation') !== 'SANDBOX') {
+        return new Response(JSON.stringify({ error: { code: 'SANDBOX_CONFIRMATION_REQUIRED' } }), { status: 400, headers: jsonHeaders })
+      }
+      const scenario = url.searchParams.get('scenario')
+      if (scenario !== 'APRO' && scenario !== 'OTHE') {
+        return new Response(JSON.stringify({ error: { code: 'TEST_SCENARIO_INVALID' } }), { status: 400, headers: jsonHeaders })
+      }
+      const result = await runServerSideCardProbe(scenario)
+      return new Response(JSON.stringify(result), { status: result.ok ? 200 : 422, headers: jsonHeaders })
+    }
 
     if (req.method === 'GET' && api === 'config') {
       return new Response(JSON.stringify({
@@ -87,7 +194,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({
         ok: true,
         marker: 'MP_CARD_STAGING_READY',
-        message: 'Use the visual staging frontend. API is healthy.',
+        message: 'Sandbox card API is healthy.',
         config: `${url.origin}${url.pathname}?api=config`,
       }), { status: 200, headers: jsonHeaders })
     }
@@ -115,50 +222,11 @@ Deno.serve(async (req: Request) => {
     if (paymentMethodId !== 'master') throw new Error('CARD_PAYMENT_METHOD_INVALID')
     if (!Number.isInteger(installments) || installments !== 1) throw new Error('CARD_INSTALLMENTS_INVALID')
 
-    const externalReference = `blacksheep-card-staging-${crypto.randomUUID()}`
-    const orderBody = {
-      type: 'online',
-      processing_mode: 'automatic',
-      capture_mode: 'automatic',
-      external_reference: externalReference,
-      total_amount: '50.00',
-      payer: {
-        email: 'test@testuser.com',
-        identification: { type: 'CPF', number: '12345678909' },
-      },
-      transactions: {
-        payments: [{
-          amount: '50.00',
-          payment_method: {
-            id: 'master',
-            type: 'credit_card',
-            token,
-            installments: 1,
-          },
-        }],
-      },
-    }
-
-    const providerResponse = await fetch('https://api.mercadopago.com/v1/orders', {
-      method: 'POST',
-      headers: {
-        'authorization': `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
-        'content-type': 'application/json',
-        'accept': 'application/json',
-        'x-idempotency-key': externalReference,
-      },
-      body: JSON.stringify(orderBody),
+    const result = await createOrderFromToken(token)
+    return new Response(JSON.stringify(result.ok ? { ok: true, provider: result.provider } : result), {
+      status: result.http_status,
+      headers: jsonHeaders,
     })
-
-    const providerRaw = await providerResponse.json().catch(() => ({})) as Record<string, unknown>
-    if (!providerResponse.ok) {
-      return new Response(JSON.stringify({
-        ok: false,
-        error: { code: 'MERCADO_PAGO_ORDER_REJECTED', provider: safeProviderError(providerResponse.status, providerRaw) },
-      }), { status: 422, headers: jsonHeaders })
-    }
-
-    return new Response(JSON.stringify({ ok: true, provider: sanitizeOrder(providerRaw) }), { status: 200, headers: jsonHeaders })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'UNKNOWN_ERROR'
     const status = message.startsWith('MISSING_ENV') ? 503 : 400
