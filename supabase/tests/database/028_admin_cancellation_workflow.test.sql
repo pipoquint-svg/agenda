@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(14);
+select plan(15);
 
 insert into public.customers(id,name,email)
 values ('97500000-0000-0000-0000-000000000001','Cancellation Customer','cancel@example.com');
