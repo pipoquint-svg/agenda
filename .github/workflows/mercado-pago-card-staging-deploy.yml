@@ -1,0 +1,102 @@
+name: Mercado Pago Card HTTPS Staging Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/mercado-pago-card-staging/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/mercado-pago-card-staging-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy card staging page
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 15
+    env:
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      MERCADO_PAGO_PUBLIC_KEY: ${{ secrets.MERCADO_PAGO_PUBLIC_KEY }}
+      APP_ENV: staging
+      MERCADO_PAGO_ENV: sandbox
+      ALLOW_REAL_CHARGES: 'false'
+      ALLOW_REAL_CUSTOMER_DATA: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require sandbox credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SUPABASE_ACCESS_TOKEN MERCADO_PAGO_ACCESS_TOKEN MERCADO_PAGO_PUBLIC_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "$name ausente no environment sandbox" >&2
+              exit 1
+            fi
+          done
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Configure sandbox-only Edge secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase secrets set \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
+            MERCADO_PAGO_PUBLIC_KEY="$MERCADO_PAGO_PUBLIC_KEY" \
+            MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
+            APP_ENV="$APP_ENV" \
+            ALLOW_REAL_CHARGES="$ALLOW_REAL_CHARGES" \
+            ALLOW_REAL_CUSTOMER_DATA="$ALLOW_REAL_CUSTOMER_DATA"
+
+      - name: Deploy HTTPS card staging function
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy mercado-pago-card-staging \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --use-api
+
+      - name: Smoke test HTTPS page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/mercado-pago-card-staging"
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --location --output "$body" --write-out '%{http_code}' "$url")"
+          if [[ "$status" != "200" ]]; then
+            echo "Staging page returned HTTP $status" >&2
+            cat "$body"
+            exit 1
+          fi
+          if ! grep -q 'MP_CARD_STAGING_READY' "$body"; then
+            echo "Staging marker missing" >&2
+            exit 1
+          fi
+          echo "HTTPS staging page is online: $url"
+
+      - name: Record staging URL
+        shell: bash
+        run: |
+          {
+            echo '## Mercado Pago Card HTTPS Staging'
+            echo
+            echo "- URL: https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/mercado-pago-card-staging"
+            echo '- Provider: Mercado Pago Orders API'
+            echo '- Amount: R$ 50,00 fixed'
+            echo '- Real charges: disabled'
+            echo '- Real customer data: disabled'
+            echo '- Indexing: noindex/nofollow'
+          } >> "$GITHUB_STEP_SUMMARY"
