@@ -41,14 +41,6 @@ Deno.serve(async (req) => {
         rpcName = 'public_get_checkout_context'
         args = { p_checkout_hold_token: token(body?.checkout_hold_token, 'CHECKOUT_HOLD_TOKEN_REQUIRED') }
         break
-      case 'SET_RECOVERY_CONTACT':
-        rpcName = 'set_checkout_hold_recovery_contact'
-        args = {
-          p_checkout_hold_token: token(body?.checkout_hold_token, 'CHECKOUT_HOLD_TOKEN_REQUIRED'),
-          p_phone: typeof body?.phone === 'string' ? body.phone : '',
-          p_enabled: body?.enabled !== false,
-        }
-        break
       case 'BIND_CUSTOMER':
         rpcName = 'public_bind_checkout_customer'
         args = {
@@ -57,7 +49,7 @@ Deno.serve(async (req) => {
           p_email: typeof body?.email === 'string' ? body.email : '',
           p_phone: typeof body?.phone === 'string' ? body.phone : '',
           p_tax_id: typeof body?.tax_id === 'string' && body.tax_id.trim() ? body.tax_id.trim() : null,
-          p_recovery_enabled: body?.recovery_enabled !== false,
+          p_recovery_enabled: false,
         }
         break
       case 'LIST_PACKAGES':
@@ -75,10 +67,6 @@ Deno.serve(async (req) => {
         rpcName = 'public_clear_checkout_hour_package'
         args = { p_checkout_hold_token: token(body?.checkout_hold_token, 'CHECKOUT_HOLD_TOKEN_REQUIRED') }
         break
-      case 'RECOVERY_CONTEXT':
-        rpcName = 'get_checkout_hold_resume_context'
-        args = { p_recovery_token: token(body?.recovery_token, 'RECOVERY_TOKEN_REQUIRED') }
-        break
       default:
         throw new Error('CHECKOUT_ACTION_INVALID')
     }
@@ -88,7 +76,7 @@ Deno.serve(async (req) => {
     return response({ data })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CHECKOUT_ACTION_FAILED'
-    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|CHECKOUT_ACTION_INVALID|CHECKOUT_HOLD_TOKEN_REQUIRED|CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_HOLD_NOT_FOUND|CHECKOUT_CUSTOMER_REQUIRED|CHECKOUT_CUSTOMER_MISSING|CUSTOMER_NAME_INVALID|CUSTOMER_EMAIL_INVALID|CUSTOMER_PHONE_INVALID|CUSTOMER_TAX_ID_INVALID|CUSTOMER_IDENTITY_AMBIGUOUS|CUSTOMER_IDENTITY_CONFLICT|RECOVERY_PHONE_INVALID|RECOVERY_TOKEN_REQUIRED|RECOVERY_TOKEN_INVALID_OR_EXPIRED|HOUR_PACKAGE_NOT_FOUND|HOUR_PACKAGE_NOT_USABLE|HOUR_PACKAGE_INSUFFICIENT_BALANCE)/)?.[1] ?? code.split(':')[0]
+    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|CHECKOUT_ACTION_INVALID|CHECKOUT_HOLD_TOKEN_REQUIRED|CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_HOLD_NOT_FOUND|CHECKOUT_CUSTOMER_REQUIRED|CHECKOUT_CUSTOMER_MISSING|CUSTOMER_NAME_INVALID|CUSTOMER_EMAIL_INVALID|CUSTOMER_PHONE_INVALID|CUSTOMER_TAX_ID_INVALID|CUSTOMER_IDENTITY_AMBIGUOUS|CUSTOMER_IDENTITY_CONFLICT|HOUR_PACKAGE_NOT_FOUND|HOUR_PACKAGE_NOT_USABLE|HOUR_PACKAGE_INSUFFICIENT_BALANCE)/)?.[1] ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : publicCode === 'CHECKOUT_HOLD_NOT_ACTIVE' ? 409
