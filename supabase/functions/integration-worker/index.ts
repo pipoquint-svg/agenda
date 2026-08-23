@@ -29,6 +29,22 @@ async function invokeFunction<T = Record<string, unknown>>(name: string, secret:
   return JSON.parse(text) as T
 }
 
+async function discardStaleJob(
+  client: ReturnType<typeof adminClient>,
+  job: any,
+  workerId: string,
+  currentVersion: number | undefined,
+  missingVersionCode: string,
+): Promise<void> {
+  if (!Number.isInteger(currentVersion)) throw new Error(missingVersionCode)
+  const { error: discardError } = await client.rpc('discard_integration_job_stale', {
+    p_job_id: job.id,
+    p_worker_id: workerId,
+    p_current_version: currentVersion,
+  })
+  if (discardError) throw new Error(`INTEGRATION_JOB_STALE_DISCARD_FAILED:${discardError.message}`)
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
@@ -79,14 +95,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Kommo is intentionally not claimed yet. Its provider adapter remains disabled
-    // until the private integration/account spike is completed. Direct WhatsApp jobs
-    // are no longer part of the V1 worker contract.
+    // Kommo jobs are safe to claim even when the provider setting is disabled: jobs are
+    // only enqueued while enabled=true and kommo-sync itself fails closed on configuration.
     const { data: jobs, error: claimError } = await client.rpc('claim_integration_jobs', {
       p_worker_id: workerId,
       p_job_types: [
         'GOOGLE_CALENDAR_SYNC',
         'GOOGLE_APPOINTMENT_SYNC',
+        'KOMMO_APPOINTMENT_SYNC',
       ],
       p_limit: 10,
     })
@@ -111,13 +127,40 @@ Deno.serve(async (req) => {
             { appointment_id: job.entity_id, entity_version: job.entity_version },
           )
           if (result.stale) {
-            if (!Number.isInteger(result.current_version)) throw new Error('GOOGLE_APPOINTMENT_SYNC_STALE_VERSION_MISSING')
-            const { error: discardError } = await client.rpc('discard_integration_job_stale', {
-              p_job_id: job.id,
-              p_worker_id: workerId,
-              p_current_version: result.current_version,
-            })
-            if (discardError) throw new Error(`INTEGRATION_JOB_STALE_DISCARD_FAILED:${discardError.message}`)
+            await discardStaleJob(
+              client,
+              job,
+              workerId,
+              result.current_version,
+              'GOOGLE_APPOINTMENT_SYNC_STALE_VERSION_MISSING',
+            )
+            discardedStale += 1
+            continue
+          }
+        } else if (job.job_type === 'KOMMO_APPOINTMENT_SYNC') {
+          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) {
+            throw new Error('KOMMO_APPOINTMENT_SYNC_VERSION_REQUIRED')
+          }
+          const eventKind = typeof job.payload_json?.event_kind === 'string'
+            ? job.payload_json.event_kind
+            : 'UPDATED'
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>(
+            'kommo-sync',
+            secret,
+            {
+              appointment_id: job.entity_id,
+              entity_version: job.entity_version,
+              event_kind: eventKind,
+            },
+          )
+          if (result.stale) {
+            await discardStaleJob(
+              client,
+              job,
+              workerId,
+              result.current_version,
+              'KOMMO_APPOINTMENT_SYNC_STALE_VERSION_MISSING',
+            )
             discardedStale += 1
             continue
           }
