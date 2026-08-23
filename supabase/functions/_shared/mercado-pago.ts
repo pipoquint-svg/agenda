@@ -17,6 +17,17 @@ export type MercadoPagoPaymentSnapshot = {
       ticket_url?: string | null
     } | null
   } | null
+  three_ds_info?: {
+    external_resource_url?: string | null
+    creq?: string | null
+  } | null
+}
+
+export type MercadoPagoExpectedIntent = {
+  transactionId: string
+  cashAmount: number | string
+  method: 'PIX' | 'CARD'
+  providerPaymentMethodId?: string | null
 }
 
 function hexToArrayBuffer(hex: string): ArrayBuffer {
@@ -25,6 +36,12 @@ function hexToArrayBuffer(hex: string): ArrayBuffer {
   const out = new Uint8Array(buffer)
   for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
   return buffer
+}
+
+function moneyToCents(value: number | string | null | undefined): number {
+  const amount = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(amount)) throw new Error('MERCADO_PAGO_PAYMENT_AMOUNT_INVALID')
+  return Math.round(amount * 100)
 }
 
 export function parseMercadoPagoSignature(value: string): { ts: string; v1: string } {
@@ -89,6 +106,9 @@ export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): Mercad
   const transactionData = poi?.transaction_data && typeof poi.transaction_data === 'object'
     ? poi.transaction_data as Record<string, unknown>
     : null
+  const threeDs = raw.three_ds_info && typeof raw.three_ds_info === 'object'
+    ? raw.three_ds_info as Record<string, unknown>
+    : null
 
   const text = (value: unknown): string | null => typeof value === 'string' && value ? value : value != null ? String(value) : null
   const amount = typeof raw.transaction_amount === 'number' ? raw.transaction_amount : Number(raw.transaction_amount)
@@ -110,6 +130,42 @@ export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): Mercad
         ticket_url: text(transactionData.ticket_url),
       },
     } : undefined,
+    three_ds_info: threeDs ? {
+      external_resource_url: text(threeDs.external_resource_url),
+      creq: text(threeDs.creq),
+    } : undefined,
+  }
+}
+
+export function assertMercadoPagoPaymentMatchesIntent(
+  snapshot: MercadoPagoPaymentSnapshot,
+  expected: MercadoPagoExpectedIntent,
+): void {
+  if (!snapshot.id) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISSING')
+  if (!expected.transactionId || snapshot.external_reference !== expected.transactionId) {
+    throw new Error('MERCADO_PAGO_EXTERNAL_REFERENCE_MISMATCH')
+  }
+  if (moneyToCents(snapshot.transaction_amount) !== moneyToCents(expected.cashAmount)) {
+    throw new Error('MERCADO_PAGO_PAYMENT_AMOUNT_MISMATCH')
+  }
+
+  if (expected.method === 'PIX') {
+    if ((snapshot.payment_method_id ?? '').toLowerCase() !== 'pix') {
+      throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
+    }
+    return
+  }
+
+  if ((snapshot.payment_method_id ?? '').toLowerCase() === 'pix') {
+    throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
+  }
+  if (snapshot.payment_type_id && snapshot.payment_type_id.toLowerCase() !== 'credit_card') {
+    throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
+  }
+  if (expected.providerPaymentMethodId
+    && snapshot.payment_method_id
+    && snapshot.payment_method_id.toLowerCase() !== expected.providerPaymentMethodId.toLowerCase()) {
+    throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
   }
 }
 
