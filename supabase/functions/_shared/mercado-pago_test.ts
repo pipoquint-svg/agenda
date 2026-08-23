@@ -1,6 +1,7 @@
 import {
   assertMercadoPagoPaymentMatchesIntent,
   buildMercadoPagoWebhookManifest,
+  mercadoPagoPaymentStorageSnapshot,
   normalizeMercadoPagoPaymentStatus,
   payerIdentification,
   sanitizeMercadoPagoPayment,
@@ -50,7 +51,7 @@ Deno.test('Mercado Pago statuses normalize conservatively', () => {
   assert(normalizeMercadoPagoPaymentStatus('unknown_future_status') === 'PENDING', 'unknown should fail conservative')
 })
 
-Deno.test('payment snapshot excludes raw payer/card data and keeps PIX/3DS instructions only', () => {
+Deno.test('client snapshot excludes raw payer/card data and storage snapshot drops transient PIX/3DS instructions', () => {
   const snapshot = sanitizeMercadoPagoPayment({
     id: 123,
     status: 'pending',
@@ -64,12 +65,19 @@ Deno.test('payment snapshot excludes raw payer/card data and keeps PIX/3DS instr
     point_of_interaction: { transaction_data: { qr_code: 'PIX-CODE', qr_code_base64: 'BASE64', ticket_url: 'https://example.test/pix' } },
     three_ds_info: { external_resource_url: 'https://acs.example.test/challenge', creq: 'challenge-request' },
   })
-  const serialized = JSON.stringify(snapshot)
+  const clientSerialized = JSON.stringify(snapshot)
   assert(snapshot.id === '123', 'provider id')
-  assert(snapshot.point_of_interaction?.transaction_data?.qr_code === 'PIX-CODE', 'pix data')
-  assert(snapshot.three_ds_info?.creq === 'challenge-request', '3DS challenge data')
-  assert(!serialized.includes('secret@example.com'), 'payer must not be persisted in snapshot')
-  assert(!serialized.includes('123456'), 'card digits must not be persisted in snapshot')
+  assert(snapshot.point_of_interaction?.transaction_data?.qr_code === 'PIX-CODE', 'client still receives pix instructions')
+  assert(snapshot.three_ds_info?.creq === 'challenge-request', 'client still receives 3DS challenge data')
+  assert(!clientSerialized.includes('secret@example.com'), 'payer must not be exposed in sanitized snapshot')
+  assert(!clientSerialized.includes('123456'), 'card digits must not be exposed in sanitized snapshot')
+
+  const stored = JSON.stringify(mercadoPagoPaymentStorageSnapshot(snapshot))
+  assert(stored.includes('pending_challenge'), 'storage keeps provider status evidence')
+  assert(!stored.includes('PIX-CODE'), 'storage must not retain PIX copy/paste payload')
+  assert(!stored.includes('BASE64'), 'storage must not retain PIX QR image')
+  assert(!stored.includes('challenge-request'), 'storage must not retain 3DS creq')
+  assert(!stored.includes('acs.example.test'), 'storage must not retain 3DS challenge URL')
 })
 
 Deno.test('provider payment must match internal intent by reference, amount and method', () => {
