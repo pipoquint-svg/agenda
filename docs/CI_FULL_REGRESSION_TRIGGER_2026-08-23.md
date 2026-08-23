@@ -1,0 +1,1 @@
+Full regression checkpoint for autonomous backend hardening. This file is informational; the authoritative result is the Database Core workflow.
