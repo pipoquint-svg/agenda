@@ -37,6 +37,11 @@ verify_jwt = false
 [functions.kommo-sync]
 verify_jwt = false
 
+# Internal transactional-email adapter. It requires x-internal-secret and reads the
+# provider API key only from the Edge secret environment.
+[functions.email-send]
+verify_jwt = false
+
 [functions.integration-worker]
 verify_jwt = false
 
