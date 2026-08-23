@@ -1,4 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
   assertMercadoPagoPaymentMatchesIntent,
   mercadoPagoPaymentStorageSnapshot,
@@ -24,19 +25,32 @@ function requiredEnv(name: string): string {
   return value
 }
 
+function providerRuntime() {
+  return mercadoPagoRuntime({
+    environment: Deno.env.get('MERCADO_PAGO_ENV'),
+    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
+    allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
+    creatingCharge: false,
+  })
+}
+
 async function getProviderOrder(orderId: string): Promise<Record<string, unknown>> {
+  const runtime = providerRuntime()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12000)
   try {
     const res = await fetch(`https://api.mercadopago.com/v1/orders/${encodeURIComponent(orderId)}`, {
       headers: {
-        authorization: `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
+        authorization: `Bearer ${runtime.accessToken}`,
         accept: 'application/json',
       },
       signal: controller.signal,
     })
     if (!res.ok) throw new Error(`MERCADO_PAGO_LOOKUP_FAILED:${res.status}`)
     return await res.json() as Record<string, unknown>
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('MERCADO_PAGO_PROVIDER_TIMEOUT')
+    throw error
   } finally {
     clearTimeout(timer)
   }
@@ -64,9 +78,6 @@ async function tryImmediateConfirmationEmail(
       .maybeSingle()
     if (appointmentError || !appointment || appointment.status !== 'CONFIRMED') return
 
-    // Only an actual confirmation outbox event authorizes this best-effort fast path.
-    // The durable job remains pending until integration-worker consumes it, so any
-    // failure here is retried later. Resend idempotency prevents duplicate delivery.
     const { data: jobs, error: jobError } = await client
       .from('integration_jobs')
       .select('entity_version,payload_json')
@@ -81,7 +92,7 @@ async function tryImmediateConfirmationEmail(
     const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
     const internalSecret = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
     if (!base || !internalSecret) {
-      console.error('Immediate confirmation email skipped: internal runtime not configured', { appointmentId })
+      console.error('Immediate confirmation email skipped: internal runtime not configured')
       return
     }
 
@@ -106,23 +117,14 @@ async function tryImmediateConfirmationEmail(
       })
 
       if (!response.ok) {
-        console.error('Immediate confirmation email failed; durable outbox retained', {
-          appointmentId,
-          status: response.status,
-        })
+        console.error('Immediate confirmation email failed; durable outbox retained', { status: response.status })
         return
       }
-
-      console.log('Immediate confirmation email attempt completed', {
-        appointmentId,
-        entityVersion: appointment.version,
-      })
     } finally {
       clearTimeout(timer)
     }
   } catch (error) {
     console.error('Immediate confirmation email failed; durable outbox retained', {
-      appointmentId,
       code: error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN',
     })
   }
@@ -158,19 +160,20 @@ Deno.serve(async (req) => {
       return json({ ok: true, ignored: 'UNSUPPORTED_EVENT_TYPE' })
     }
 
-    // Fail closed across environments: a live provider event never mutates sandbox,
-    // and a test event never mutates a future production deployment.
-    const mpEnv = Deno.env.get('MERCADO_PAGO_ENV')?.trim().toLowerCase() ?? ''
-    if (mpEnv === 'sandbox' && body.live_mode === true) {
-      console.error('Ignoring live Mercado Pago Order event in sandbox', { dataId, requestId })
+    // Runtime environment and credential class must match before any provider read.
+    const runtime = providerRuntime()
+    if (typeof body.live_mode !== 'boolean') {
+      return json({ ok: true, ignored: 'LIVE_MODE_MISSING' })
+    }
+    if (runtime.environment === 'sandbox' && body.live_mode === true) {
+      console.error('Ignoring live Mercado Pago Order event in sandbox')
       return json({ ok: true, ignored: 'LIVE_EVENT_IN_SANDBOX' })
     }
-    if (mpEnv === 'production' && body.live_mode === false) {
-      console.error('Ignoring Mercado Pago test Order event in production', { dataId, requestId })
+    if (runtime.environment === 'production' && body.live_mode === false) {
+      console.error('Ignoring Mercado Pago test Order event in production')
       return json({ ok: true, ignored: 'TEST_EVENT_IN_PRODUCTION' })
     }
 
-    // The notification is only a signal. Full Order state is always re-fetched.
     const rawOrder = await getProviderOrder(dataId)
     const snapshot = sanitizeMercadoPagoPayment(rawOrder)
     const storedSnapshot = mercadoPagoPaymentStorageSnapshot(snapshot)
@@ -200,10 +203,9 @@ Deno.serve(async (req) => {
       transaction = data ?? null
     }
 
-    // Orders unrelated to Agenda are acknowledged without mutating any booking.
     if (!transaction) return json({ ok: true, ignored: 'ORDER_NOT_MANAGED_BY_AGENDA' })
     if (transaction.method !== 'PIX' && transaction.method !== 'CARD') {
-      console.error('Mercado Pago managed transaction has invalid method', transaction.id)
+      console.error('Mercado Pago managed transaction has invalid method')
       return json({ ok: true, ignored: 'PAYMENT_INTENT_INVALID' })
     }
 
@@ -226,13 +228,7 @@ Deno.serve(async (req) => {
       const code = validationError instanceof Error && validationError.message.startsWith('MERCADO_PAGO_')
         ? validationError.message
         : 'MERCADO_PAGO_PAYMENT_METHOD_MISMATCH'
-      console.error('Mercado Pago Order webhook did not match internal intent', {
-        transactionId: transaction.id,
-        notificationOrderId: dataId,
-        providerOrderId: snapshot.id || null,
-        providerTransactionId: snapshot.provider_transaction_id,
-        code,
-      })
+      console.error('Mercado Pago Order webhook did not match internal intent', { code })
       const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
         p_transaction_id: transaction.id,
         p_provider_payment_id: snapshot.id || dataId,
@@ -240,10 +236,9 @@ Deno.serve(async (req) => {
         p_payload_json: storedSnapshot,
       })
       if (quarantineError) {
-        console.error('Failed to persist Mercado Pago Order mismatch quarantine', quarantineError.message)
+        console.error('Failed to persist Mercado Pago Order mismatch quarantine')
         return json({ error: { code: 'PAYMENT_MISMATCH_QUARANTINE_FAILED' } }, 500)
       }
-      // Signed event is acknowledged to avoid retry storms, but state is never applied.
       return json({ ok: true, ignored: 'PAYMENT_INTENT_MISMATCH' })
     }
 
@@ -260,7 +255,7 @@ Deno.serve(async (req) => {
       p_payload_json: storedSnapshot,
       p_paid_at: snapshot.date_approved,
     })
-    if (error) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${error.message}`)
+    if (error) throw new Error('PAYMENT_STATUS_APPLY_FAILED')
 
     const appointmentId = applied && typeof applied === 'object' && typeof applied.appointment_id === 'string'
       ? applied.appointment_id
@@ -270,8 +265,12 @@ Deno.serve(async (req) => {
     return json({ ok: true, state: applied })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'MERCADO_PAGO_WEBHOOK_FAILED'
-    console.error('Mercado Pago Order webhook processing failed', message)
-    const status = message.startsWith('MISSING_ENV') ? 503 : 500
-    return json({ error: { code: message.split(':')[0] } }, status)
+    const code = message.split(':')[0]
+    console.error('Mercado Pago Order webhook processing failed', { code })
+    const status = code === 'MERCADO_PAGO_ENV_INVALID'
+      || code === 'MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED'
+      || code === 'MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED'
+      || code === 'MISSING_ENV' ? 503 : 500
+    return json({ error: { code } }, status)
   }
 })
