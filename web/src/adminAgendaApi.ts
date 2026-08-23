@@ -94,6 +94,40 @@ export type ChangePolicyPreview = {
   cancellation_penalty_outstanding: number | string
 }
 
+export type AppointmentTimelineEvent = {
+  occurred_at: string
+  source: 'BUSINESS_AUDIT' | 'AUTHORSHIP' | 'TOKEN_EVIDENCE' | string
+  id: string
+  origin: 'CLIENT_TOKEN' | 'ADMIN_UI' | 'SYSTEM_JOB' | 'PROVIDER_WEBHOOK' | string
+  action: string
+  admin_user_id: string | null
+  actor_name: string | null
+  actor_role: string | null
+  actor_permissions: string[] | null
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  reason: string | null
+  ip_address: string | null
+  user_agent: string | null
+  request_id: string | null
+  token_scope: string | null
+  destination_masked: string | null
+  provider: string | null
+  summary: string
+}
+
+export type AppointmentTimeline = {
+  appointment_id: string
+  security: {
+    locked: boolean
+    appointment_locked: boolean
+    appointment_attempt_count: number
+    locked_origin_count: number
+    active_token_count: number
+  }
+  events: AppointmentTimelineEvent[]
+}
+
 export type AmeliaHistoryRecord = {
   id: string
   amelia_booking_id: string
@@ -118,11 +152,14 @@ export class AdminAgendaApiError extends Error {
   }
 }
 
-async function adminRequest(path: string, accessToken: string): Promise<Response> {
+async function adminRequest(path: string, accessToken: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${functionsBaseUrl}/${path}`, {
+    ...init,
     headers: {
       apikey: publicApiKey,
       authorization: `Bearer ${accessToken}`,
+      ...(init?.body ? { 'content-type': 'application/json', 'x-request-id': crypto.randomUUID() } : {}),
+      ...(init?.headers ?? {}),
     },
   })
 
@@ -147,6 +184,32 @@ export async function getAdminAgenda(startAt: string, endAt: string, accessToken
 export async function getAdminAppointment(id: string, accessToken: string): Promise<AppointmentDetailResponse> {
   const params = new URLSearchParams({ action: 'appointment', id })
   return (await adminRequest(`admin-agenda?${params}`, accessToken)).json()
+}
+
+export async function getAppointmentTimeline(id: string, accessToken: string): Promise<AppointmentTimeline> {
+  const params = new URLSearchParams({ action: 'timeline', id })
+  return (await adminRequest(`admin-agenda?${params}`, accessToken)).json()
+}
+
+export async function downloadAppointmentTimeline(id: string, accessToken: string): Promise<void> {
+  const params = new URLSearchParams({ action: 'timeline_export', id })
+  const response = await adminRequest(`admin-agenda?${params}`, accessToken)
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `agenda-${id}-timeline.csv`
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+export async function unlockAppointmentTokenVerification(id: string, reason: string, accessToken: string): Promise<AppointmentTimeline['security']> {
+  return (await adminRequest('admin-agenda', accessToken, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'unlock_token_verification', appointment_id: id, reason }),
+  })).json()
 }
 
 export async function getChangePolicyPreview(id: string, changeType: 'RESCHEDULE' | 'CANCEL', accessToken: string): Promise<ChangePolicyPreview> {
