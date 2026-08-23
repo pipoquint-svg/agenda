@@ -1,0 +1,1 @@
+This one-line checkpoint exists only to trigger pull-request workflows against the current `main` after the autonomous backend hardening batch. It introduces no runtime behavior.
