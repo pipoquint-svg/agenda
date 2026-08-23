@@ -66,3 +66,19 @@ jobs:
             echo '```'
           } > /tmp/evidence.md
           gh issue comment 134 --repo "$REPO" --body-file /tmp/evidence.md
+
+      - name: Record LIVE worker verification failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id='${{ steps.dispatch.outputs.run_id }}'
+          {
+            echo '## Email LIVE — worker OIDC falhou na verificação'
+            echo
+            echo "- Workflow permanente: \`integration-worker-schedule.yml\`"
+            echo "- Run ID observado: \`${run_id:-nenhum}\`"
+            echo "- Run temporário: \`${GITHUB_RUN_ID}\`"
+            echo '- Nenhum cliente é usado nessa prova; fila estava vazia antes do disparo.'
+          } > /tmp/failure.md
+          gh issue comment 134 --repo "$REPO" --body-file /tmp/failure.md
