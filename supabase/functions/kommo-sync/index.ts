@@ -161,11 +161,10 @@ async function recoverInitialLeadForContact(
   // Contact may legitimately have several leads because each reservation is a separate lead.
   // We only reuse an unclaimed pre-booking lead in BlackSheep / CONTATO INICIAL.
   const contact = await kommoJson<any>(baseUrl, token, `/contacts/${contactId}?with=leads`)
-  const leadIds = [...new Set(
-    (contact?._embedded?.leads ?? [])
-      .map((lead: any) => Number(lead?.id))
-      .filter((id: number) => Number.isInteger(id) && id > 0),
-  )]
+  const rawLeadIds: number[] = (contact?._embedded?.leads ?? [])
+    .map((lead: any) => Number(lead?.id))
+    .filter((id: number) => Number.isInteger(id) && id > 0)
+  const leadIds: number[] = [...new Set<number>(rawLeadIds)]
   if (leadIds.length === 0) return null
 
   const { data: mappedRows, error: mappedError } = await client
@@ -174,11 +173,10 @@ async function recoverInitialLeadForContact(
     .in('kommo_lead_id', leadIds)
   if (mappedError) throw new Error('KOMMO_APPOINTMENT_LINK_LOOKUP_FAILED')
 
-  const alreadyClaimed = new Set(
-    (mappedRows ?? [])
-      .map((row: any) => Number(row.kommo_lead_id))
-      .filter((id: number) => Number.isInteger(id) && id > 0),
-  )
+  const claimedLeadIds: number[] = (mappedRows ?? [])
+    .map((row: any) => Number(row.kommo_lead_id))
+    .filter((id: number) => Number.isInteger(id) && id > 0)
+  const alreadyClaimed = new Set<number>(claimedLeadIds)
 
   const matches: number[] = []
   for (const leadId of leadIds) {
