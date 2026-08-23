@@ -64,6 +64,35 @@ jobs:
             echo "MERCADO_PAGO_WEBHOOK_SECRET ainda ausente: permitido apenas no primeiro deploy, antes de cadastrar a URL no Mercado Pago."
           fi
 
+      - name: Reject Mercado Pago live credential in sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$MERCADO_PAGO_ACCESS_TOKEN" == TEST-* ]]; then
+            echo "Mercado Pago sandbox credential preflight: TEST prefix accepted."
+            exit 0
+          fi
+
+          status="$(curl --silent --show-error \
+            --output /tmp/mp-user.json \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
+            'https://api.mercadolibre.com/users/me')"
+          if [[ "$status" != "200" ]]; then
+            echo "Não foi possível validar a identidade da credencial Mercado Pago (HTTP $status)." >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          data = json.load(open('/tmp/mp-user.json'))
+          tags = data.get('tags') or []
+          if 'test_user' not in tags:
+              print('Credencial recusada: o environment sandbox não pode publicar token associado a usuário produtivo.')
+              raise SystemExit(1)
+          print('Mercado Pago sandbox credential preflight: test_user confirmado.')
+          PY
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
