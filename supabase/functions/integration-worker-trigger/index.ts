@@ -5,6 +5,7 @@ import {
   GITHUB_WORKER_AUDIENCE,
 } from '../_shared/github-oidc.ts'
 
+const WORKER_TIMEOUT_MS = 20_000
 const GITHUB_JWKS = createRemoteJWKSet(
   new URL('https://token.actions.githubusercontent.com/.well-known/jwks'),
 )
@@ -42,14 +43,29 @@ Deno.serve(async (req) => {
 
     const base = requiredEnv('SUPABASE_URL').replace(/\/$/, '')
     const internalSecret = requiredEnv('INTEGRATION_INTERNAL_SECRET')
-    const response = await fetch(`${base}/functions/v1/integration-worker`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-internal-secret': internalSecret,
-      },
-      body: '{}',
-    })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(`${base}/functions/v1/integration-worker`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-secret': internalSecret,
+        },
+        body: '{}',
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.error('Scheduled integration worker timed out')
+        return json({ ok: false, error: { code: 'INTEGRATION_WORKER_TIMEOUT' } }, 504)
+      }
+      console.error('Scheduled integration worker network failure')
+      return json({ ok: false, error: { code: 'INTEGRATION_WORKER_NETWORK_ERROR' } }, 502)
+    } finally {
+      clearTimeout(timeout)
+    }
 
     const text = await response.text()
     let workerResult: unknown = null
