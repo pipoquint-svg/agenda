@@ -56,6 +56,7 @@
 
 <script>
 const API_BASE = 'https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-card-staging';
+const MERCADO_PAGO_PUBLIC_KEY = 'APP_USR-1e45b5f7-95b1-4a44-b102-8cac95d3d6e8';
 const mount = document.getElementById('mount');
 const result = document.getElementById('result');
 const payButton = document.getElementById('payButton');
@@ -126,10 +127,10 @@ payButton.addEventListener('click', handlePayClick);
   try {
     const configResponse = await fetch(API_BASE + '?api=config', { cache: 'no-store' });
     config = await configResponse.json();
-    if (!configResponse.ok || !config.public_key) throw new Error(config?.error?.code || 'CONFIG_NOT_AVAILABLE');
+    if (!configResponse.ok || !config.order_endpoint) throw new Error(config?.error?.code || 'CONFIG_NOT_AVAILABLE');
     if (!window.MercadoPago) throw new Error('MERCADO_PAGO_SDK_NOT_LOADED');
 
-    mp = new MercadoPago(config.public_key, { locale: 'pt-BR' });
+    mp = new MercadoPago(MERCADO_PAGO_PUBLIC_KEY, { locale: 'pt-BR' });
 
     mp.fields.create('cardNumber', { placeholder: 'Número do cartão' }).mount('cardNumber');
     mp.fields.create('expirationDate', { placeholder: 'MM/AA' }).mount('expirationDate');
