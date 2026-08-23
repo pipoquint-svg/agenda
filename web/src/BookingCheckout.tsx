@@ -165,7 +165,6 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
         email,
         phone,
         taxId,
-        recoveryEnabled: false,
       })
       setCustomerBound(true)
       const available = await listCheckoutPackages(hold.checkout_hold_token)
