@@ -6,8 +6,8 @@ select has_table('public', 'legacy_amelia_import_batches', 'legacy Amelia import
 select has_table('public', 'legacy_amelia_bookings', 'legacy Amelia history table exists');
 
 select ok(
-  has_table_privilege('authenticated', 'public.legacy_amelia_bookings', 'SELECT'),
-  'authenticated role has select privilege (RLS still limits it to admins)'
+  not has_table_privilege('authenticated', 'public.legacy_amelia_bookings', 'SELECT'),
+  'authenticated role cannot select legacy bookings directly; admin access is Edge/backend only'
 );
 
 select ok(
