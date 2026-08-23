@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   preflight:
-    name: Validar acesso Mercado Pago Payments
+    name: Validar acesso Mercado Pago Orders
     runs-on: ubuntu-latest
     environment: sandbox
     timeout-minutes: 5
@@ -36,37 +36,41 @@ jobs:
           [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]] || { echo "ALLOW_REAL_CUSTOMER_DATA precisa ser false" >&2; exit 1; }
           [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]] || { echo "MERCADO_PAGO_ACCESS_TOKEN ausente" >&2; exit 1; }
 
-      - name: Validate payment API scope without creating payment
+      - name: Validate Orders API access without creating an Order
         shell: bash
         run: |
           set -euo pipefail
+          begin_date="$(date -u -d '1 day ago' +'%Y-%m-%dT%H:%M:%S.000Z')"
+          end_date="$(date -u +'%Y-%m-%dT%H:%M:%S.999Z')"
+
           status="$(curl --silent --show-error \
-            --output /tmp/mp-payment-scope.json \
+            --output /tmp/mp-orders-scope.json \
             --write-out '%{http_code}' \
             --get \
             --header 'accept: application/json' \
             --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
-            --data-urlencode 'sort=date_created' \
-            --data-urlencode 'criteria=desc' \
-            --data-urlencode 'external_reference=blacksheep-sandbox-scope-preflight-no-payment' \
-            --data-urlencode 'limit=1' \
-            'https://api.mercadopago.com/v1/payments/search')"
+            --data-urlencode "begin_date=${begin_date}" \
+            --data-urlencode "end_date=${end_date}" \
+            --data-urlencode 'external_reference=blacksheep-sandbox-scope-preflight' \
+            --data-urlencode 'page=1' \
+            --data-urlencode 'page_size=1' \
+            'https://api.mercadopago.com/v1/orders')"
 
           python3 - "$status" <<'PY'
           import json, sys
           status = int(sys.argv[1])
           try:
-              data = json.load(open('/tmp/mp-payment-scope.json'))
+              data = json.load(open('/tmp/mp-orders-scope.json'))
           except Exception:
               data = {}
           if status == 200:
-              print('Mercado Pago Payments API: acesso de leitura confirmado; nenhum pagamento criado.')
+              print('Mercado Pago Orders API: acesso de leitura confirmado; nenhuma Order ou cobrança criada.')
               raise SystemExit(0)
-          message = data.get('message') or data.get('error') or 'sem mensagem'
+          message = data.get('message') or data.get('error') or data.get('code') or 'sem mensagem'
           if status == 401:
-              print('Mercado Pago Payments API recusou a credencial (401). A credencial não possui autorização payment válida para este endpoint.')
+              print('Mercado Pago Orders API recusou a credencial (401). Revise a credencial de teste da aplicação Checkout Transparente.')
           else:
-              print(f'Mercado Pago Payments API preflight falhou: HTTP {status}: {message}')
+              print(f'Mercado Pago Orders API preflight falhou: HTTP {status}: {message}')
           raise SystemExit(1)
           PY
 
@@ -75,11 +79,11 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Mercado Pago Sandbox Credential Preflight"
+            echo "## Mercado Pago Sandbox Credential Preflight — Orders API"
             echo
             echo "- Environment: \`sandbox\`"
             echo "- Real charges allowed: \`false\`"
             echo "- Real customer data allowed: \`false\`"
-            echo "- Operation: read-only \`GET /v1/payments/search\`"
-            echo "- No payment is created by this workflow."
+            echo "- Operation: read-only \`GET /v1/orders\` with date filters"
+            echo "- No Order or payment is created by this workflow."
           } >> "$GITHUB_STEP_SUMMARY"
