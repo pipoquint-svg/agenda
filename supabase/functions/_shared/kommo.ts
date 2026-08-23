@@ -135,11 +135,13 @@ export async function kommoJson<T = unknown>(
   try {
     payload = text ? JSON.parse(text) : null
   } catch {
-    payload = { raw: text.slice(0, 500) }
+    payload = null
   }
 
   if (!response.ok) {
-    const error = new Error(`KOMMO_HTTP_${response.status}:${JSON.stringify(payload).slice(0, 1000)}`) as Error & { status?: number }
+    // Provider responses may contain contact/lead data. Never propagate their body into
+    // Agenda errors, integration_jobs.last_error or Edge logs.
+    const error = new Error(`KOMMO_HTTP_${response.status}`) as Error & { status?: number }
     error.status = response.status
     throw error
   }
