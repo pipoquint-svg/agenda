@@ -2,8 +2,11 @@ import {
   buildContactCustomFields,
   contactMatchesExactly,
   exactContactCandidates,
+  findUniqueLeadBalanceFieldId,
   findUniqueLeadDateFieldId,
+  findUniqueLeadExtrasFieldId,
   kommoLeadName,
+  kommoRentalExtrasValue,
   kommoReservationDateValue,
   normalizePhone,
   stageIdForAppointment,
@@ -104,6 +107,33 @@ Deno.test('reservation Data field is resolved uniquely and must be date-compatib
     failed = error instanceof Error && error.message === 'KOMMO_RESERVATION_DATE_FIELD_INVALID_TYPE'
   }
   if (!failed) throw new Error('non-date Data field should fail closed')
+})
+
+Deno.test('Saldo accepts numeric or monetary but not text', () => {
+  if (findUniqueLeadBalanceFieldId([{ id: 40, name: 'Saldo', type: 'numeric' }]) !== 40) {
+    throw new Error('numeric Saldo field id mismatch')
+  }
+  if (findUniqueLeadBalanceFieldId([{ id: 41, name: 'Saldo', type: 'monetary' }]) !== 41) {
+    throw new Error('monetary Saldo field id mismatch')
+  }
+  let failed = false
+  try {
+    findUniqueLeadBalanceFieldId([{ id: 42, name: 'Saldo', type: 'text' }])
+  } catch (error) {
+    failed = error instanceof Error && error.message === 'KOMMO_BALANCE_FIELD_INVALID_TYPE'
+  }
+  if (!failed) throw new Error('text Saldo field should fail closed')
+})
+
+Deno.test('Extras locação lookup ignores accents and formats quantities', () => {
+  const id = findUniqueLeadExtrasFieldId([{ id: 50, name: 'Extras locacao', type: 'textarea' }])
+  if (id !== 50) throw new Error('Extras locação field id mismatch')
+  const value = kommoRentalExtrasValue([
+    { name: 'Flash adicional', quantity: 1 },
+    { name: 'Tripé', quantity: 2 },
+    { name: '', quantity: 3 },
+  ])
+  if (value !== 'Flash adicional\n2× Tripé') throw new Error(`extras formatting mismatch: ${value}`)
 })
 
 Deno.test('reservation date is derived in America/Sao_Paulo and encoded as RFC3339', () => {
