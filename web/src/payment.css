@@ -22,8 +22,17 @@
 .pix-box p { margin: 0; text-align: center; color: #666; }
 .card-brick { min-height: 240px; }
 .card-brick.busy { opacity: .72; pointer-events: none; }
+.three-ds-box { display: grid; gap: 12px; padding: 14px; border: 1px solid #deded8; border-radius: 12px; background: #fff; }
+.three-ds-box > div { display: grid; gap: 4px; }
+.three-ds-box p { margin: 0; color: #666; line-height: 1.45; }
+.three-ds-frame { width: 100%; max-width: 500px; height: 600px; border: 0; justify-self: center; background: #fff; }
+.three-ds-form { display: none; }
 .payment-confirmed { padding: 18px; border: 1px solid #d8e7d7; border-radius: 12px; background: #f5faf4; }
 
 @media (min-width: 650px) {
   .payment-kind-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 980px) {
+  .three-ds-frame { height: 440px; }
 }
