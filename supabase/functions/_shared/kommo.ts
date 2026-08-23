@@ -44,6 +44,13 @@ export type KommoRentalExtra = {
   quantity?: number | null
 }
 
+const KOMMO_TIMEOUT_MS = 15_000
+const KOMMO_BASE_URL_RE = /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.kommo\.com\/api\/v4$/
+
+export function assertKommoBaseUrl(baseUrl: string): void {
+  if (!KOMMO_BASE_URL_RE.test(baseUrl)) throw new Error('KOMMO_BASE_URL_DENIED')
+}
+
 export function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const normalized = value.trim().toLowerCase()
@@ -54,9 +61,6 @@ export function normalizePhone(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const digits = value.replace(/\D+/g, '')
   if (!digits) return null
-
-  // BlackSheep operates in BR. Treat local DDD+number and +55 forms as the same
-  // customer identity while preserving already international-looking numbers.
   if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) return `55${digits}`
   return digits
 }
@@ -68,37 +72,23 @@ function fieldValues(contact: KommoContact, code: string): string[] {
     .filter(Boolean)
 }
 
-export function contactMatchesExactly(
-  contact: KommoContact,
-  email: string | null,
-  phone: string | null,
-): boolean {
+export function contactMatchesExactly(contact: KommoContact, email: string | null, phone: string | null): boolean {
   const emailNeedle = normalizeEmail(email)
   const phoneNeedle = normalizePhone(phone)
   const emails = fieldValues(contact, 'EMAIL').map(normalizeEmail).filter(Boolean)
   const phones = fieldValues(contact, 'PHONE').map(normalizePhone).filter(Boolean)
-
   if (phoneNeedle && phones.includes(phoneNeedle)) return true
   if (emailNeedle && emails.includes(emailNeedle)) return true
   return false
 }
 
-export function exactContactCandidates(
-  contacts: KommoContact[],
-  email: string | null,
-  phone: string | null,
-): KommoContact[] {
+export function exactContactCandidates(contacts: KommoContact[], email: string | null, phone: string | null): KommoContact[] {
   return contacts.filter((contact) => contactMatchesExactly(contact, email, phone))
 }
 
-export function stageIdForAppointment(
-  settings: KommoPipelineSettings,
-  appointmentStatus: string,
-  eventKind: string,
-): number {
+export function stageIdForAppointment(settings: KommoPipelineSettings, appointmentStatus: string, eventKind: string): number {
   const event = eventKind.trim().toUpperCase()
   const status = appointmentStatus.trim().toUpperCase()
-
   const stage = event === 'RESCHEDULED'
     ? settings.stage_rescheduled_id
     : status === 'CONFIRMED'
@@ -112,7 +102,6 @@ export function stageIdForAppointment(
             : status === 'EXPIRED'
               ? settings.stage_expired_id
               : settings.stage_awaiting_payment_id
-
   if (!Number.isInteger(stage) || Number(stage) <= 0) throw new Error(`KOMMO_STAGE_NOT_CONFIGURED:${event}:${status}`)
   return Number(stage)
 }
@@ -131,18 +120,10 @@ function normalizeFieldName(value: unknown): string {
     .toLocaleLowerCase('pt-BR')
 }
 
-function resolveUniqueLeadField(
-  fields: KommoCustomField[],
-  expectedName: string,
-  allowedTypes: string[],
-  errorPrefix: string,
-): KommoResolvedLeadField {
+function resolveUniqueLeadField(fields: KommoCustomField[], expectedName: string, allowedTypes: string[], errorPrefix: string): KommoResolvedLeadField {
   const needle = normalizeFieldName(expectedName)
   const named = fields.filter((field) => normalizeFieldName(field.name) === needle)
-  if (named.length !== 1) {
-    throw new Error(named.length === 0 ? `${errorPrefix}_MISSING` : `${errorPrefix}_AMBIGUOUS`)
-  }
-
+  if (named.length !== 1) throw new Error(named.length === 0 ? `${errorPrefix}_MISSING` : `${errorPrefix}_AMBIGUOUS`)
   const field = named[0]
   const type = String(field.type ?? '').trim().toLowerCase()
   if (!allowedTypes.includes(type)) throw new Error(`${errorPrefix}_INVALID_TYPE`)
@@ -151,34 +132,14 @@ function resolveUniqueLeadField(
 }
 
 export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
-  return resolveUniqueLeadField(
-    fields,
-    expectedName,
-    ['date', 'date_time'],
-    'KOMMO_RESERVATION_DATE_FIELD',
-  ).id
+  return resolveUniqueLeadField(fields, expectedName, ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD').id
 }
 
 export function resolveLeadCardFields(fields: KommoCustomField[]): KommoLeadCardFields {
   return {
-    reservationDate: resolveUniqueLeadField(
-      fields,
-      'Data',
-      ['date', 'date_time'],
-      'KOMMO_RESERVATION_DATE_FIELD',
-    ),
-    balance: resolveUniqueLeadField(
-      fields,
-      'Saldo',
-      ['numeric', 'monetary', 'text', 'textarea'],
-      'KOMMO_BALANCE_FIELD',
-    ),
-    rentalExtras: resolveUniqueLeadField(
-      fields,
-      'Extras locação',
-      ['text', 'textarea'],
-      'KOMMO_RENTAL_EXTRAS_FIELD',
-    ),
+    reservationDate: resolveUniqueLeadField(fields, 'Data', ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD'),
+    balance: resolveUniqueLeadField(fields, 'Saldo', ['numeric', 'monetary', 'text', 'textarea'], 'KOMMO_BALANCE_FIELD'),
+    rentalExtras: resolveUniqueLeadField(fields, 'Extras locação', ['text', 'textarea'], 'KOMMO_RENTAL_EXTRAS_FIELD'),
   }
 }
 
@@ -186,27 +147,19 @@ export function kommoReservationDateValue(startAt: string | null | undefined): s
   if (!startAt) throw new Error('KOMMO_RESERVATION_START_REQUIRED')
   const instant = new Date(startAt)
   if (Number.isNaN(instant.getTime())) throw new Error('KOMMO_RESERVATION_START_INVALID')
-
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(instant)
   const year = parts.find((part) => part.type === 'year')?.value
   const month = parts.find((part) => part.type === 'month')?.value
   const day = parts.find((part) => part.type === 'day')?.value
   if (!year || !month || !day) throw new Error('KOMMO_RESERVATION_DATE_FORMAT_FAILED')
-
-  // Kommo accepts RFC-3339 for date/date_time custom fields. Noon in the business
-  // timezone avoids date-boundary shifts while the CRM renders the field as a date.
   return `${year}-${month}-${day}T12:00:00-03:00`
 }
 
 export function kommoLeadPrice(value: number | null | undefined): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error('KOMMO_COMMERCIAL_VALUE_INVALID')
-  // Kommo's built-in lead price is an integer in the account currency.
   return Math.round(parsed)
 }
 
@@ -236,18 +189,9 @@ export function buildLeadCardCustomFields(
   extras: KommoRentalExtra[] | null | undefined,
 ): Array<{ field_id: number; values: Array<{ value: string }> }> {
   return [
-    {
-      field_id: fields.reservationDate.id,
-      values: [{ value: kommoReservationDateValue(startAt) }],
-    },
-    {
-      field_id: fields.balance.id,
-      values: [{ value: kommoBalanceValue(balance) }],
-    },
-    {
-      field_id: fields.rentalExtras.id,
-      values: [{ value: formatRentalExtras(extras) }],
-    },
+    { field_id: fields.reservationDate.id, values: [{ value: kommoReservationDateValue(startAt) }] },
+    { field_id: fields.balance.id, values: [{ value: kommoBalanceValue(balance) }] },
+    { field_id: fields.rentalExtras.id, values: [{ value: formatRentalExtras(extras) }] },
   ]
 }
 
@@ -260,7 +204,6 @@ export function buildContactCustomFields(
   const fields: Array<{ field_id: number; values: Array<{ value: string; enum_code: string }> }> = []
   const normalizedEmail = normalizeEmail(email)
   const normalizedPhone = typeof phone === 'string' ? phone.trim() : ''
-
   if (normalizedEmail && Number.isInteger(emailFieldId) && Number(emailFieldId) > 0) {
     fields.push({ field_id: Number(emailFieldId), values: [{ value: normalizedEmail, enum_code: 'WORK' }] })
   }
@@ -270,21 +213,30 @@ export function buildContactCustomFields(
   return fields
 }
 
-export async function kommoJson<T = unknown>(
-  baseUrl: string,
-  token: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      authorization: `Bearer ${token}`,
-      ...(init.headers ?? {}),
-    },
-  })
+export async function kommoJson<T = unknown>(baseUrl: string, token: string, path: string, init: RequestInit = {}): Promise<T> {
+  assertKommoBaseUrl(baseUrl)
+  if (!path.startsWith('/') || path.startsWith('//')) throw new Error('KOMMO_PATH_DENIED')
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), KOMMO_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+        ...(init.headers ?? {}),
+      },
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('KOMMO_TIMEOUT')
+    throw new Error('KOMMO_NETWORK_ERROR')
+  } finally {
+    clearTimeout(timeout)
+  }
 
   const text = await response.text()
   let payload: unknown = null
@@ -295,8 +247,6 @@ export async function kommoJson<T = unknown>(
   }
 
   if (!response.ok) {
-    // Provider responses may contain contact/lead data. Never propagate their body into
-    // Agenda errors, integration_jobs.last_error or Edge logs.
     const error = new Error(`KOMMO_HTTP_${response.status}`) as Error & { status?: number }
     error.status = response.status
     throw error
