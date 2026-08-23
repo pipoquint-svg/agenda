@@ -16,7 +16,7 @@ insert into public.services (
   minimum_people, maximum_people, maximum_booking_horizon_days, confirmation_percentage
 ) values
   ('97000000-0000-0000-0000-000000000010','97000000-0000-0000-0000-000000000001','Default Confirmation Service','default-confirmation-target',60,1000,1,1,5000,null),
-  ('97000000-0000-0000-0000-000000000011','97000000-0000-0000-0000-000000000001','Override Confirmation Service','override-confirmation-target',60,1000,1,1,5000,30);
+  ('97000000-0000-0000-0000-000000000011','97000000-0000-0000-0000-000000000001','Full Confirmation Service','full-confirmation-target',60,1000,1,1,5000,100);
 
 insert into public.service_employees (id, service_id, employee_id)
 values
@@ -33,10 +33,9 @@ insert into public.appointments (
 ) values
   ('97000000-0000-0000-0000-000000000040','TGT-DEFAULT','97000000-0000-0000-0000-000000000010','97000000-0000-0000-0000-000000000020','97000000-0000-0000-0000-000000000030','AWAITING_PAYMENT','PENDING','2035-05-01 09:00:00-03','2035-05-01 10:00:00-03',60,1,now()+interval '30 minutes',1000),
   ('97000000-0000-0000-0000-000000000041','TGT-PARTIAL','97000000-0000-0000-0000-000000000010','97000000-0000-0000-0000-000000000020','97000000-0000-0000-0000-000000000030','AWAITING_PAYMENT','PARTIALLY_PAID','2035-05-01 11:00:00-03','2035-05-01 12:00:00-03',60,1,now()+interval '30 minutes',1000),
-  ('97000000-0000-0000-0000-000000000042','TGT-OVERRIDE','97000000-0000-0000-0000-000000000011','97000000-0000-0000-0000-000000000021','97000000-0000-0000-0000-000000000030','AWAITING_PAYMENT','PENDING','2035-05-01 13:00:00-03','2035-05-01 14:00:00-03',60,1,now()+interval '30 minutes',1000),
+  ('97000000-0000-0000-0000-000000000042','TGT-FULL','97000000-0000-0000-0000-000000000011','97000000-0000-0000-0000-000000000021','97000000-0000-0000-0000-000000000030','AWAITING_PAYMENT','PENDING','2035-05-01 13:00:00-03','2035-05-01 14:00:00-03',60,1,now()+interval '30 minutes',1000),
   ('97000000-0000-0000-0000-000000000043','TGT-SATISFIED','97000000-0000-0000-0000-000000000010','97000000-0000-0000-0000-000000000020','97000000-0000-0000-0000-000000000030','CONFIRMED','PARTIALLY_PAID','2035-05-01 15:00:00-03','2035-05-01 16:00:00-03',60,1,null,1000);
 
--- Appointment 041 has already settled R$200; appointment 043 already reached the R$500 threshold.
 insert into public.payment_transactions (
   appointment_id, transaction_type, method, provider, status,
   contract_amount_settled, payment_discount_amount, cash_amount, paid_at, notes
@@ -62,21 +61,21 @@ insert into target_results values (
 );
 
 select is((select (payload->>'contract_settled_before')::numeric from target_results where name='partial'),200::numeric,'payment intent sees contract settlement already received');
-select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='partial'),300::numeric,'minimum payment charges only the R$300 gap to the R$500 threshold, not 50 percent of remaining balance');
+select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='partial'),300::numeric,'minimum payment charges only the R$300 gap to the R$500 threshold');
 select is((select (payload->>'cash_amount')::numeric from target_results where name='partial'),285::numeric,'PIX discount is R$15 on the R$300 confirmation gap');
 
 insert into target_results values (
-  'override',
-  public.create_payment_intent('97000000-0000-0000-0000-000000000042',30,'CARD','target-override')
+  'full',
+  public.create_payment_intent('97000000-0000-0000-0000-000000000042',100,'CARD','target-full')
 );
 
-select is((select (payload->>'confirmation_percentage')::numeric from target_results where name='override'),30::numeric,'service confirmation percentage overrides the operation default');
-select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='override'),300::numeric,'service 30 percent minimum creates a R$300 contract settlement intent');
+select is((select (payload->>'confirmation_percentage')::numeric from target_results where name='full'),100::numeric,'service can explicitly require 100 percent confirmation');
+select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='full'),1000::numeric,'100 percent confirmation settles the full outstanding contract');
 
 select throws_ok(
   $$ select public.create_payment_intent('97000000-0000-0000-0000-000000000042',50,'CARD','target-invalid-percent') $$,
   'P0001','INVALID_PAYMENT_PERCENTAGE',
-  'client cannot choose a percentage other than the service minimum or 100 percent'
+  'client cannot choose 50 percent when the service explicitly requires 100 percent'
 );
 
 select throws_ok(

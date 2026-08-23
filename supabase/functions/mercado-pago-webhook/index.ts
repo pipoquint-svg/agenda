@@ -1,5 +1,7 @@
 import { adminClient } from '../_shared/supabase.ts'
 import {
+  assertMercadoPagoPaymentMatchesIntent,
+  mercadoPagoPaymentStorageSnapshot,
   normalizeMercadoPagoPaymentStatus,
   sanitizeMercadoPagoPayment,
   verifyMercadoPagoWebhookSignature,
@@ -18,11 +20,11 @@ function requiredEnv(name: string): string {
   return value
 }
 
-async function getProviderPayment(paymentId: string): Promise<Record<string, unknown>> {
+async function getProviderOrder(orderId: string): Promise<Record<string, unknown>> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12000)
   try {
-    const res = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+    const res = await fetch(`https://api.mercadopago.com/v1/orders/${encodeURIComponent(orderId)}`, {
       headers: {
         authorization: `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
         accept: 'application/json',
@@ -53,9 +55,6 @@ Deno.serve(async (req) => {
     return json({ error: { code: 'INVALID_JSON' } }, 400)
   }
 
-  const type = typeof body.type === 'string' ? body.type : ''
-  if (type && type !== 'payment') return json({ ok: true, ignored: 'UNSUPPORTED_EVENT_TYPE' })
-
   const url = new URL(req.url)
   const dataId = dataIdFrom(url, body)
   const signature = req.headers.get('x-signature') ?? ''
@@ -71,51 +70,111 @@ Deno.serve(async (req) => {
     })
     if (!valid) return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_INVALID' } }, 401)
 
-    // The notification is only a signal. Full payment state is fetched from Mercado Pago.
-    const rawPayment = await getProviderPayment(dataId)
-    const snapshot = sanitizeMercadoPagoPayment(rawPayment)
-    if (!snapshot.id || snapshot.id !== dataId) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
+    const type = typeof body.type === 'string' ? body.type : ''
+    if (type && type !== 'order' && type !== 'orders') {
+      return json({ ok: true, ignored: 'UNSUPPORTED_EVENT_TYPE' })
+    }
+
+    // Fail closed across environments: a live provider event never mutates sandbox,
+    // and a test event never mutates a future production deployment.
+    const mpEnv = Deno.env.get('MERCADO_PAGO_ENV')?.trim().toLowerCase() ?? ''
+    if (mpEnv === 'sandbox' && body.live_mode === true) {
+      console.error('Ignoring live Mercado Pago Order event in sandbox', { dataId, requestId })
+      return json({ ok: true, ignored: 'LIVE_EVENT_IN_SANDBOX' })
+    }
+    if (mpEnv === 'production' && body.live_mode === false) {
+      console.error('Ignoring Mercado Pago test Order event in production', { dataId, requestId })
+      return json({ ok: true, ignored: 'TEST_EVENT_IN_PRODUCTION' })
+    }
+
+    // The notification is only a signal. Full Order state is always re-fetched.
+    const rawOrder = await getProviderOrder(dataId)
+    const snapshot = sanitizeMercadoPagoPayment(rawOrder)
+    const storedSnapshot = mercadoPagoPaymentStorageSnapshot(snapshot)
 
     const client = adminClient()
-    let transactionId: string | null = null
+    let transaction: { id: string; appointment_id: string; cash_amount: number | string; method: string } | null = null
 
     if (snapshot.external_reference && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(snapshot.external_reference)) {
       const { data } = await client
         .from('payment_transactions')
-        .select('id')
+        .select('id,appointment_id,cash_amount,method')
         .eq('id', snapshot.external_reference)
         .eq('provider', 'MERCADO_PAGO')
         .eq('transaction_type', 'CHARGE')
         .maybeSingle()
-      transactionId = data?.id ?? null
+      transaction = data ?? null
     }
 
-    if (!transactionId) {
+    if (!transaction) {
       const { data } = await client
         .from('payment_transactions')
-        .select('id')
+        .select('id,appointment_id,cash_amount,method')
         .eq('provider', 'MERCADO_PAGO')
-        .eq('provider_payment_id', snapshot.id)
+        .eq('provider_payment_id', dataId)
         .eq('transaction_type', 'CHARGE')
         .maybeSingle()
-      transactionId = data?.id ?? null
+      transaction = data ?? null
     }
 
-    // A payment from the same Mercado Pago application but unrelated to Agenda
-    // must not trigger retries forever or mutate any booking.
-    if (!transactionId) return json({ ok: true, ignored: 'PAYMENT_NOT_MANAGED_BY_AGENDA' })
+    // Orders unrelated to Agenda are acknowledged without mutating any booking.
+    if (!transaction) return json({ ok: true, ignored: 'ORDER_NOT_MANAGED_BY_AGENDA' })
+    if (transaction.method !== 'PIX' && transaction.method !== 'CARD') {
+      console.error('Mercado Pago managed transaction has invalid method', transaction.id)
+      return json({ ok: true, ignored: 'PAYMENT_INTENT_INVALID' })
+    }
+
+    let validationError: unknown = null
+    if (!snapshot.id) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISSING')
+    else if (snapshot.id !== dataId) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
+    else {
+      try {
+        assertMercadoPagoPaymentMatchesIntent(snapshot, {
+          transactionId: transaction.id,
+          cashAmount: transaction.cash_amount,
+          method: transaction.method,
+        })
+      } catch (cause) {
+        validationError = cause
+      }
+    }
+
+    if (validationError) {
+      const code = validationError instanceof Error && validationError.message.startsWith('MERCADO_PAGO_')
+        ? validationError.message
+        : 'MERCADO_PAGO_PAYMENT_METHOD_MISMATCH'
+      console.error('Mercado Pago Order webhook did not match internal intent', {
+        transactionId: transaction.id,
+        notificationOrderId: dataId,
+        providerOrderId: snapshot.id || null,
+        providerTransactionId: snapshot.provider_transaction_id,
+        code,
+      })
+      const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
+        p_transaction_id: transaction.id,
+        p_provider_payment_id: snapshot.id || dataId,
+        p_reason: code,
+        p_payload_json: storedSnapshot,
+      })
+      if (quarantineError) {
+        console.error('Failed to persist Mercado Pago Order mismatch quarantine', quarantineError.message)
+        return json({ error: { code: 'PAYMENT_MISMATCH_QUARANTINE_FAILED' } }, 500)
+      }
+      // Signed event is acknowledged to avoid retry storms, but state is never applied.
+      return json({ ok: true, ignored: 'PAYMENT_INTENT_MISMATCH' })
+    }
 
     const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
     const notificationId = body.id == null ? requestId : String(body.id)
-    const action = typeof body.action === 'string' ? body.action : 'payment.updated'
-    const eventKey = `webhook:${notificationId}:${action}:${dataId}`
+    const action = typeof body.action === 'string' ? body.action : 'order.updated'
+    const eventKey = `webhook-order:${notificationId}:${action}:${dataId}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`
 
     const { data: applied, error } = await client.rpc('apply_provider_payment_status', {
-      p_transaction_id: transactionId,
+      p_transaction_id: transaction.id,
       p_provider_payment_id: snapshot.id,
       p_normalized_status: normalized,
       p_event_key: eventKey,
-      p_payload_json: snapshot,
+      p_payload_json: storedSnapshot,
       p_paid_at: snapshot.date_approved,
     })
     if (error) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${error.message}`)
@@ -123,7 +182,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, state: applied })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'MERCADO_PAGO_WEBHOOK_FAILED'
-    console.error('Mercado Pago webhook processing failed', message)
+    console.error('Mercado Pago Order webhook processing failed', message)
     const status = message.startsWith('MISSING_ENV') ? 503 : 500
     return json({ error: { code: message.split(':')[0] } }, status)
   }

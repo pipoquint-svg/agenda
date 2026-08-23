@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(13);
+select plan(15);
 
 insert into public.customers(id,name) values ('98000000-0000-0000-0000-000000000001','Package Reschedule Customer');
 insert into public.employees(id,name) values ('98000000-0000-0000-0000-000000000002','Package Reschedule Employee');
@@ -13,15 +13,16 @@ insert into public.service_employees(id,service_id,employee_id) values ('9800000
 insert into public.service_resources(service_id,resource_id,is_required) values ('98000000-0000-0000-0000-000000000005','98000000-0000-0000-0000-000000000004',true);
 insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time,slot_interval_minutes,is_active)
 select '98000000-0000-0000-0000-000000000006',d,time '08:00',time '18:00',30,true from generate_series(0,6)d;
-insert into public.service_change_policies(service_id,notice_hours,reschedule_first_penalty_type,reschedule_first_penalty_value,reschedule_repeat_penalty_type,reschedule_repeat_penalty_value,reschedule_late_penalty_type,reschedule_late_penalty_value,cancellation_early_penalty_type,cancellation_early_penalty_value,cancellation_late_penalty_type,cancellation_late_penalty_value,cancellation_early_refund_allowed,cancellation_early_credit_allowed,cancellation_late_refund_allowed,cancellation_late_credit_allowed,cancellation_credit_validity_days)
-values ('98000000-0000-0000-0000-000000000005',48,'NONE',0,'NONE',0,'NONE',0,'NONE',0,'NONE',0,true,true,true,true,90);
+insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
+values ('98000000-0000-0000-0000-000000000005',48,0,20,30,30);
 
 insert into public.hour_packages(id,customer_id,name,total_minutes,purchased_value,valid_from,valid_until,status,special_surcharge_percent,standard_start_local_time,standard_end_local_time)
 values ('98000000-0000-0000-0000-000000000007','98000000-0000-0000-0000-000000000001','40h Test',600,3000,'2035-01-01 00:00:00-03','2036-01-01 00:00:00-03','ACTIVE',15,time '08:00',time '18:00');
 insert into public.hour_package_services(hour_package_id,service_id) values ('98000000-0000-0000-0000-000000000007','98000000-0000-0000-0000-000000000005');
 
-insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,people_count,primary_customer_id,commercial_value)
-values ('98000000-0000-0000-0000-000000000010','PKG-RS-1','98000000-0000-0000-0000-000000000005','98000000-0000-0000-0000-000000000006','CONFIRMED','NOT_STARTED','2035-03-05 10:00:00-03','2035-03-05 12:00:00-03','2035-03-05 10:00:00-03','2035-03-05 12:00:00-03',120,120,1,'98000000-0000-0000-0000-000000000001',500);
+-- Real package-only checkout stores commercial_value as cash_due, which is zero.
+insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
+values ('98000000-0000-0000-0000-000000000010','PKG-RS-1','98000000-0000-0000-0000-000000000005','98000000-0000-0000-0000-000000000006','CONFIRMED','PAID','2035-03-05 10:00:00-03','2035-03-05 12:00:00-03','2035-03-05 10:00:00-03','2035-03-05 12:00:00-03',120,120,1,'98000000-0000-0000-0000-000000000001',0,now());
 insert into public.resource_allocations(resource_id,appointment_id,allocation_type,status,occupied_range)
 values ('98000000-0000-0000-0000-000000000004','98000000-0000-0000-0000-000000000010','APPOINTMENT','CONFIRMED',tstzrange('2035-03-05 10:00:00-03','2035-03-05 12:30:00-03','[)'));
 
@@ -37,9 +38,11 @@ where appointment_id='98000000-0000-0000-0000-000000000010' and movement_type='R
 select has_function('public','service_reconcile_reschedule_package',array['uuid','uuid','uuid'],'package reschedule reconciliation exists');
 
 create temporary table h as
-select public.service_admin_create_reschedule_hold('98000000-0000-0000-0000-000000000010','2035-03-10 10:00:00-03','2035-03-01 10:00:00-03',null) data;
+select public.service_admin_create_reschedule_hold('98000000-0000-0000-0000-000000000010','2035-03-10 10:00:00-03','2035-03-01 10:00:00-03','CLIENT',null) data;
 
 select is((select data->'package_reconciliation'->>'uses_package' from h),'true','package-backed appointment can create a reschedule hold');
+select is((select (data->>'new_contract_value')::numeric from h),0::numeric,'package reschedule keeps commercial value equal to cash due, not gross service price');
+select is((select (data->>'difference_due')::numeric from h),0::numeric,'package-only reschedule does not fabricate a cash difference');
 select is((select (data->'package_reconciliation'->>'new_surcharge_seconds')::bigint from h),1080::bigint,'weekend target adds fifteen-percent seconds surcharge');
 select is((select (data->'package_reconciliation'->>'delta_seconds')::bigint from h),1080::bigint,'hold exposes only incremental package debit');
 select is((select status from public.appointments where id='98000000-0000-0000-0000-000000000010'),'CONFIRMED','old appointment remains confirmed before apply');

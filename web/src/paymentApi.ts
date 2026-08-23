@@ -23,9 +23,13 @@ export type PublicPaymentContext = {
 }
 
 export type ProviderPayment = {
+  // Orders API resource id (ORD...). Kept under provider.id to preserve the UI contract.
   id: string
-  status: string | null
+  provider_transaction_id?: string | null
+  provider_transaction_count?: number
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | null
   status_detail: string | null
+  raw_status?: string | null
   transaction_amount: number | null
   payment_method_id: string | null
   payment_type_id: string | null
@@ -37,6 +41,9 @@ export type ProviderPayment = {
       qr_code_base64?: string | null
       ticket_url?: string | null
     } | null
+  } | null
+  three_ds_info?: {
+    external_resource_url?: string | null
   } | null
 }
 
@@ -111,7 +118,7 @@ function trackProviderState(accessToken: string, response: PaymentResponse, fall
     return
   }
 
-  if (['pending', 'in_process', 'authorized', 'in_mediation'].includes(providerStatus)) {
+  if (providerStatus === 'pending') {
     trackFunnelStep('payment_pending', { payment_method: method, provider: 'MERCADO_PAGO' })
   }
 }
@@ -175,11 +182,11 @@ export async function createCardPayment(accessToken: string, kind: 'MINIMUM' | '
   return result
 }
 
-export async function syncProviderPayment(accessToken: string, providerPaymentId: string): Promise<PaymentResponse> {
+export async function syncProviderPayment(accessToken: string, providerOrderId: string): Promise<PaymentResponse> {
   const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'SYNC', provider_payment_id: providerPaymentId }),
+    body: JSON.stringify({ action: 'SYNC', provider_payment_id: providerOrderId }),
   }))
   trackProviderState(accessToken, result)
   return result

@@ -11,15 +11,15 @@ const financeKeys = new Set([
   'commercial_value', 'financial_status', 'financial', 'payments',
   'base_price_snapshot', 'variable_price_adjustment', 'extras_total', 'coupon_discount',
   'gross_contract_settled', 'gross_cash_received', 'refunded_contract_amount', 'refunded_cash_amount',
-  'contract_settled', 'cash_received', 'contract_balance', 'operational_penalties_cash_received',
-  'penalty_amount', 'penalty_due_now', 'refundable_amount', 'credit_amount',
-  'cancellation_penalty_outstanding', 'contract_value', 'net_paid',
+  'contract_settled', 'cash_received', 'cash_contract_net', 'contract_balance',
+  'customer_balance_applied', 'customer_funds_under_reservation', 'customer_cash_cover_of_contract',
+  'customer_excess_held', 'penalties_retained',
+  'penalty_percent', 'theoretical_penalty', 'penalty_retained', 'penalty_amount',
+  'refund_due', 'refundable_amount', 'contract_value', 'new_contract_value',
+  'customer_funds_before', 'contract_applied_before', 'excess_before', 'applicable_amount',
+  'excess_amount', 'difference_due', 'customer_funds_after_penalty',
   'billing_mode', 'invoice_due_days', 'invoice_due_days_snapshot',
   'invoice_due_basis', 'invoice_due_base_at', 'invoice_due_at', 'invoice_authorized_by_admin_id',
-])
-
-const settlementDecisionKeys = new Set([
-  'refund_allowed', 'credit_allowed', 'credit_validity_days',
 ])
 
 function json(body: unknown, status = 200): Response {
@@ -71,8 +71,21 @@ function redactFinance(value: unknown): unknown {
   return redactKeys(value, financeKeys)
 }
 
-function redactSettlementDecisions(value: unknown): unknown {
-  return redactKeys(value, settlementDecisionKeys)
+function parseChangeOrigin(url: URL): 'CLIENT' | 'OPERATION' {
+  const value = clean(url.searchParams.get('change_origin'))?.toUpperCase()
+  if (value !== 'CLIENT' && value !== 'OPERATION') throw new Error('CHANGE_ORIGIN_REQUIRED')
+  return value
+}
+
+function parseNewContractValue(url: URL, required: boolean): number | null {
+  const raw = clean(url.searchParams.get('new_contract_value'))
+  if (!raw) {
+    if (required) throw new Error('NEW_CONTRACT_VALUE_REQUIRED')
+    return null
+  }
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0) throw new Error('NEW_CONTRACT_VALUE_INVALID')
+  return Math.round(value * 100) / 100
 }
 
 Deno.serve(async (req) => {
@@ -125,17 +138,13 @@ Deno.serve(async (req) => {
           : null
 
         if (!currentTerms && !canManageFinance) throw new Error('ADMIN_PERMISSION_DENIED')
-
         const billingMode = requestedBillingMode ?? currentTerms?.billing_mode ?? ''
         const invoiceDueDays = hasInvoiceDueDays ? requestedInvoiceDueDays : currentTerms?.invoice_due_days ?? null
         if (billingMode !== 'CHECKOUT' && billingMode !== 'INVOICE') throw new Error('BILLING_MODE_INVALID')
         if (invoiceDueDays !== null && (!Number.isInteger(invoiceDueDays) || invoiceDueDays < 0)) throw new Error('INVOICE_DUE_DAYS_INVALID')
         if (billingMode === 'INVOICE' && invoiceDueDays === null) throw new Error('INVOICE_DUE_DAYS_REQUIRED')
 
-        if (customerFinancialTermsChanged(currentTerms, {
-          billing_mode: billingMode,
-          invoice_due_days: invoiceDueDays,
-        })) {
+        if (customerFinancialTermsChanged(currentTerms, { billing_mode: billingMode, invoice_due_days: invoiceDueDays })) {
           await requirePermission('FINANCE_MANAGE')
         }
 
@@ -202,15 +211,18 @@ Deno.serve(async (req) => {
       const requestedAt = clean(url.searchParams.get('requested_at'))
       const parsedRequestedAt = requestedAt ? new Date(requestedAt) : new Date()
       if (Number.isNaN(parsedRequestedAt.getTime())) throw new Error('REQUESTED_AT_INVALID')
+      const origin = parseChangeOrigin(url)
+      const newContractValue = parseNewContractValue(url, changeType === 'RESCHEDULE')
 
-      const { data, error } = await client.rpc('calculate_appointment_change_policy', {
+      const { data, error } = await client.rpc('calculate_reservation_change', {
         p_appointment_id: appointmentId(url),
         p_action_type: changeType,
         p_requested_at: parsedRequestedAt.toISOString(),
+        p_change_origin: origin,
+        p_new_contract_value: newContractValue,
       })
       if (error) throw new Error(error.message)
-      const financeScoped = canViewFinance ? data : redactFinance(data)
-      return json(canManageFinance ? financeScoped : redactSettlementDecisions(financeScoped))
+      return json(canViewFinance ? data : redactFinance(data))
     }
 
     if (action === 'amelia') {
