@@ -13,8 +13,8 @@ insert into public.service_employees(id,service_id,employee_id)
 values ('95000000-0000-0000-0000-000000000011','95000000-0000-0000-0000-000000000010','95000000-0000-0000-0000-000000000002');
 insert into public.customers(id,name,email,phone,cpf_cnpj)
 values ('95000000-0000-0000-0000-000000000020','Token Revoke Customer','revoke@example.com','48999994444','52998224725');
-insert into public.appointments(id,public_code,service_id,service_employee_id,service_name_snapshot,primary_customer_id,status,financial_status,start_at,end_at,duration_minutes,people_count,commercial_value)
-values ('95000000-0000-0000-0000-000000000030','TOKEN-REVOKE-1','95000000-0000-0000-0000-000000000010','95000000-0000-0000-0000-000000000011','Token Revoke Service','95000000-0000-0000-0000-000000000020','CONFIRMED','PARTIALLY_PAID','2035-11-01 09:00:00-03','2035-11-01 10:00:00-03',60,1,100);
+insert into public.appointments(id,public_code,service_id,service_employee_id,service_name_snapshot,primary_customer_id,status,financial_status,start_at,end_at,core_start_at,core_end_at,duration_minutes,people_count,commercial_value)
+values ('95000000-0000-0000-0000-000000000030','TOKEN-REVOKE-1','95000000-0000-0000-0000-000000000010','95000000-0000-0000-0000-000000000011','Token Revoke Service','95000000-0000-0000-0000-000000000020','CONFIRMED','PARTIALLY_PAID','2035-11-01 09:00:00-03','2035-11-01 10:00:00-03','2035-11-01 09:00:00-03','2035-11-01 10:00:00-03',60,1,100);
 
 create temporary table token_one as
 select public.service_issue_appointment_action_token('95000000-0000-0000-0000-000000000030','RESCHEDULE','EMAIL','r***@example.com','revoke-issue-1') payload;
@@ -25,7 +25,7 @@ select ok(
 );
 
 update public.appointments
-set start_at='2035-11-01 11:00:00-03',end_at='2035-11-01 12:00:00-03'
+set start_at='2035-11-01 11:00:00-03',end_at='2035-11-01 12:00:00-03',core_start_at='2035-11-01 11:00:00-03',core_end_at='2035-11-01 12:00:00-03'
 where id='95000000-0000-0000-0000-000000000030';
 
 select ok(
