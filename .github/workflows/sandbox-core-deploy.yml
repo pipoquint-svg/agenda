@@ -117,6 +117,8 @@ jobs:
             admin-appointment-actions
             admin-reschedule-actions
             admin-pre-reservations
+            kommo-sync
+            integration-worker
           )
           for fn in "${functions[@]}"; do
             supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api
@@ -163,6 +165,6 @@ jobs:
             echo '- Cobranças reais permitidas: `false`'
             echo '- Migration history: validado contra versões de `main`'
             echo '- Google provider: não implantado por este workflow'
-            echo '- Kommo provider: não habilitado por este workflow'
+            echo '- Kommo adapter/worker: código implantado, sincronização permanece condicionada a settings enabled e gate #112'
             echo '- Mercado Pago provider: não alterado por este workflow'
           } >> "$GITHUB_STEP_SUMMARY"
