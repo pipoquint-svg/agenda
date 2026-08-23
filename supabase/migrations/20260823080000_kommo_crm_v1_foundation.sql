@@ -179,15 +179,17 @@ begin
     raise exception using errcode = 'P0001', message = 'KOMMO_EVENT_KIND_INVALID';
   end if;
 
-  select a.*, s.operation_scope
-  into v_appointment, v_scope
-  from public.appointments a
-  join public.services s on s.id = a.service_id
-  where a.id = p_appointment_id;
+  select * into v_appointment
+  from public.appointments
+  where id = p_appointment_id;
 
   if not found then
     raise exception using errcode = 'P0001', message = 'APPOINTMENT_NOT_FOUND';
   end if;
+
+  select operation_scope into v_scope
+  from public.services
+  where id = v_appointment.service_id;
 
   select enabled into v_enabled
   from public.kommo_integration_settings
