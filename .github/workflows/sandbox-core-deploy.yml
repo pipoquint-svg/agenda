@@ -118,7 +118,9 @@ jobs:
             admin-reschedule-actions
             admin-pre-reservations
             kommo-sync
+            email-send
             integration-worker
+            integration-worker-trigger
           )
           for fn in "${functions[@]}"; do
             supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api
@@ -152,6 +154,26 @@ jobs:
             exit 1
           fi
 
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/email-send")"
+          if [[ "$status" != "401" ]] || ! grep -q 'INTERNAL_AUTH_REQUIRED' "$body"; then
+            echo "email-send custom auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/integration-worker-trigger")"
+          if [[ "$status" != "401" ]] || ! grep -q 'GITHUB_OIDC_REQUIRED' "$body"; then
+            echo "integration-worker-trigger OIDC smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
       - name: Record evidence
         if: always()
         shell: bash
@@ -166,5 +188,6 @@ jobs:
             echo '- Migration history: validado contra versões de `main`'
             echo '- Google provider: não implantado por este workflow'
             echo '- Kommo adapter/worker: código implantado, sincronização permanece condicionada a settings enabled e gate #112'
+            echo '- Email adapter/worker/trigger: código implantado; flags LIVE permanecem em Edge secrets e não são alteradas pelo deploy'
             echo '- Mercado Pago provider: não alterado por este workflow'
           } >> "$GITHUB_STEP_SUMMARY"
