@@ -9,6 +9,7 @@ import {
   type AmeliaHistoryRecord,
   type AppointmentDetailResponse,
 } from './adminAgendaApi'
+import { AppointmentAuditPanel } from './AppointmentAuditPanel'
 import { AppointmentChangePreview } from './AppointmentChangePreview'
 import { supabase } from './supabase'
 
@@ -127,6 +128,7 @@ function DetailPanel({ detail, accessToken, onClose }: { detail: AppointmentDeta
       </div>
 
       <AppointmentChangePreview appointmentId={appointment.id} accessToken={accessToken} appointmentStatus={appointment.status} />
+      <AppointmentAuditPanel appointmentId={appointment.id} accessToken={accessToken} />
 
       <section className="agenda-detail-section">
         <h3>Recursos ocupados</h3>
