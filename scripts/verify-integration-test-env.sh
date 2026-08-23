@@ -30,11 +30,8 @@ need MERCADO_PAGO_ENV
 need MERCADO_PAGO_ACCESS_TOKEN
 need MERCADO_PAGO_TEST_USER_ID
 
-# WhatsApp: explicit test mode and recipient allowlist.
-need WHATSAPP_TEST_MODE
-[[ "$WHATSAPP_TEST_MODE" == "true" ]] || fail "WhatsApp deve estar explicitamente em modo de teste"
-need WHATSAPP_TEST_RECIPIENT_ALLOWLIST
-[[ -n "$WHATSAPP_TEST_RECIPIENT_ALLOWLIST" ]] || fail "allowlist de destinatarios de teste vazia"
+# Direct WhatsApp/Meta is intentionally absent from the Agenda V1.12 provider gate.
+# Communication for BlackSheep is delegated to Kommo and has its own provider gate.
 
 # Production references and side effects are forbidden in sandbox.
 if [[ -n "${PRODUCTION_CALENDAR_IDS:-}" ]]; then
@@ -49,10 +46,6 @@ if [[ "${ALLOW_REAL_CHARGES:-false}" == "true" ]]; then
   fail "cobrancas reais sao proibidas no sandbox"
 fi
 
-if [[ "${ALLOW_REAL_WHATSAPP_RECIPIENTS:-false}" == "true" ]]; then
-  fail "destinatarios reais de WhatsApp sao proibidos no sandbox"
-fi
-
 echo "PRE-FLIGHT PASSOU: ambiente declarado como isolado."
 echo "Google strategy: $GOOGLE_AUTH_STRATEGY"
 echo "Google test project: $GOOGLE_TEST_PROJECT_ID"
@@ -60,4 +53,4 @@ echo "Google test account: $GOOGLE_TEST_ACCOUNT_EMAIL"
 echo "Google calendar prefix: $GOOGLE_TEST_CALENDAR_PREFIX"
 echo "Google write scope: presente"
 echo "Mercado Pago: sandbox / test user declarado"
-echo "WhatsApp: test mode / allowlist declarada"
+echo "WhatsApp direto: fora do escopo da Agenda V1.12"
