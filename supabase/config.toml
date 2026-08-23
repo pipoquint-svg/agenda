@@ -64,6 +64,11 @@ verify_jwt = false
 [functions.mercado-pago-webhook]
 verify_jwt = false
 
+# Sandbox-only HTTPS page. It hard-fails unless APP_ENV=staging,
+# MERCADO_PAGO_ENV=sandbox and real charges/customer data are disabled.
+[functions.mercado-pago-card-staging]
+verify_jwt = false
+
 # Opaque pre-reservation tokens are resolved only behind distributed rate limiting.
 [functions.prebook-access]
 verify_jwt = false
