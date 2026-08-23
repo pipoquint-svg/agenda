@@ -2,7 +2,7 @@
 -- final cancel/apply steps even when the policy action explicitly said CLIENT.
 -- Rewrite only that final audit argument, preserving the already-tested workflow body.
 
-do $$
+do $do$
 declare
   v_def text;
   v_new text;
@@ -19,9 +19,9 @@ begin
   end if;
   execute v_new;
 end;
-$$;
+$do$;
 
-do $$
+do $do$
 declare
   v_def text;
   v_new text;
@@ -38,4 +38,4 @@ begin
   end if;
   execute v_new;
 end;
-$$;
+$do$;
