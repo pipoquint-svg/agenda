@@ -1,9 +1,15 @@
 export type MercadoPagoNormalizedStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
 
 export type MercadoPagoPaymentSnapshot = {
+  // Provider resource id. In the Orders API this is the Order id (ORD...).
   id: string
-  status: string | null
+  provider_transaction_id: string | null
+  provider_transaction_count: number
+  // Stable client-facing status used by the Agenda UI.
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | null
+  // Raw Mercado Pago detail for diagnostics and state-machine evidence.
   status_detail: string | null
+  raw_status: string | null
   payment_method_id: string | null
   payment_type_id: string | null
   transaction_amount: number | null
@@ -19,7 +25,6 @@ export type MercadoPagoPaymentSnapshot = {
   } | null
   three_ds_info?: {
     external_resource_url?: string | null
-    creq?: string | null
   } | null
 }
 
@@ -42,6 +47,24 @@ function moneyToCents(value: number | string | null | undefined): number {
   const amount = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(amount)) throw new Error('MERCADO_PAGO_PAYMENT_AMOUNT_INVALID')
   return Math.round(amount * 100)
+}
+
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : value != null ? String(value) : null
+}
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function firstOrderPayment(raw: Record<string, unknown>): {
+  payment: Record<string, unknown> | null
+  count: number
+} {
+  const transactions = object(raw.transactions)
+  const payments = Array.isArray(transactions?.payments) ? transactions?.payments as unknown[] : []
+  const payment = payments.length > 0 ? object(payments[0]) : null
+  return { payment, count: payments.length }
 }
 
 export function parseMercadoPagoSignature(value: string): { ts: string; v1: string } {
@@ -80,59 +103,85 @@ export async function verifyMercadoPagoWebhookSignature(input: {
   return crypto.subtle.verify('HMAC', key, hexToArrayBuffer(parsed.v1), encoder.encode(manifest))
 }
 
+function orderStatusForClient(status: string | null | undefined, statusDetail?: string | null): MercadoPagoPaymentSnapshot['status'] {
+  const raw = (status ?? '').toLowerCase()
+  const detail = (statusDetail ?? '').toLowerCase()
+  if (raw === 'processed' || raw === 'approved') return 'approved'
+  if (raw === 'expired' || (raw === 'canceled' && detail === 'expired') || (raw === 'cancelled' && detail === 'expired')) return 'expired'
+  if (raw === 'failed' || raw === 'rejected' || raw === 'canceled' || raw === 'cancelled') return 'rejected'
+  if (raw === 'action_required' || raw === 'processing' || raw === 'created' || raw === 'pending' || raw === 'in_process' || raw === 'authorized' || raw === 'in_mediation') return 'pending'
+  return 'pending'
+}
+
 export function normalizeMercadoPagoPaymentStatus(status: string | null | undefined): MercadoPagoNormalizedStatus {
   switch ((status ?? '').toLowerCase()) {
     case 'approved':
+    case 'processed':
       return 'APPROVED'
     case 'rejected':
+    case 'failed':
     case 'cancelled':
+    case 'canceled':
       return 'REJECTED'
     case 'expired':
       return 'EXPIRED'
     case 'pending':
+    case 'action_required':
+    case 'processing':
+    case 'created':
     case 'in_process':
     case 'authorized':
     case 'in_mediation':
-      return 'PENDING'
     default:
       return 'PENDING'
   }
 }
 
+/**
+ * Normalizes a Checkout Transparente Orders API response into the compact shape
+ * already consumed by the Agenda checkout. One Agenda charge maps to exactly one
+ * Mercado Pago Order with exactly one payment transaction.
+ */
 export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): MercadoPagoPaymentSnapshot {
-  const poi = raw.point_of_interaction && typeof raw.point_of_interaction === 'object'
-    ? raw.point_of_interaction as Record<string, unknown>
-    : null
-  const transactionData = poi?.transaction_data && typeof poi.transaction_data === 'object'
-    ? poi.transaction_data as Record<string, unknown>
-    : null
-  const threeDs = raw.three_ds_info && typeof raw.three_ds_info === 'object'
-    ? raw.three_ds_info as Record<string, unknown>
-    : null
+  const { payment, count } = firstOrderPayment(raw)
+  const paymentMethod = object(payment?.payment_method)
+  const transactionSecurity = object(paymentMethod?.transaction_security)
 
-  const text = (value: unknown): string | null => typeof value === 'string' && value ? value : value != null ? String(value) : null
-  const amount = typeof raw.transaction_amount === 'number' ? raw.transaction_amount : Number(raw.transaction_amount)
+  const rawStatus = text(payment?.status) ?? text(raw.status)
+  const statusDetail = text(payment?.status_detail) ?? text(raw.status_detail)
+  const clientStatus = orderStatusForClient(rawStatus, statusDetail)
+  const amountRaw = payment?.amount ?? raw.total_amount
+  const amount = typeof amountRaw === 'number' ? amountRaw : Number(amountRaw)
+  const lastUpdated = text(payment?.last_updated_date) ?? text(raw.last_updated_date)
+  const dateCreated = text(payment?.created_date) ?? text(raw.created_date)
+
+  const qrCode = text(paymentMethod?.qr_code)
+  const qrBase64 = text(paymentMethod?.qr_code_base64)
+  const ticketUrl = text(paymentMethod?.ticket_url)
+  const challengeUrl = text(transactionSecurity?.url)
 
   return {
     id: text(raw.id) ?? '',
-    status: text(raw.status),
-    status_detail: text(raw.status_detail),
-    payment_method_id: text(raw.payment_method_id),
-    payment_type_id: text(raw.payment_type_id),
+    provider_transaction_id: text(payment?.id),
+    provider_transaction_count: count,
+    status: clientStatus,
+    status_detail: statusDetail,
+    raw_status: rawStatus,
+    payment_method_id: text(paymentMethod?.id),
+    payment_type_id: text(paymentMethod?.type),
     transaction_amount: Number.isFinite(amount) ? amount : null,
     external_reference: text(raw.external_reference),
-    date_approved: text(raw.date_approved),
-    date_created: text(raw.date_created),
-    point_of_interaction: transactionData ? {
+    date_approved: clientStatus === 'approved' ? lastUpdated : null,
+    date_created: dateCreated,
+    point_of_interaction: qrCode || qrBase64 || ticketUrl ? {
       transaction_data: {
-        qr_code: text(transactionData.qr_code),
-        qr_code_base64: text(transactionData.qr_code_base64),
-        ticket_url: text(transactionData.ticket_url),
+        qr_code: qrCode,
+        qr_code_base64: qrBase64,
+        ticket_url: ticketUrl,
       },
     } : undefined,
-    three_ds_info: threeDs ? {
-      external_resource_url: text(threeDs.external_resource_url),
-      creq: text(threeDs.creq),
+    three_ds_info: challengeUrl ? {
+      external_resource_url: challengeUrl,
     } : undefined,
   }
 }
@@ -140,8 +189,11 @@ export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): Mercad
 export function mercadoPagoPaymentStorageSnapshot(snapshot: MercadoPagoPaymentSnapshot): Record<string, unknown> {
   return {
     id: snapshot.id,
+    provider_transaction_id: snapshot.provider_transaction_id,
+    provider_transaction_count: snapshot.provider_transaction_count,
     status: snapshot.status,
     status_detail: snapshot.status_detail,
+    raw_status: snapshot.raw_status,
     payment_method_id: snapshot.payment_method_id,
     payment_type_id: snapshot.payment_type_id,
     transaction_amount: snapshot.transaction_amount,
@@ -155,7 +207,11 @@ export function assertMercadoPagoPaymentMatchesIntent(
   snapshot: MercadoPagoPaymentSnapshot,
   expected: MercadoPagoExpectedIntent,
 ): void {
+  // The provider id is the Order id in the current integration.
   if (!snapshot.id) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISSING')
+  if (snapshot.provider_transaction_count !== 1 || !snapshot.provider_transaction_id) {
+    throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
+  }
   if (!expected.transactionId || snapshot.external_reference !== expected.transactionId) {
     throw new Error('MERCADO_PAGO_EXTERNAL_REFERENCE_MISMATCH')
   }
@@ -164,16 +220,14 @@ export function assertMercadoPagoPaymentMatchesIntent(
   }
 
   if (expected.method === 'PIX') {
-    if ((snapshot.payment_method_id ?? '').toLowerCase() !== 'pix') {
+    if ((snapshot.payment_method_id ?? '').toLowerCase() !== 'pix'
+      || (snapshot.payment_type_id ?? '').toLowerCase() !== 'bank_transfer') {
       throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
     }
     return
   }
 
-  if ((snapshot.payment_method_id ?? '').toLowerCase() === 'pix') {
-    throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
-  }
-  if (snapshot.payment_type_id && snapshot.payment_type_id.toLowerCase() !== 'credit_card') {
+  if ((snapshot.payment_type_id ?? '').toLowerCase() !== 'credit_card') {
     throw new Error('MERCADO_PAGO_PAYMENT_METHOD_MISMATCH')
   }
   if (expected.providerPaymentMethodId

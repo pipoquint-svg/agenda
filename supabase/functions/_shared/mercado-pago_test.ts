@@ -20,15 +20,15 @@ async function hmacHex(secret: string, text: string): Promise<string> {
   return Array.from(result).map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-Deno.test('Mercado Pago webhook manifest preserves data id and validates HMAC', async () => {
-  const manifest = buildMercadoPagoWebhookManifest('AbC123', 'request-xyz', '1704908010')
-  assert(manifest === 'id:AbC123;request-id:request-xyz;ts:1704908010;', 'unexpected manifest')
+Deno.test('Mercado Pago webhook manifest preserves Order data id and validates HMAC', async () => {
+  const manifest = buildMercadoPagoWebhookManifest('ORD01ABC', 'request-xyz', '1704908010')
+  assert(manifest === 'id:ORD01ABC;request-id:request-xyz;ts:1704908010;', 'unexpected manifest')
   const secret = 'test-secret'
   const signature = await hmacHex(secret, manifest)
   const valid = await verifyMercadoPagoWebhookSignature({
     signature: `ts=1704908010,v1=${signature}`,
     requestId: 'request-xyz',
-    dataId: 'AbC123',
+    dataId: 'ORD01ABC',
     secret,
   })
   assert(valid, 'expected valid signature')
@@ -36,63 +36,135 @@ Deno.test('Mercado Pago webhook manifest preserves data id and validates HMAC', 
   const invalid = await verifyMercadoPagoWebhookSignature({
     signature: `ts=1704908010,v1=${signature}`,
     requestId: 'other-request',
-    dataId: 'AbC123',
+    dataId: 'ORD01ABC',
     secret,
   })
   assert(!invalid, 'changed request id must invalidate signature')
 })
 
-Deno.test('Mercado Pago statuses normalize conservatively', () => {
-  assert(normalizeMercadoPagoPaymentStatus('approved') === 'APPROVED', 'approved')
-  assert(normalizeMercadoPagoPaymentStatus('rejected') === 'REJECTED', 'rejected')
-  assert(normalizeMercadoPagoPaymentStatus('cancelled') === 'REJECTED', 'cancelled')
+Deno.test('Mercado Pago Order statuses normalize conservatively', () => {
+  assert(normalizeMercadoPagoPaymentStatus('processed') === 'APPROVED', 'processed')
+  assert(normalizeMercadoPagoPaymentStatus('failed') === 'REJECTED', 'failed')
+  assert(normalizeMercadoPagoPaymentStatus('canceled') === 'REJECTED', 'canceled')
   assert(normalizeMercadoPagoPaymentStatus('expired') === 'EXPIRED', 'expired')
-  assert(normalizeMercadoPagoPaymentStatus('in_process') === 'PENDING', 'in process')
+  assert(normalizeMercadoPagoPaymentStatus('action_required') === 'PENDING', 'action required')
+  assert(normalizeMercadoPagoPaymentStatus('processing') === 'PENDING', 'processing')
   assert(normalizeMercadoPagoPaymentStatus('unknown_future_status') === 'PENDING', 'unknown should fail conservative')
 })
 
-Deno.test('client snapshot excludes raw payer/card data and storage snapshot drops transient PIX/3DS instructions', () => {
+Deno.test('Orders PIX snapshot exposes transient QR only to client and keeps storage minimal', () => {
   const snapshot = sanitizeMercadoPagoPayment({
-    id: 123,
-    status: 'pending',
-    status_detail: 'pending_challenge',
-    payment_method_id: 'master',
-    payment_type_id: 'credit_card',
-    transaction_amount: 475,
-    external_reference: 'tx-id',
+    id: 'ORD01PIX',
+    status: 'action_required',
+    status_detail: 'waiting_transfer',
+    external_reference: '11111111-1111-4111-8111-111111111111',
+    total_amount: '475.00',
+    created_date: '2026-08-23T00:00:00Z',
     payer: { email: 'secret@example.com', identification: { number: '52998224725' } },
-    card: { first_six_digits: '123456', last_four_digits: '7890' },
-    point_of_interaction: { transaction_data: { qr_code: 'PIX-CODE', qr_code_base64: 'BASE64', ticket_url: 'https://example.test/pix' } },
-    three_ds_info: { external_resource_url: 'https://acs.example.test/challenge', creq: 'challenge-request' },
+    transactions: {
+      payments: [{
+        id: 'PAY01PIX',
+        amount: '475.00',
+        status: 'action_required',
+        status_detail: 'waiting_transfer',
+        payment_method: {
+          id: 'pix',
+          type: 'bank_transfer',
+          qr_code: 'PIX-CODE',
+          qr_code_base64: 'BASE64',
+          ticket_url: 'https://example.test/pix',
+        },
+      }],
+    },
   })
+
   const clientSerialized = JSON.stringify(snapshot)
-  assert(snapshot.id === '123', 'provider id')
-  assert(snapshot.point_of_interaction?.transaction_data?.qr_code === 'PIX-CODE', 'client still receives pix instructions')
-  assert(snapshot.three_ds_info?.creq === 'challenge-request', 'client still receives 3DS challenge data')
+  assert(snapshot.id === 'ORD01PIX', 'order id')
+  assert(snapshot.provider_transaction_id === 'PAY01PIX', 'provider transaction id')
+  assert(snapshot.status === 'pending', 'client status')
+  assert(snapshot.point_of_interaction?.transaction_data?.qr_code === 'PIX-CODE', 'client receives pix instructions')
   assert(!clientSerialized.includes('secret@example.com'), 'payer must not be exposed in sanitized snapshot')
-  assert(!clientSerialized.includes('123456'), 'card digits must not be exposed in sanitized snapshot')
+  assert(!clientSerialized.includes('52998224725'), 'document must not be exposed in sanitized snapshot')
 
   const stored = JSON.stringify(mercadoPagoPaymentStorageSnapshot(snapshot))
-  assert(stored.includes('pending_challenge'), 'storage keeps provider status evidence')
+  assert(stored.includes('waiting_transfer'), 'storage keeps provider status evidence')
+  assert(stored.includes('PAY01PIX'), 'storage keeps provider transaction id')
   assert(!stored.includes('PIX-CODE'), 'storage must not retain PIX copy/paste payload')
   assert(!stored.includes('BASE64'), 'storage must not retain PIX QR image')
-  assert(!stored.includes('challenge-request'), 'storage must not retain 3DS creq')
-  assert(!stored.includes('acs.example.test'), 'storage must not retain 3DS challenge URL')
+  assert(!stored.includes('example.test/pix'), 'storage must not retain PIX ticket URL')
 })
 
-Deno.test('provider payment must match internal intent by reference, amount and method', () => {
+Deno.test('Orders 3DS snapshot returns challenge URL but storage drops it', () => {
+  const snapshot = sanitizeMercadoPagoPayment({
+    id: 'ORD01CARD',
+    status: 'action_required',
+    status_detail: 'pending_challenge',
+    external_reference: '22222222-2222-4222-8222-222222222222',
+    total_amount: '500.00',
+    transactions: {
+      payments: [{
+        id: 'PAY01CARD',
+        amount: '500.00',
+        status: 'action_required',
+        status_detail: 'pending_challenge',
+        payment_method: {
+          id: 'master',
+          type: 'credit_card',
+          installments: 1,
+          token: 'must-never-be-exposed',
+          transaction_security: {
+            url: 'https://www.mercadopago.com.br/auth/card/challenge-token',
+            validation: 'on_fraud_risk',
+            liability_shift: 'required',
+          },
+        },
+      }],
+    },
+  })
+
+  assert(snapshot.status === 'pending', 'challenge remains pending')
+  assert(snapshot.three_ds_info?.external_resource_url?.startsWith('https://'), 'client receives challenge URL')
+  const clientSerialized = JSON.stringify(snapshot)
+  assert(!clientSerialized.includes('must-never-be-exposed'), 'card token must not be exposed')
+
+  const stored = JSON.stringify(mercadoPagoPaymentStorageSnapshot(snapshot))
+  assert(!stored.includes('challenge-token'), 'storage must not retain 3DS challenge URL')
+})
+
+Deno.test('Order must match internal intent by reference, amount, one transaction and method', () => {
   const pix = sanitizeMercadoPagoPayment({
-    id: 'mp-1', status: 'approved', payment_method_id: 'pix', payment_type_id: 'bank_transfer',
-    transaction_amount: '475.00', external_reference: '11111111-1111-4111-8111-111111111111',
+    id: 'ORD01PIX',
+    status: 'action_required',
+    status_detail: 'waiting_transfer',
+    total_amount: '475.00',
+    external_reference: '11111111-1111-4111-8111-111111111111',
+    transactions: {
+      payments: [{
+        id: 'PAY01PIX', amount: '475.00', status: 'action_required', status_detail: 'waiting_transfer',
+        payment_method: { id: 'pix', type: 'bank_transfer' },
+      }],
+    },
   })
   assertMercadoPagoPaymentMatchesIntent(pix, {
     transactionId: '11111111-1111-4111-8111-111111111111', cashAmount: 475, method: 'PIX',
   })
 
   const card = sanitizeMercadoPagoPayment({
-    id: 'mp-2', status: 'pending', payment_method_id: 'master', payment_type_id: 'credit_card',
-    transaction_amount: 500, external_reference: '22222222-2222-4222-8222-222222222222',
+    id: 'ORD01CARD',
+    status: 'processed',
+    status_detail: 'accredited',
+    total_amount: '500.00',
+    external_reference: '22222222-2222-4222-8222-222222222222',
+    last_updated_date: '2026-08-23T00:00:00Z',
+    transactions: {
+      payments: [{
+        id: 'PAY01CARD', amount: '500.00', status: 'processed', status_detail: 'accredited',
+        payment_method: { id: 'master', type: 'credit_card', installments: 1 },
+      }],
+    },
   })
+  assert(card.status === 'approved', 'processed order maps to approved client status')
+  assert(card.date_approved === '2026-08-23T00:00:00Z', 'approved provider timestamp')
   assertMercadoPagoPaymentMatchesIntent(card, {
     transactionId: '22222222-2222-4222-8222-222222222222', cashAmount: '500.00', method: 'CARD', providerPaymentMethodId: 'master',
   })
@@ -106,8 +178,32 @@ Deno.test('provider payment must match internal intent by reference, amount and 
   for (const run of invalidCases) {
     let rejected = false
     try { run() } catch { rejected = true }
-    assert(rejected, 'mismatched provider payment must be rejected')
+    assert(rejected, 'mismatched provider Order must be rejected')
   }
+})
+
+Deno.test('Order with multiple provider payment transactions is rejected', () => {
+  const multiple = sanitizeMercadoPagoPayment({
+    id: 'ORD01MULTI',
+    status: 'processed',
+    total_amount: '500.00',
+    external_reference: '22222222-2222-4222-8222-222222222222',
+    transactions: {
+      payments: [
+        { id: 'PAY1', amount: '250.00', payment_method: { id: 'master', type: 'credit_card' } },
+        { id: 'PAY2', amount: '250.00', payment_method: { id: 'master', type: 'credit_card' } },
+      ],
+    },
+  })
+  let rejected = false
+  try {
+    assertMercadoPagoPaymentMatchesIntent(multiple, {
+      transactionId: '22222222-2222-4222-8222-222222222222', cashAmount: 500, method: 'CARD', providerPaymentMethodId: 'master',
+    })
+  } catch {
+    rejected = true
+  }
+  assert(rejected, 'Agenda must never accept multi-transaction Order for one internal charge')
 })
 
 Deno.test('card submission accepts only tokenized bounded data', () => {

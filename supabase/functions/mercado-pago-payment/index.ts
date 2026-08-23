@@ -65,17 +65,25 @@ function appointmentToken(req: Request): string {
   return value
 }
 
+function moneyString(value: number | string): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('PAYMENT_AMOUNT_INVALID')
+  return (Math.round(amount * 100) / 100).toFixed(2)
+}
+
 function providerErrorSnapshot(status: number, raw: unknown): Record<string, unknown> {
   const row = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const errors = Array.isArray(row.errors) ? row.errors : Array.isArray(row.cause) ? row.cause : []
   return {
     http_status: status,
     error: typeof row.error === 'string' ? row.error : null,
     message: typeof row.message === 'string' ? row.message.slice(0, 500) : null,
     status: typeof row.status === 'number' || typeof row.status === 'string' ? row.status : null,
-    cause: Array.isArray(row.cause) ? row.cause.slice(0, 5).map((item) => {
-      const cause = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      return { code: cause.code ?? null, description: cause.description ?? null }
-    }) : [],
+    status_detail: typeof row.status_detail === 'string' ? row.status_detail.slice(0, 200) : null,
+    errors: errors.slice(0, 5).map((item) => {
+      const error = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      return { code: error.code ?? null, message: error.message ?? error.description ?? null }
+    }),
   }
 }
 
@@ -99,16 +107,16 @@ async function mercadoPagoRequest(url: string, init: RequestInit): Promise<{ sta
   }
 }
 
-async function mercadoPagoCreatePayment(body: Record<string, unknown>, idempotencyKey: string) {
-  return mercadoPagoRequest('https://api.mercadopago.com/v1/payments', {
+async function mercadoPagoCreateOrder(body: Record<string, unknown>, idempotencyKey: string) {
+  return mercadoPagoRequest('https://api.mercadopago.com/v1/orders', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey },
     body: JSON.stringify(body),
   })
 }
 
-async function mercadoPagoGetPayment(paymentId: string) {
-  return mercadoPagoRequest(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { method: 'GET' })
+async function mercadoPagoGetOrder(orderId: string) {
+  return mercadoPagoRequest(`https://api.mercadopago.com/v1/orders/${encodeURIComponent(orderId)}`, { method: 'GET' })
 }
 
 async function loadContext(token: string): Promise<PaymentContext> {
@@ -173,8 +181,10 @@ Deno.serve(async (req) => {
     const context = await loadContext(token)
 
     if (input?.action === 'SYNC') {
-      const providerPaymentId = typeof input?.provider_payment_id === 'string' ? input.provider_payment_id.trim() : ''
-      if (!/^[A-Za-z0-9_-]{1,100}$/.test(providerPaymentId)) throw new Error('PROVIDER_PAYMENT_ID_INVALID')
+      // Kept as provider_payment_id in the public contract for backward compatibility;
+      // with Orders API the stored provider resource is the Order id (ORD...).
+      const providerOrderId = typeof input?.provider_payment_id === 'string' ? input.provider_payment_id.trim() : ''
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(providerOrderId)) throw new Error('PROVIDER_PAYMENT_ID_INVALID')
 
       const { data: transaction, error: transactionError } = await client
         .from('payment_transactions')
@@ -182,20 +192,20 @@ Deno.serve(async (req) => {
         .eq('appointment_id', context.appointment_id)
         .eq('provider', 'MERCADO_PAGO')
         .eq('transaction_type', 'CHARGE')
-        .eq('provider_payment_id', providerPaymentId)
+        .eq('provider_payment_id', providerOrderId)
         .maybeSingle()
       if (transactionError) throw new Error(`PAYMENT_LOOKUP_FAILED:${transactionError.message}`)
       if (!transaction?.id) throw new Error('PAYMENT_NOT_FOUND')
       if (transaction.method !== 'PIX' && transaction.method !== 'CARD') throw new Error('PAYMENT_METHOD_INVALID')
 
-      const provider = await mercadoPagoGetPayment(providerPaymentId)
+      const provider = await mercadoPagoGetOrder(providerOrderId)
       if (provider.status < 200 || provider.status >= 300) throw new Error(`MERCADO_PAGO_LOOKUP_FAILED:${provider.status}`)
       const snapshot = sanitizeMercadoPagoPayment(provider.data)
       const storedSnapshot = mercadoPagoPaymentStorageSnapshot(snapshot)
 
       let validationError: unknown = null
       if (!snapshot.id) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISSING')
-      else if (snapshot.id !== providerPaymentId) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
+      else if (snapshot.id !== providerOrderId) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
       else {
         try {
           assertMercadoPagoPaymentMatchesIntent(snapshot, {
@@ -210,15 +220,15 @@ Deno.serve(async (req) => {
 
       if (validationError) {
         const reason = mismatchReason(validationError)
-        console.error('Mercado Pago sync did not match internal intent', { transactionId: transaction.id, providerPaymentId, reason })
+        console.error('Mercado Pago Order sync did not match internal intent', { transactionId: transaction.id, providerOrderId, reason })
         const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
           p_transaction_id: transaction.id,
-          p_provider_payment_id: snapshot.id || providerPaymentId,
+          p_provider_payment_id: snapshot.id || providerOrderId,
           p_reason: reason,
           p_payload_json: storedSnapshot,
         })
         if (quarantineError) {
-          console.error('Failed to quarantine Mercado Pago sync mismatch', quarantineError.message)
+          console.error('Failed to quarantine Mercado Pago Order sync mismatch', quarantineError.message)
           return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' } }, 503)
         }
         return response({ error: { code: 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' } }, 502)
@@ -229,7 +239,7 @@ Deno.serve(async (req) => {
         p_transaction_id: transaction.id,
         p_provider_payment_id: snapshot.id,
         p_normalized_status: normalized,
-        p_event_key: `poll:${snapshot.id}:${snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
+        p_event_key: `poll-order:${snapshot.id}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
         p_payload_json: storedSnapshot,
         p_paid_at: snapshot.date_approved,
       })
@@ -253,40 +263,53 @@ Deno.serve(async (req) => {
     const intent = intentData as Intent
 
     const identification = payerIdentification(context.payer.tax_id)
-    const cashAmount = Number(intent.cash_amount)
-    if (!Number.isFinite(cashAmount) || cashAmount <= 0) throw new Error('PAYMENT_AMOUNT_INVALID')
-
-    const providerBody: Record<string, unknown> = {
-      transaction_amount: cashAmount,
-      description: `BlackSheep Agenda - ${context.service_name}`.slice(0, 200),
-      external_reference: intent.transaction_id,
-      payer: { email: context.payer.email, identification },
-    }
-
-    const notificationUrl = Deno.env.get('MERCADO_PAGO_WEBHOOK_URL')?.trim()
-    if (notificationUrl) providerBody.notification_url = notificationUrl
+    const amount = moneyString(intent.cash_amount)
 
     let providerPaymentMethodId: string | null = null
+    let paymentMethod: Record<string, unknown>
+    const providerBody: Record<string, unknown> = {
+      type: 'online',
+      processing_mode: 'automatic',
+      external_reference: intent.transaction_id,
+      total_amount: amount,
+      payer: {
+        email: context.payer.email,
+        identification,
+      },
+      transactions: { payments: [] },
+    }
+
     if (method === 'PIX') {
       providerPaymentMethodId = 'pix'
-      providerBody.payment_method_id = 'pix'
+      paymentMethod = { id: 'pix', type: 'bank_transfer' }
     } else {
       const card = validateCardSubmission(input?.card)
       providerPaymentMethodId = card.paymentMethodId
-      providerBody.token = card.token
-      providerBody.payment_method_id = card.paymentMethodId
-      providerBody.installments = card.installments
-      providerBody.three_d_secure_mode = 'optional'
-      providerBody.capture = true
-      providerBody.binary_mode = false
-      if (card.issuerId) providerBody.issuer_id = card.issuerId
+      paymentMethod = {
+        id: card.paymentMethodId,
+        type: 'credit_card',
+        token: card.token,
+        installments: card.installments,
+      }
+      providerBody.config = {
+        online: {
+          transaction_security: {
+            validation: 'on_fraud_risk',
+            liability_shift: 'required',
+          },
+        },
+      }
+    }
+
+    providerBody.transactions = {
+      payments: [{ amount, payment_method: paymentMethod }],
     }
 
     let provider: { status: number; data: Record<string, unknown> }
     try {
-      provider = await mercadoPagoCreatePayment(providerBody, intent.transaction_id)
+      provider = await mercadoPagoCreateOrder(providerBody, intent.transaction_id)
     } catch (cause) {
-      console.error('Mercado Pago create payment unavailable', cause)
+      console.error('Mercado Pago create Order unavailable', cause)
       return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
     }
 
@@ -315,7 +338,7 @@ Deno.serve(async (req) => {
       })
     } catch (validationError) {
       const reason = mismatchReason(validationError)
-      console.error('Mercado Pago payment did not match internal intent', { transactionId: intent.transaction_id, providerPaymentId: snapshot.id || null, reason })
+      console.error('Mercado Pago Order did not match internal intent', { transactionId: intent.transaction_id, providerOrderId: snapshot.id || null, reason })
       const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
         p_transaction_id: intent.transaction_id,
         p_provider_payment_id: snapshot.id || null,
@@ -323,18 +346,18 @@ Deno.serve(async (req) => {
         p_payload_json: storedSnapshot,
       })
       if (quarantineError) {
-        console.error('Failed to quarantine Mercado Pago create mismatch', quarantineError.message)
+        console.error('Failed to quarantine Mercado Pago Order mismatch', quarantineError.message)
         return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
       }
       return response({ error: { code: 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' } }, 502)
     }
-    const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
 
+    const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
     const { data: applied, error: applyError } = await client.rpc('apply_provider_payment_status', {
       p_transaction_id: intent.transaction_id,
       p_provider_payment_id: snapshot.id,
       p_normalized_status: normalized,
-      p_event_key: `create:${snapshot.id}:${snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
+      p_event_key: `create-order:${snapshot.id}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
       p_payload_json: storedSnapshot,
       p_paid_at: snapshot.date_approved,
     })
@@ -355,7 +378,8 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
     if (code.startsWith('MERCADO_PAGO_') && code.includes('MISMATCH')) console.error('Mercado Pago validation failed', code)
-    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MISSING_ENV)/)?.[1] ?? (code.startsWith('MERCADO_PAGO_') && code.includes('MISMATCH') ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' : code.split(':')[0])
+    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MISSING_ENV)/)?.[1]
+      ?? (code.startsWith('MERCADO_PAGO_') && code.includes('MISMATCH') ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' : code.split(':')[0])
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'PAYMENT_HOLD_EXPIRED' ? 409
       : publicCode === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' ? 502

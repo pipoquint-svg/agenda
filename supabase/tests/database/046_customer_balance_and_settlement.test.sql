@@ -69,7 +69,7 @@ values ('60000000-0000-0000-0000-000000000023','BAL-LIMIT','60000000-0000-0000-0
 insert into public.appointment_policy_actions(appointment_id,action_type,status,original_start_at,hours_before_start,notice_hours_snapshot,is_inside_notice_window,contract_value_snapshot,net_paid_snapshot,penalty_type,penalty_value,penalty_amount,refundable_amount,change_origin)
 select '60000000-0000-0000-0000-000000000023','RESCHEDULE','APPLIED','2035-08-10 10:00:00-03',100,48,false,700,350,'NONE',0,0,0,'CLIENT' from generate_series(1,3);
 select throws_ok($$select public.enforce_appointment_reschedule_limit('60000000-0000-0000-0000-000000000023','CLIENT')$$,'P0001','CLIENT_RESCHEDULE_LIMIT_REACHED','fourth client reschedule is refused');
-select lives_ok($$select public.enforce_appointment_reschedule_limit('60000000-0000-0000-000000000023','OPERATION')$$,'operation-origin reschedule bypasses client lifetime limit');
+select lives_ok($$select public.enforce_appointment_reschedule_limit('60000000-0000-0000-0000-000000000023','OPERATION')$$,'operation-origin reschedule bypasses client lifetime limit');
 
 select * from finish();
 rollback;
