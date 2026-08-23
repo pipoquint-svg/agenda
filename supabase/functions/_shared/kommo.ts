@@ -28,6 +28,22 @@ export type KommoPipelineSettings = {
   stage_expired_id: number | null
 }
 
+export type KommoResolvedLeadField = {
+  id: number
+  type: string
+}
+
+export type KommoLeadCardFields = {
+  reservationDate: KommoResolvedLeadField
+  balance: KommoResolvedLeadField
+  rentalExtras: KommoResolvedLeadField
+}
+
+export type KommoRentalExtra = {
+  name?: string | null
+  quantity?: number | null
+}
+
 export function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const normalized = value.trim().toLowerCase()
@@ -107,16 +123,63 @@ export function kommoLeadName(serviceName: string | null | undefined, publicCode
   return code ? `${service} · ${code}` : service
 }
 
-export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
-  const needle = expectedName.trim().toLocaleLowerCase('pt-BR')
-  const named = fields.filter((field) => (field.name ?? '').trim().toLocaleLowerCase('pt-BR') === needle)
-  if (named.length !== 1) throw new Error(named.length === 0 ? 'KOMMO_RESERVATION_DATE_FIELD_MISSING' : 'KOMMO_RESERVATION_DATE_FIELD_AMBIGUOUS')
+function normalizeFieldName(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleLowerCase('pt-BR')
+}
+
+function resolveUniqueLeadField(
+  fields: KommoCustomField[],
+  expectedName: string,
+  allowedTypes: string[],
+  errorPrefix: string,
+): KommoResolvedLeadField {
+  const needle = normalizeFieldName(expectedName)
+  const named = fields.filter((field) => normalizeFieldName(field.name) === needle)
+  if (named.length !== 1) {
+    throw new Error(named.length === 0 ? `${errorPrefix}_MISSING` : `${errorPrefix}_AMBIGUOUS`)
+  }
 
   const field = named[0]
-  const type = (field.type ?? '').trim().toLowerCase()
-  if (type !== 'date' && type !== 'date_time') throw new Error('KOMMO_RESERVATION_DATE_FIELD_INVALID_TYPE')
-  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_RESERVATION_DATE_FIELD_INVALID_ID')
-  return Number(field.id)
+  const type = String(field.type ?? '').trim().toLowerCase()
+  if (!allowedTypes.includes(type)) throw new Error(`${errorPrefix}_INVALID_TYPE`)
+  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error(`${errorPrefix}_INVALID_ID`)
+  return { id: Number(field.id), type }
+}
+
+export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
+  return resolveUniqueLeadField(
+    fields,
+    expectedName,
+    ['date', 'date_time'],
+    'KOMMO_RESERVATION_DATE_FIELD',
+  ).id
+}
+
+export function resolveLeadCardFields(fields: KommoCustomField[]): KommoLeadCardFields {
+  return {
+    reservationDate: resolveUniqueLeadField(
+      fields,
+      'Data',
+      ['date', 'date_time'],
+      'KOMMO_RESERVATION_DATE_FIELD',
+    ),
+    balance: resolveUniqueLeadField(
+      fields,
+      'Saldo',
+      ['numeric', 'monetary', 'text', 'textarea'],
+      'KOMMO_BALANCE_FIELD',
+    ),
+    rentalExtras: resolveUniqueLeadField(
+      fields,
+      'Extras locação',
+      ['text', 'textarea'],
+      'KOMMO_RENTAL_EXTRAS_FIELD',
+    ),
+  }
 }
 
 export function kommoReservationDateValue(startAt: string | null | undefined): string {
@@ -138,6 +201,54 @@ export function kommoReservationDateValue(startAt: string | null | undefined): s
   // Kommo accepts RFC-3339 for date/date_time custom fields. Noon in the business
   // timezone avoids date-boundary shifts while the CRM renders the field as a date.
   return `${year}-${month}-${day}T12:00:00-03:00`
+}
+
+export function kommoLeadPrice(value: number | null | undefined): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('KOMMO_COMMERCIAL_VALUE_INVALID')
+  // Kommo's built-in lead price is an integer in the account currency.
+  return Math.round(parsed)
+}
+
+export function kommoBalanceValue(value: number | null | undefined): string {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('KOMMO_BALANCE_INVALID')
+  return parsed.toFixed(2)
+}
+
+export function formatRentalExtras(extras: KommoRentalExtra[] | null | undefined): string {
+  return (extras ?? [])
+    .map((extra) => {
+      const name = String(extra?.name ?? '').trim()
+      if (!name) return ''
+      const quantity = Number(extra?.quantity ?? 1)
+      const safeQuantity = Number.isInteger(quantity) && quantity > 0 ? quantity : 1
+      return safeQuantity > 1 ? `${safeQuantity}x ${name}` : name
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function buildLeadCardCustomFields(
+  fields: KommoLeadCardFields,
+  startAt: string | null | undefined,
+  balance: number | null | undefined,
+  extras: KommoRentalExtra[] | null | undefined,
+): Array<{ field_id: number; values: Array<{ value: string }> }> {
+  return [
+    {
+      field_id: fields.reservationDate.id,
+      values: [{ value: kommoReservationDateValue(startAt) }],
+    },
+    {
+      field_id: fields.balance.id,
+      values: [{ value: kommoBalanceValue(balance) }],
+    },
+    {
+      field_id: fields.rentalExtras.id,
+      values: [{ value: formatRentalExtras(extras) }],
+    },
+  ]
 }
 
 export function buildContactCustomFields(
