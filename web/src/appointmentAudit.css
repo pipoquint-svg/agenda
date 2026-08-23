@@ -1,0 +1,125 @@
+.appointment-audit {
+  margin-top: 1.5rem;
+}
+
+.audit-heading,
+.audit-event-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.audit-heading p,
+.audit-lockout p,
+.audit-event-card p {
+  margin: .35rem 0 0;
+}
+
+.audit-lockout {
+  display: grid;
+  gap: .8rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 14px;
+}
+
+.audit-lockout label {
+  display: grid;
+  gap: .35rem;
+}
+
+.audit-lockout input {
+  width: 100%;
+}
+
+.audit-timeline {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: .8rem;
+}
+
+.audit-timeline > li {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.audit-event-time {
+  font-size: .82rem;
+  opacity: .72;
+  padding-top: .8rem;
+}
+
+.audit-event-card {
+  padding: .9rem 1rem;
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.audit-event-title span {
+  font-size: .78rem;
+  opacity: .72;
+  white-space: nowrap;
+}
+
+.audit-event-details {
+  margin-top: .75rem;
+}
+
+.audit-event-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.audit-event-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: .35rem .75rem;
+  font-size: .82rem;
+}
+
+.audit-event-details dt {
+  font-weight: 700;
+}
+
+.audit-event-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-json {
+  margin-top: .75rem;
+}
+
+.audit-json pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .75rem;
+  padding: .75rem;
+  background: rgba(0, 0, 0, .04);
+  border-radius: 8px;
+}
+
+@media (max-width: 720px) {
+  .audit-heading,
+  .audit-event-title {
+    flex-direction: column;
+  }
+
+  .audit-timeline > li {
+    grid-template-columns: 1fr;
+    gap: .25rem;
+  }
+
+  .audit-event-time {
+    padding-top: 0;
+  }
+}
