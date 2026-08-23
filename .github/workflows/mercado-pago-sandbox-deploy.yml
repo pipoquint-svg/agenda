@@ -64,6 +64,40 @@ jobs:
             echo "MERCADO_PAGO_WEBHOOK_SECRET ainda ausente: permitido apenas no primeiro deploy, antes de cadastrar a URL no Mercado Pago."
           fi
 
+      - name: Validate Mercado Pago payment API scope read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error \
+            --output /tmp/mp-payment-scope.json \
+            --write-out '%{http_code}' \
+            --get \
+            --header 'accept: application/json' \
+            --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
+            --data-urlencode 'sort=date_created' \
+            --data-urlencode 'criteria=desc' \
+            --data-urlencode 'external_reference=blacksheep-sandbox-scope-preflight-no-payment' \
+            --data-urlencode 'limit=1' \
+            'https://api.mercadopago.com/v1/payments/search')"
+
+          python3 - "$status" <<'PY'
+          import json, sys
+          status = int(sys.argv[1])
+          try:
+              data = json.load(open('/tmp/mp-payment-scope.json'))
+          except Exception:
+              data = {}
+          if status == 200:
+              print('Mercado Pago Payments API: acesso de leitura confirmado; nenhum pagamento criado.')
+              raise SystemExit(0)
+          message = data.get('message') or data.get('error') or 'sem mensagem'
+          if status == 401:
+              print('Mercado Pago Payments API recusou a credencial (401). A credencial não possui autorização payment válida para este endpoint.')
+          else:
+              print(f'Mercado Pago Payments API preflight falhou: HTTP {status}: {message}')
+          raise SystemExit(1)
+          PY
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
@@ -161,6 +195,6 @@ jobs:
               echo "- Webhook signing secret: PENDENTE (primeiro deploy)"
             fi
             echo
-            echo "Este workflow apenas publica/configura o sandbox e testa o boundary de autenticação do webhook."
+            echo "Este workflow publica/configura o sandbox somente após um preflight read-only do acesso à Payments API."
             echo "PIX/cartão/3DS/webhook assinado permanecem NÃO TESTADOS até a matriz real de sandbox ser executada."
           } >> "$GITHUB_STEP_SUMMARY"
