@@ -64,22 +64,11 @@ insert into public.hour_packages (
 insert into public.hour_package_services (hour_package_id, service_id)
 values ('70000000-0000-0000-0000-000000000060', '70000000-0000-0000-0000-000000000012');
 
-insert into public.appointments (
-  id, public_code, service_id, service_employee_id, primary_customer_id,
-  status, financial_status, start_at, end_at, duration_minutes, people_count, commercial_value
-) values (
-  '70000000-0000-0000-0000-000000000070', 'SOURCE-CREDIT',
-  '70000000-0000-0000-0000-000000000010', '70000000-0000-0000-0000-000000000020',
-  '70000000-0000-0000-0000-000000000051', 'CANCELLED', 'PARTIALLY_PAID',
-  '2035-01-02 10:00:00-03', '2035-01-02 11:00:00-03', 60, 1, 100
-);
-
 insert into public.coupons (
   id, code, discount_type, discount_value, valid_from, valid_until,
   is_active, source, customer_id, source_appointment_id, max_uses
 ) values
-  ('70000000-0000-0000-0000-000000000071', 'ONCE10', 'FIXED', 10, now() - interval '1 day', now() + interval '90 days', true, 'PROMOTION', null, null, 1),
-  ('70000000-0000-0000-0000-000000000072', 'OTHER-CREDIT', 'FIXED', 30, now() - interval '1 day', now() + interval '90 days', true, 'CANCELLATION_CREDIT', '70000000-0000-0000-0000-000000000051', '70000000-0000-0000-0000-000000000070', 1);
+  ('70000000-0000-0000-0000-000000000071', 'ONCE10', 'FIXED', 10, now() - interval '1 day', now() + interval '90 days', true, 'PROMOTION', null, null, 1);
 
 insert into public.checkout_holds (
   id, public_token_hash, service_id, service_employee_id, selection_hash,
@@ -146,7 +135,7 @@ select throws_ok(
 
 select throws_ok(
   $$ select public.promote_checkout_hold('70000000-0000-0000-0000-000000000084','70000000-0000-0000-0000-000000000050','OTHER-CREDIT') $$,
-  'P0001','COUPON_CUSTOMER_MISMATCH','cancellation credit is customer-bound'
+  'P0001','INVALID_COUPON','removed cancellation-credit codes are not accepted by checkout'
 );
 
 select is((public.promote_checkout_hold('70000000-0000-0000-0000-000000000085','70000000-0000-0000-0000-000000000050','ONCE10')->>'cash_due')::numeric, 90.00::numeric, 'one-use coupon reduces pending amount');
