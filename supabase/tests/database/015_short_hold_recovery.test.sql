@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(12);
+select plan(10);
 
 insert into public.resources (id, name, resource_type)
 values ('95000000-0000-0000-0000-000000000001', 'RECOVERY RESOURCE', 'PERSON');
@@ -101,19 +101,19 @@ insert into public.resource_allocations (
 );
 
 select is(
-  public.set_checkout_hold_recovery_contact(
-    'checkout-recovery-token',
-    '+55 (48) 99999-1234',
-    true
-  )->>'recovery_enabled',
-  'true',
-  'recovery can be enabled while the short hold is active'
+  (select recovery_enabled from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
+  false,
+  'new holds do not opt into direct WhatsApp recovery'
 );
 
-select is(
-  (select recovery_phone from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
-  '5548999991234',
-  'recovery phone is normalized before persistence'
+select ok(
+  not has_function_privilege('anon','public.set_checkout_hold_recovery_contact(text,text,boolean)','EXECUTE'),
+  'anonymous clients cannot enable retired direct recovery'
+);
+
+select ok(
+  not has_function_privilege('anon','public.get_checkout_hold_resume_context(text)','EXECUTE'),
+  'anonymous clients cannot resolve retired recovery links'
 );
 
 update public.checkout_holds
@@ -126,7 +126,7 @@ select public.expire_due_checkout_holds();
 select is(
   (select status::text from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
   'EXPIRED',
-  'expired short hold releases its reservation state'
+  'expired short hold still expires normally'
 );
 
 select is(
@@ -135,41 +135,20 @@ select is(
   'resource allocation is immediately released on hold expiry'
 );
 
-select ok(
-  exists (
-    select 1 from public.integration_jobs
-    where entity_id = '95000000-0000-0000-0000-000000000050'
-      and job_type = 'CHECKOUT_HOLD_EXPIRED_RECOVERY'
-      and status = 'PENDING'
-  ),
-  'expiry enqueues a recovery message job'
-);
-
 select is(
   (
-    select payload_json->>'template_key'
+    select count(*)::integer
     from public.integration_jobs
     where entity_id = '95000000-0000-0000-0000-000000000050'
       and job_type = 'CHECKOUT_HOLD_EXPIRED_RECOVERY'
   ),
-  'checkout_hold_expired_recovery',
-  'recovery job points to the dedicated transactional template'
-);
-
-select is(
-  (
-    select payload_json->>'resume_token'
-    from public.integration_jobs
-    where entity_id = '95000000-0000-0000-0000-000000000050'
-      and job_type = 'CHECKOUT_HOLD_EXPIRED_RECOVERY'
-  ),
-  'resume-recovery-token',
-  'recovery job carries only the opaque resume token needed for the link'
+  0,
+  'expiry does not enqueue direct WhatsApp recovery'
 );
 
 select ok(
-  (select recovery_enqueued_at is not null from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
-  'hold records that recovery was enqueued'
+  (select recovery_enqueued_at is null from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
+  'hold does not record a retired recovery enqueue'
 );
 
 select public.expire_due_checkout_holds();
@@ -181,29 +160,19 @@ select is(
     where entity_id = '95000000-0000-0000-0000-000000000050'
       and job_type = 'CHECKOUT_HOLD_EXPIRED_RECOVERY'
   ),
-  1,
-  'running expiry repeatedly never duplicates the recovery message'
-);
-
-select ok(
-  exists (
-    select 1 from public.message_templates
-    where template_key = 'checkout_hold_expired_recovery'
-      and channel = 'WHATSAPP'
-      and is_active
-  ),
-  'logical WhatsApp recovery template is registered'
+  0,
+  'repeated expiry remains free of direct WhatsApp recovery jobs'
 );
 
 select is(
-  public.get_checkout_hold_resume_context('resume-recovery-token')->>'service_id',
-  '95000000-0000-0000-0000-000000000030',
-  'resume context restores the selected service'
+  (select is_active from public.message_templates where template_key = 'checkout_hold_expired_recovery'),
+  false,
+  'legacy WhatsApp recovery template is inactive'
 );
 
 select ok(
-  not (public.get_checkout_hold_resume_context('resume-recovery-token') ? 'recovery_phone'),
-  'public resume context never exposes the recovery phone'
+  position('CHECKOUT_HOLD_EXPIRED_RECOVERY' in pg_get_functiondef('public.expire_due_checkout_holds()'::regprocedure)) = 0,
+  'expiry implementation contains no direct WhatsApp job path'
 );
 
 select * from finish();
