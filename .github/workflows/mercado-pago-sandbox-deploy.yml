@@ -50,16 +50,19 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
-      - name: Require sandbox secrets
+      - name: Require initial sandbox secrets
         shell: bash
         run: |
           set -euo pipefail
-          for name in SUPABASE_ACCESS_TOKEN SANDBOX_DATABASE_URL MERCADO_PAGO_ACCESS_TOKEN MERCADO_PAGO_WEBHOOK_SECRET; do
+          for name in SUPABASE_ACCESS_TOKEN SANDBOX_DATABASE_URL MERCADO_PAGO_ACCESS_TOKEN; do
             if [[ -z "${!name:-}" ]]; then
               echo "$name ausente no environment sandbox" >&2
               exit 1
             fi
           done
+          if [[ -z "${MERCADO_PAGO_WEBHOOK_SECRET:-}" ]]; then
+            echo "MERCADO_PAGO_WEBHOOK_SECRET ainda ausente: permitido apenas no primeiro deploy, antes de cadastrar a URL no Mercado Pago."
+          fi
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
@@ -78,19 +81,27 @@ jobs:
           set -euo pipefail
           supabase db push --db-url "$SANDBOX_DATABASE_URL" --include-all
 
-      - name: Configure Mercado Pago Edge Function secrets
+      - name: Configure non-webhook Mercado Pago Edge Function secrets
         shell: bash
         run: |
           set -euo pipefail
           supabase secrets set \
             --project-ref "$SUPABASE_PROJECT_REF" \
             MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
-            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET" \
             MERCADO_PAGO_WEBHOOK_URL="$MERCADO_PAGO_WEBHOOK_URL" \
             MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
             APP_ENV="$APP_ENV" \
             ALLOW_REAL_CHARGES="$ALLOW_REAL_CHARGES" \
             ALLOW_REAL_CUSTOMER_DATA="$ALLOW_REAL_CUSTOMER_DATA"
+
+      - name: Configure webhook signing secret when available
+        if: ${{ env.MERCADO_PAGO_WEBHOOK_SECRET != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase secrets set \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET"
 
       - name: Deploy Mercado Pago payment function
         shell: bash
@@ -144,6 +155,11 @@ jobs:
             echo "- MERCADO_PAGO_ENV: \`$MERCADO_PAGO_ENV\`"
             echo "- ALLOW_REAL_CHARGES: \`$ALLOW_REAL_CHARGES\`"
             echo "- Webhook URL: \`$MERCADO_PAGO_WEBHOOK_URL\`"
+            if [[ -n "${MERCADO_PAGO_WEBHOOK_SECRET:-}" ]]; then
+              echo "- Webhook signing secret: CONFIGURADO"
+            else
+              echo "- Webhook signing secret: PENDENTE (primeiro deploy)"
+            fi
             echo
             echo "Este workflow apenas publica/configura o sandbox e testa o boundary de autenticação do webhook."
             echo "PIX/cartão/3DS/webhook assinado permanecem NÃO TESTADOS até a matriz real de sandbox ser executada."
