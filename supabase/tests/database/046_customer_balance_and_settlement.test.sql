@@ -35,7 +35,7 @@ select lives_ok($$select public.service_credit_customer_balance_from_return(
   'CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-balance-one',null
 )$$,'explicit client choice can move refundable cancellation amount to customer balance');
 select is(public.customer_balance_available('60000000-0000-0000-0000-000000000001'),590::numeric,'customer balance is R$590 and has no expiry deduction');
-select ok(not has_column('public','customer_balance_movements','valid_until'),'customer balance has no validity/expiry field');
+select ok(not exists(select 1 from information_schema.columns where table_schema='public' and table_name='customer_balance_movements' and column_name='valid_until'),'customer balance has no validity/expiry field');
 
 -- Integral application: all R$590 moves, even though only R$250 is due; R$340 becomes excess.
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
@@ -69,7 +69,7 @@ values ('60000000-0000-0000-0000-000000000023','BAL-LIMIT','60000000-0000-0000-0
 insert into public.appointment_policy_actions(appointment_id,action_type,status,original_start_at,hours_before_start,notice_hours_snapshot,is_inside_notice_window,contract_value_snapshot,net_paid_snapshot,penalty_type,penalty_value,penalty_amount,refundable_amount,change_origin)
 select '60000000-0000-0000-0000-000000000023','RESCHEDULE','APPLIED','2035-08-10 10:00:00-03',100,48,false,700,350,'NONE',0,0,0,'CLIENT' from generate_series(1,3);
 select throws_ok($$select public.enforce_appointment_reschedule_limit('60000000-0000-0000-0000-000000000023','CLIENT')$$,'P0001','CLIENT_RESCHEDULE_LIMIT_REACHED','fourth client reschedule is refused');
-select lives_ok($$select public.enforce_appointment_reschedule_limit('60000000-0000-0000-0000-000000000023','OPERATION')$$,'operation-origin reschedule bypasses client lifetime limit');
+select lives_ok($$select public.enforce_appointment_reschedule_limit('60000000-0000-0000-000000000023','OPERATION')$$,'operation-origin reschedule bypasses client lifetime limit');
 
 select * from finish();
 rollback;
