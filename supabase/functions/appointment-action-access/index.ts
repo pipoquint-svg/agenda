@@ -9,7 +9,9 @@ const corsHeaders = {
 }
 
 const actionScopes = new Set(['CANCEL', 'RESCHEDULE', 'EDIT_DETAILS', 'EDIT_EXTRAS'])
+const operations = new Set(['RESOLVE', 'VERIFY_EMAIL', 'CANCEL_PREVIEW', 'EXECUTE_CANCEL'])
 const minimumResponseMs = 120
+const personalLinkWarning = 'link pessoal, válido por tempo limitado, não encaminhe'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -49,6 +51,16 @@ function userAgent(req: Request): string | null {
   return value ? value.slice(0, 1000) : null
 }
 
+function text(value: unknown, limit: number): string | null {
+  const next = typeof value === 'string' ? value.trim().slice(0, limit) : ''
+  return next || null
+}
+
+function numeric(value: unknown): number {
+  const next = Number(value ?? 0)
+  return Number.isFinite(next) ? Math.round(next * 100) / 100 : 0
+}
+
 async function minimumDelay(startedAt: number): Promise<void> {
   const remaining = minimumResponseMs - (Date.now() - startedAt)
   if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining))
@@ -57,12 +69,15 @@ async function minimumDelay(startedAt: number): Promise<void> {
 function genericTokenError(raw: string): { code: string; status: number } {
   if (raw === 'RATE_LIMITED') return { code: 'ACTION_ACCESS_RATE_LIMITED', status: 429 }
   if (raw.startsWith('RATE_LIMIT_BACKEND_FAILED')) return { code: 'ACTION_ACCESS_TEMPORARY_FAILURE', status: 503 }
+  if (raw.includes('CANCEL_CONFIRMATION_REQUIRED')) return { code: 'ACTION_CONFIRMATION_REQUIRED', status: 400 }
+  if (raw.includes('CANCEL_EMAIL_VERIFICATION_REQUIRED')) return { code: 'ACTION_VERIFICATION_REQUIRED', status: 400 }
   if (
     raw.includes('APPOINTMENT_TOKEN_INVALID')
     || raw.includes('APPOINTMENT_TOKEN_EXPIRED')
     || raw.includes('APPOINTMENT_TOKEN_REVOKED')
     || raw.includes('TOKEN_SCOPE_DENIED')
     || raw.includes('ACTION_TOKEN_SCOPE_INVALID')
+    || raw.includes('APPOINTMENT_NOT_CANCELLABLE')
     || raw.includes('LINK_INVALID_OR_EXPIRED')
   ) return { code: 'LINK_INVALID_OR_EXPIRED', status: 400 }
   return { code: 'ACTION_ACCESS_TEMPORARY_FAILURE', status: 503 }
@@ -83,13 +98,14 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
     const operation = typeof body.operation === 'string' ? body.operation.trim().toUpperCase() : 'RESOLVE'
-    if (operation !== 'RESOLVE' && operation !== 'VERIFY_EMAIL') throw new Error('ACTION_OPERATION_INVALID')
+    if (!operations.has(operation)) throw new Error('ACTION_OPERATION_INVALID')
 
     const scope = actionScope(body.scope)
     const token = actionToken(req)
     const id = requestId(req)
     const ip = clientIp(req)
     const agent = userAgent(req)
+    const accessedAt = new Date().toISOString()
 
     const { data: resolved, error: resolveError } = await client.rpc('service_resolve_appointment_action_token', {
       p_access_token: token,
@@ -102,21 +118,83 @@ Deno.serve(async (req) => {
 
     const row = resolved && typeof resolved === 'object' ? resolved as Record<string, unknown> : {}
     const tokenId = typeof row.token_id === 'string' ? row.token_id : ''
+    const appointmentId = typeof row.appointment_id === 'string' ? row.appointment_id : ''
     const expiresAt = typeof row.expires_at === 'string' ? row.expires_at : null
-    if (!tokenId) throw new Error('LINK_INVALID_OR_EXPIRED')
+    if (!tokenId || !appointmentId) throw new Error('LINK_INVALID_OR_EXPIRED')
 
     if (operation === 'RESOLVE') {
       await minimumDelay(startedAt)
-      return json({ data: { valid: true, scope, expires_at: expiresAt } })
+      return json({
+        data: {
+          valid: true,
+          scope,
+          expires_at: expiresAt,
+          accessed_at: accessedAt,
+          warning: personalLinkWarning,
+        },
+      })
     }
 
     if (scope !== 'CANCEL') throw new Error('LINK_INVALID_OR_EXPIRED')
-    const email = typeof body.email === 'string' ? body.email.trim().slice(0, 320) : ''
+
+    if (operation === 'CANCEL_PREVIEW') {
+      const { data: preview, error: previewError } = await client.rpc('calculate_reservation_change', {
+        p_appointment_id: appointmentId,
+        p_action_type: 'CANCEL',
+        p_requested_at: accessedAt,
+        p_change_origin: 'CLIENT',
+        p_new_contract_value: null,
+      })
+      if (previewError) throw new Error(previewError.message)
+      const financial = preview && typeof preview === 'object' ? preview as Record<string, unknown> : {}
+      const refundAmount = numeric(financial.refund_due)
+
+      await minimumDelay(startedAt)
+      return json({
+        data: {
+          valid: true,
+          scope: 'CANCEL',
+          expires_at: expiresAt,
+          accessed_at: accessedAt,
+          warning: personalLinkWarning,
+          requires_explicit_confirmation: true,
+          requires_email_verification: true,
+          financial: {
+            contract_value: numeric(financial.contract_value),
+            penalty_amount: numeric(financial.penalty_retained),
+            refund_amount: refundAmount,
+            settlement_default: refundAmount > 0 ? 'REFUND' : null,
+          },
+        },
+      })
+    }
+
+    const email = text(body.email, 320)
     if (!email) {
       await minimumDelay(startedAt)
       return json({ data: { verified: false } }, 400)
     }
 
+    if (operation === 'VERIFY_EMAIL') {
+      const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
+        p_token_id: tokenId,
+        p_email: email,
+        p_ip_address: ip,
+        p_user_agent: agent,
+        p_request_id: id,
+      })
+      if (verifyError) throw new Error(verifyError.message)
+
+      await minimumDelay(startedAt)
+      return verified === true
+        ? json({ data: { verified: true } })
+        : json({ data: { verified: false } }, 400)
+    }
+
+    if (body.confirmed !== true) throw new Error('CANCEL_CONFIRMATION_REQUIRED')
+
+    // The financial verification and execution deliberately share the same
+    // request id. The database wrapper refuses an older VERIFIED event.
     const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
       p_token_id: tokenId,
       p_email: email,
@@ -125,11 +203,24 @@ Deno.serve(async (req) => {
       p_request_id: id,
     })
     if (verifyError) throw new Error(verifyError.message)
+    if (verified !== true) {
+      await minimumDelay(startedAt)
+      return json({ data: { verified: false } }, 400)
+    }
+
+    const { data: cancellation, error: cancellationError } = await client.rpc('service_client_cancel_appointment_evidenced', {
+      p_token_id: tokenId,
+      p_reason: text(body.reason, 500),
+      p_requested_at: accessedAt,
+      p_ip: ip,
+      p_user_agent: agent,
+      p_request_id: id,
+      p_session_id: text(body.session_id, 200),
+    })
+    if (cancellationError) throw new Error(cancellationError.message)
 
     await minimumDelay(startedAt)
-    return verified === true
-      ? json({ data: { verified: true } })
-      : json({ data: { verified: false } }, 400)
+    return json({ data: cancellation })
   } catch (error) {
     const raw = error instanceof Error ? error.message : 'ACTION_ACCESS_FAILED'
     const mapped = raw === 'ACTION_OPERATION_INVALID'
