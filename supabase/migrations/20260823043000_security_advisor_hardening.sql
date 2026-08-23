@@ -13,7 +13,17 @@ grant select on table public.hour_package_statement_entries to service_role;
 
 -- Trigger/internal helpers are not API surface.
 revoke execute on function public.copy_checkout_attribution_to_appointment() from public, anon, authenticated;
-revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
+
+-- `rls_auto_enable()` can exist in the hosted project as an environment-level helper
+-- without being part of a clean migration rebuild. Harden it when present, but do not
+-- make local/CI reconstruction depend on a remote-only object.
+do $$
+begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke execute on function public.rls_auto_enable() from public, anon, authenticated';
+  end if;
+end;
+$$;
 
 -- Legacy admin overloads remain only for internal compatibility and must not be callable
 -- through PostgREST by anonymous or ordinary authenticated users.
