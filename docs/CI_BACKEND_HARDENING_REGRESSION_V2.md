@@ -1,0 +1,1 @@
+CI-only checkpoint after making hosted-only security hardening rebuild-safe. No runtime behavior is introduced by this file.
