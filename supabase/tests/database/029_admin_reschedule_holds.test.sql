@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(8);
+select plan(10);
 
 insert into public.customers(id,name) values ('97600000-0000-0000-0000-000000000001','Reschedule Customer');
 insert into public.employees(id,name) values ('97600000-0000-0000-0000-000000000002','Reschedule Employee');
@@ -17,7 +17,9 @@ insert into public.service_change_policies(service_id,notice_hours,reschedule_fi
 values ('97600000-0000-0000-0000-000000000005',48,0,20,30,30);
 
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
-values ('97600000-0000-0000-0000-000000000010','RESCHEDULE-1','97600000-0000-0000-0000-000000000005','97600000-0000-0000-0000-000000000006','CONFIRMED','NOT_STARTED',((current_date+5)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '12:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '12:00') at time zone 'America/Sao_Paulo',120,120,1,'97600000-0000-0000-0000-000000000001',500,now());
+values ('97600000-0000-0000-0000-000000000010','RESCHEDULE-1','97600000-0000-0000-0000-000000000005','97600000-0000-0000-0000-000000000006','CONFIRMED','PARTIALLY_PAID',((current_date+5)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '12:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '12:00') at time zone 'America/Sao_Paulo',120,120,1,'97600000-0000-0000-0000-000000000001',500,now());
+insert into public.payment_transactions(appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
+values ('97600000-0000-0000-0000-000000000010','CHARGE','CARD','MERCADO_PAGO','reschedule-half-paid','APPROVED',250,250,now(),'CONTRACT');
 insert into public.resource_allocations(id,resource_id,appointment_id,allocation_type,status,occupied_range)
 values ('97600000-0000-0000-0000-000000000011','97600000-0000-0000-0000-000000000004','97600000-0000-0000-0000-000000000010','APPOINTMENT','CONFIRMED',tstzrange(((current_date+5)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+5)+time '12:30') at time zone 'America/Sao_Paulo','[)'));
 
@@ -26,6 +28,8 @@ select has_function('public','service_admin_apply_reschedule',array['uuid','uuid
 
 create temporary table r as select public.service_admin_create_reschedule_hold('97600000-0000-0000-0000-000000000010',((current_date+10)+time '10:00') at time zone 'America/Sao_Paulo',now(),'CLIENT',null) data;
 select is((select data->>'policy_action_status' from r),'PREVIEW','free first client reschedule creates preview');
+select is((select (data->>'difference_due')::numeric from r),0::numeric,'same-price reschedule preserves the already-satisfied 50 percent commitment');
+select is((select (data->>'applicable_amount')::numeric from r),250::numeric,'the R$250 customer payment remains applied to the new reservation');
 select is((select status::text from public.resource_allocations where id='97600000-0000-0000-0000-000000000011'),'CONFIRMED','old slot remains occupied before apply');
 
 create temporary table a as select public.service_admin_apply_reschedule((select (data->>'policy_action_id')::uuid from r),null) data;
