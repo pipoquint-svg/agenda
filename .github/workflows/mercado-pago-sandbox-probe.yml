@@ -1,10 +1,10 @@
-name: Mercado Pago Sandbox Probe
+name: Mercado Pago Sandbox Credential Preflight
 
 on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: "Digite SANDBOX para executar somente com credenciais de teste"
+        description: "Digite SANDBOX para validar apenas credenciais de teste"
         required: true
         type: string
 
@@ -12,20 +12,17 @@ permissions:
   contents: read
 
 jobs:
-  probe:
-    name: PIX teste + webhook real
+  preflight:
+    name: Validar credencial Mercado Pago sandbox
     runs-on: ubuntu-latest
     environment: sandbox
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       APP_ENV: staging
       MERCADO_PAGO_ENV: sandbox
       ALLOW_REAL_CHARGES: "false"
       ALLOW_REAL_CUSTOMER_DATA: "false"
-      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
-      WEBHOOK_BASE_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-webhook
       MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
     steps:
       - name: Require explicit sandbox confirmation
@@ -38,141 +35,45 @@ jobs:
           [[ "$ALLOW_REAL_CHARGES" == "false" ]] || { echo "ALLOW_REAL_CHARGES precisa ser false" >&2; exit 1; }
           [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]] || { echo "ALLOW_REAL_CUSTOMER_DATA precisa ser false" >&2; exit 1; }
           [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]] || { echo "MERCADO_PAGO_ACCESS_TOKEN ausente" >&2; exit 1; }
-          [[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]] || { echo "SUPABASE_ACCESS_TOKEN ausente" >&2; exit 1; }
 
-      - name: Create sandbox PIX probe payment
-        id: payment
+      - name: Reject Mercado Pago live credential in sandbox
         shell: bash
         run: |
           set -euo pipefail
-          probe_id="blacksheep-sandbox-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          notification_url="${WEBHOOK_BASE_URL}?probe=${probe_id}"
-          idem="$(python3 - <<'PY'
-          import uuid
-          print(uuid.uuid4())
-          PY
-          )"
-          started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-          cat > /tmp/payment.json <<JSON
-          {
-            "transaction_amount": 1.00,
-            "description": "BlackSheep Agenda sandbox webhook probe",
-            "payment_method_id": "pix",
-            "external_reference": "${probe_id}",
-            "notification_url": "${notification_url}",
-            "payer": {
-              "email": "test@testuser.com",
-              "first_name": "Test",
-              "last_name": "User",
-              "identification": {"type": "CPF", "number": "19119119100"}
-            }
-          }
-          JSON
+          if [[ "$MERCADO_PAGO_ACCESS_TOKEN" == TEST-* ]]; then
+            echo "Mercado Pago sandbox credential preflight: TEST prefix accepted."
+            exit 0
+          fi
 
           status="$(curl --silent --show-error \
-            --output /tmp/payment-response.json \
+            --output /tmp/mp-user.json \
             --write-out '%{http_code}' \
-            --request POST \
-            --header 'accept: application/json' \
-            --header 'content-type: application/json' \
             --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
-            --header "X-Idempotency-Key: ${idem}" \
-            --data-binary @/tmp/payment.json \
-            'https://api.mercadopago.com/v1/payments')"
-
-          python3 - "$status" <<'PY'
-          import json, sys
-          http_status = int(sys.argv[1])
-          data = json.load(open('/tmp/payment-response.json'))
-          if http_status not in (200, 201):
-              print('Mercado Pago rejeitou o probe sandbox:', http_status, data.get('message') or data.get('error'))
-              raise SystemExit(1)
-          payment_id = str(data.get('id') or '')
-          if not payment_id:
-              print('Resposta sem payment id')
-              raise SystemExit(1)
-          print('Sandbox PIX criado:', payment_id, 'status=', data.get('status'), 'detail=', data.get('status_detail'))
-          with open('/tmp/payment-id', 'w') as f:
-              f.write(payment_id)
-          with open('/tmp/payment-status', 'w') as f:
-              f.write(str(data.get('status') or 'unknown'))
-          PY
-
-          echo "probe_id=$probe_id" >> "$GITHUB_OUTPUT"
-          echo "payment_id=$(cat /tmp/payment-id)" >> "$GITHUB_OUTPUT"
-          echo "payment_status=$(cat /tmp/payment-status)" >> "$GITHUB_OUTPUT"
-          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for Mercado Pago webhook
-        run: sleep 15
-
-      - name: Require provider webhook 2xx in Supabase logs
-        id: webhook
-        shell: bash
-        run: |
-          set -euo pipefail
-          start="${{ steps.payment.outputs.started_at }}"
-          found=0
-
-          for attempt in 1 2 3 4 5; do
-            end="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            sql="select timestamp, log_attributes['request.path'] as path, toInt32OrZero(log_attributes['response.status_code']) as status from logs where source = 'function_edge_logs' and timestamp >= parseDateTimeBestEffort('${start}') and positionCaseInsensitive(log_attributes['request.path'], 'mercado-pago-webhook') > 0 order by timestamp desc limit 50"
-
-            curl --silent --show-error --fail \
-              --get "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/analytics/endpoints/logs" \
-              --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-              --data-urlencode "sql=${sql}" \
-              --data-urlencode "iso_timestamp_start=${start}" \
-              --data-urlencode "iso_timestamp_end=${end}" \
-              --output /tmp/logs.json
-
-            if python3 - <<'PY'
-          import json
-          data = json.load(open('/tmp/logs.json'))
-          rows = data.get('result') or []
-          ok = False
-          for row in rows:
-              status = row.get('status') if isinstance(row, dict) else None
-              path = row.get('path') if isinstance(row, dict) else None
-              try:
-                  code = int(status)
-              except (TypeError, ValueError):
-                  continue
-              if path and 'mercado-pago-webhook' in str(path).lower() and 200 <= code < 300:
-                  ok = True
-                  break
-          print('webhook_2xx=', ok, 'rows=', len(rows))
-          raise SystemExit(0 if ok else 1)
-          PY
-            then
-              found=1
-              break
-            fi
-
-            sleep 10
-          done
-
-          if [[ "$found" != "1" ]]; then
-            echo "Nenhum webhook 2xx do Mercado Pago apareceu nos logs após o PIX sandbox." >&2
+            'https://api.mercadolibre.com/users/me')"
+          if [[ "$status" != "200" ]]; then
+            echo "Não foi possível validar a identidade da credencial Mercado Pago (HTTP $status)." >&2
             exit 1
           fi
-          echo "observed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Record sandbox probe evidence
+          python3 - <<'PY'
+          import json
+          data = json.load(open('/tmp/mp-user.json'))
+          tags = data.get('tags') or []
+          if 'test_user' not in tags:
+              print('Credencial recusada: o environment sandbox não pode usar token associado a usuário produtivo.')
+              raise SystemExit(1)
+          print('Mercado Pago sandbox credential preflight: test_user confirmado.')
+          PY
+
+      - name: Record preflight evidence
         if: always()
         shell: bash
         run: |
           {
-            echo "## Mercado Pago Sandbox Probe"
+            echo "## Mercado Pago Sandbox Credential Preflight"
             echo
             echo "- Environment: \`sandbox\`"
             echo "- Real charges allowed: \`false\`"
             echo "- Real customer data allowed: \`false\`"
-            echo "- Probe: \`${{ steps.payment.outputs.probe_id }}\`"
-            echo "- Mercado Pago payment id: \`${{ steps.payment.outputs.payment_id }}\`"
-            echo "- Initial provider status: \`${{ steps.payment.outputs.payment_status }}\`"
-            echo "- Provider-originated webhook 2xx observed in Supabase logs: \`${{ steps.webhook.outputs.observed }}\`"
-            echo
-            echo "Este probe valida apenas PIX sandbox + entrega real do webhook. Não valida ainda aprovação de PIX, cartão, 3DS ou jornada completa do checkout."
+            echo "- No payment was created by this workflow."
           } >> "$GITHUB_STEP_SUMMARY"
