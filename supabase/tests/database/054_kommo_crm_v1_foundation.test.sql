@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(12);
+select plan(13);
 
 select has_table('public','kommo_integration_settings','Kommo settings table exists');
 select has_table('public','kommo_customer_links','Kommo contact mapping exists');
@@ -22,6 +22,17 @@ select ok(
 select ok(
   exists(select 1 from pg_trigger where tgrelid='public.appointments'::regclass and tgname='appointments_enqueue_kommo_sync' and not tgisinternal),
   'appointment Kommo outbox trigger exists'
+);
+select ok(
+  not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'kommo_appointment_links'
+      and indexdef ilike '%unique%'
+      and indexdef ilike '%kommo_contact_id%'
+  ),
+  'one Kommo contact may have multiple reservation leads'
 );
 
 select is(
