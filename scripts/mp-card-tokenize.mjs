@@ -11,63 +11,58 @@ if (!cardholderName) throw new Error('CARDHOLDER_NAME_REQUIRED')
 
 const html = `<!doctype html>
 <html lang="pt-BR">
-<head><meta charset="utf-8"><title>MP card sandbox gate</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MP Card Payment Brick sandbox gate</title>
+</head>
 <body>
-  <form id="form-checkout">
-    <div id="form-checkout__cardNumber"></div>
-    <div id="form-checkout__expirationDate"></div>
-    <div id="form-checkout__securityCode"></div>
-    <input id="form-checkout__cardholderName" />
-    <select id="form-checkout__identificationType"></select>
-    <input id="form-checkout__identificationNumber" />
-    <input id="form-checkout__cardholderEmail" />
-    <button id="form-checkout__submit" type="submit">Pagar</button>
-    <progress value="0" class="progress-bar"></progress>
-  </form>
+  <div id="cardPaymentBrick_container"></div>
   <script src="https://sdk.mercadopago.com/js/v2"></script>
   <script>
-    window.__mpReady = false;
+    window.__brickReady = false;
     window.__tokenResult = null;
-    window.__tokenError = null;
-    const mp = new MercadoPago(${JSON.stringify(publicKey)});
-    const cardForm = mp.cardForm({
-      amount: '50.00',
-      iframe: true,
-      form: {
-        id: 'form-checkout',
-        cardNumber: { id: 'form-checkout__cardNumber', placeholder: 'Número do cartão' },
-        expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/YY' },
-        securityCode: { id: 'form-checkout__securityCode', placeholder: 'Código de segurança' },
-        cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Titular do cartão' },
-        identificationType: { id: 'form-checkout__identificationType', placeholder: 'Tipo de documento' },
-        identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'Número do documento' },
-        cardholderEmail: { id: 'form-checkout__cardholderEmail', placeholder: 'E-mail' },
-      },
-      callbacks: {
-        onFormMounted: (error) => {
-          if (error) { window.__tokenError = String(error); return; }
-          window.__mpReady = true;
-        },
-        onSubmit: (event) => {
-          event.preventDefault();
-          try {
-            const data = cardForm.getCardFormData();
-            window.__tokenResult = {
-              token: data.token,
-              paymentMethodId: data.paymentMethodId,
-              issuerId: data.issuerId || null,
-              // The sandbox gate deliberately tests one installment. Installments
-              // belong to the Order request and do not need to be discovered by
-              // CardForm to validate browser-side tokenization.
-              installments: 1,
-            };
-          } catch (error) {
-            window.__tokenError = String(error);
-          }
-        },
-        onFetching: () => () => undefined,
-      },
-    });
+    window.__brickError = null;
+
+    (async () => {
+      try {
+        const mp = new MercadoPago(${JSON.stringify(publicKey)}, { locale: 'pt-BR' });
+        const bricksBuilder = mp.bricks();
+        const settings = {
+          initialization: {
+            amount: 50,
+            payer: {
+              email: 'test@testuser.com',
+              identification: { type: 'CPF', number: '12345678909' },
+            },
+          },
+          callbacks: {
+            onReady: () => {
+              window.__brickReady = true;
+            },
+            onSubmit: (formData) => {
+              window.__tokenResult = {
+                token: formData?.token ?? null,
+                paymentMethodId: formData?.payment_method_id ?? formData?.paymentMethodId ?? null,
+                issuerId: formData?.issuer_id ?? formData?.issuerId ?? null,
+                installments: Number(formData?.installments ?? 1),
+              };
+              return Promise.resolve();
+            },
+            onError: (error) => {
+              window.__brickError = String(error?.message ?? error?.type ?? error ?? 'CARD_BRICK_ERROR');
+            },
+          },
+        };
+        window.__brickController = await bricksBuilder.create(
+          'cardPayment',
+          'cardPaymentBrick_container',
+          settings,
+        );
+      } catch (error) {
+        window.__brickError = String(error?.message ?? error ?? 'CARD_BRICK_CREATE_FAILED');
+      }
+    })();
   </script>
 </body>
 </html>`
@@ -81,58 +76,140 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const address = server.address()
 if (!address || typeof address === 'string') throw new Error('LOCAL_SERVER_FAILED')
 
-async function fillSecureFrame(page, containerId, value) {
-  const iframe = page.locator(`#${containerId} iframe`).first()
-  await iframe.waitFor({ state: 'attached', timeout: 30000 })
-  const frame = iframe.contentFrame()
-  const input = frame.locator('input:visible').first()
-  await input.waitFor({ state: 'visible', timeout: 30000 })
-  await input.click()
-  await input.pressSequentially(value, { delay: 20 })
-  await input.press('Tab').catch(() => undefined)
+function fieldHaystack(meta) {
+  return [meta.placeholder, meta.name, meta.id, meta.ariaLabel, meta.autocomplete]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
+async function fillVisibleField(page, hints, value) {
+  const lowered = hints.map((hint) => hint.toLowerCase())
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    for (const frame of page.frames()) {
+      const inputs = frame.locator('input:visible')
+      const count = await inputs.count().catch(() => 0)
+      for (let index = 0; index < count; index += 1) {
+        const input = inputs.nth(index)
+        const meta = {
+          placeholder: await input.getAttribute('placeholder').catch(() => ''),
+          name: await input.getAttribute('name').catch(() => ''),
+          id: await input.getAttribute('id').catch(() => ''),
+          ariaLabel: await input.getAttribute('aria-label').catch(() => ''),
+          autocomplete: await input.getAttribute('autocomplete').catch(() => ''),
+        }
+        const haystack = fieldHaystack(meta)
+        if (!lowered.some((hint) => haystack.includes(hint))) continue
+        await input.click()
+        await input.fill('').catch(() => undefined)
+        await input.pressSequentially(value, { delay: 15 })
+        await input.press('Tab').catch(() => undefined)
+        return
+      }
+    }
+    await page.waitForTimeout(200)
+  }
+  throw new Error(`VISIBLE_FIELD_NOT_FOUND:${hints[0]}`)
+}
+
+async function chooseVisibleSelects(page) {
+  for (const frame of page.frames()) {
+    const selects = frame.locator('select:visible')
+    const count = await selects.count().catch(() => 0)
+    for (let index = 0; index < count; index += 1) {
+      const select = selects.nth(index)
+      const options = await select.locator('option').evaluateAll((rows) => rows.map((row) => ({
+        value: row.value,
+        disabled: row.disabled,
+      }))).catch(() => [])
+      const usable = options.find((option) => option.value && !option.disabled)
+      if (usable) await select.selectOption(usable.value).catch(() => undefined)
+    }
+  }
+}
+
+async function clickSubmit(page) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    for (const frame of page.frames()) {
+      const buttons = frame.locator('button:visible, input[type="submit"]:visible')
+      const count = await buttons.count().catch(() => 0)
+      for (let index = 0; index < count; index += 1) {
+        const button = buttons.nth(index)
+        const text = [
+          await button.textContent().catch(() => ''),
+          await button.getAttribute('value').catch(() => ''),
+          await button.getAttribute('aria-label').catch(() => ''),
+        ].filter(Boolean).join(' ').toLowerCase()
+        if (!/(pagar|pay|continuar|continue)/i.test(text)) continue
+        await button.click()
+        return
+      }
+    }
+    await page.waitForTimeout(200)
+  }
+  throw new Error('CARD_BRICK_SUBMIT_NOT_FOUND')
+}
+
+async function safeFieldInventory(page) {
+  const inventory = []
+  for (const frame of page.frames()) {
+    const inputs = frame.locator('input:visible, select:visible, button:visible')
+    const count = Math.min(await inputs.count().catch(() => 0), 20)
+    for (let index = 0; index < count; index += 1) {
+      const node = inputs.nth(index)
+      inventory.push({
+        frame: frame.url().slice(0, 120),
+        tag: await node.evaluate((el) => el.tagName).catch(() => ''),
+        type: await node.getAttribute('type').catch(() => ''),
+        placeholder: await node.getAttribute('placeholder').catch(() => ''),
+        name: await node.getAttribute('name').catch(() => ''),
+        id: await node.getAttribute('id').catch(() => ''),
+        ariaLabel: await node.getAttribute('aria-label').catch(() => ''),
+      })
+      if (inventory.length >= 40) return inventory
+    }
+  }
+  return inventory
 }
 
 const browser = await chromium.launch({ headless: true })
 try {
-  const page = await browser.newPage()
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   await page.goto(`http://127.0.0.1:${address.port}`, { waitUntil: 'networkidle' })
-  await page.waitForFunction(() => window.__mpReady === true || window.__tokenError, null, { timeout: 30000 })
-  const mountError = await page.evaluate(() => window.__tokenError)
-  if (mountError) throw new Error(`MERCADO_PAGO_FORM_MOUNT_FAILED:${mountError}`)
+  await page.waitForFunction(() => window.__brickReady === true || window.__brickError, null, { timeout: 45000 })
+  const brickError = await page.evaluate(() => window.__brickError)
+  if (brickError) throw new Error(`MERCADO_PAGO_BRICK_MOUNT_FAILED:${brickError}`)
 
-  // Target the SDK-owned iframe inside each explicit field container. Never scan
-  // generic inputs: MercadoPago.js also creates hidden expirationMonth/year inputs.
-  await fillSecureFrame(page, 'form-checkout__cardNumber', '5480832801033311')
-  await fillSecureFrame(page, 'form-checkout__expirationDate', '1130')
-  await fillSecureFrame(page, 'form-checkout__securityCode', '123')
+  await fillVisibleField(page, ['card number', 'número do cartão', 'cardnumber'], '5480832801033311')
+  await fillVisibleField(page, ['mm/yy', 'mm/aa', 'expiration', 'validade'], '1130')
+  await fillVisibleField(page, ['security code', 'código de segurança', 'cvv'], '123')
+  await fillVisibleField(page, ['cardholder', 'titular', 'nome no cartão', 'name'], cardholderName)
 
-  await page.locator('#form-checkout__cardholderName').fill(cardholderName)
-  await page.locator('#form-checkout__identificationNumber').fill('12345678909')
-  await page.locator('#form-checkout__cardholderEmail').fill('test@testuser.com')
+  await page.waitForTimeout(1500)
+  await chooseVisibleSelects(page)
+  await clickSubmit(page)
 
-  // CardForm populates identification types asynchronously. Prefer CPF when it is
-  // available, but do not couple tokenization to issuer/installment lookup.
-  await page.waitForFunction(() => {
-    const select = document.querySelector('#form-checkout__identificationType')
-    return Boolean(select && select.querySelectorAll('option').length > 0)
-  }, null, { timeout: 15000 })
-  const cpfValue = await page.locator('#form-checkout__identificationType option').evaluateAll((options) => {
-    const cpf = options.find((option) => /cpf/i.test(`${option.value} ${option.textContent || ''}`))
-    return cpf?.value || options[0]?.value || ''
-  })
-  if (cpfValue) await page.locator('#form-checkout__identificationType').selectOption(cpfValue)
+  try {
+    await page.waitForFunction(() => window.__tokenResult?.token || window.__brickError, null, { timeout: 45000 })
+  } catch (error) {
+    const inventory = await safeFieldInventory(page)
+    const state = await page.evaluate(() => ({ ready: window.__brickReady, error: window.__brickError }))
+    throw new Error(`CARD_BRICK_SUBMIT_TIMEOUT:${JSON.stringify({ state, inventory })}`)
+  }
 
-  await page.locator('#form-checkout__submit').click()
-  await page.waitForFunction(() => window.__tokenResult?.token || window.__tokenError, null, { timeout: 30000 })
-
-  const result = await page.evaluate(() => ({ result: window.__tokenResult, error: window.__tokenError }))
-  if (result.error) throw new Error(`MERCADO_PAGO_TOKENIZE_FAILED:${result.error}`)
+  const result = await page.evaluate(() => ({ result: window.__tokenResult, error: window.__brickError }))
+  if (result.error) throw new Error(`MERCADO_PAGO_BRICK_FAILED:${result.error}`)
   if (!result.result?.token || !result.result?.paymentMethodId) {
     throw new Error('MERCADO_PAGO_TOKENIZE_INCOMPLETE')
   }
 
-  fs.writeFileSync(outputPath, JSON.stringify(result.result), { mode: 0o600 })
-  console.log(`Card tokenization PASS for scenario ${cardholderName}; token redacted.`)
+  fs.writeFileSync(outputPath, JSON.stringify({
+    token: result.result.token,
+    paymentMethodId: result.result.paymentMethodId,
+    issuerId: result.result.issuerId,
+    installments: Number(result.result.installments || 1),
+  }), { mode: 0o600 })
+  console.log(`Card Payment Brick tokenization PASS for ${cardholderName}; token redacted.`)
 } finally {
   await browser.close()
   await new Promise((resolve) => server.close(resolve))

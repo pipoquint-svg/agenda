@@ -65,7 +65,7 @@ jobs:
         id: approved
         shell: bash
         env:
-          CARDHOLDER_NAME: APRO-AUTH
+          CARDHOLDER_NAME: APRO
           OUTPUT_PATH: /tmp/mp-approved-token.json
         run: |
           set -euo pipefail
@@ -74,7 +74,7 @@ jobs:
 
           token="$(jq -r '.token' "$OUTPUT_PATH")"
           method="$(jq -r '.paymentMethodId' "$OUTPUT_PATH")"
-          installments="$(jq -r '.installments' "$OUTPUT_PATH")"
+          installments="$(jq -r '.installments // 1' "$OUTPUT_PATH")"
           [[ -n "$token" && "$token" != "null" && -n "$method" && "$method" != "null" ]]
 
           external_ref="sandbox-card-approved-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -93,7 +93,6 @@ jobs:
               capture_mode:"automatic",
               external_reference:$external,
               total_amount:"50.00",
-              config:{online:{transaction_security:{validation:"on_fraud_risk",liability_shift:"required"}}},
               payer:{email:"test@testuser.com"},
               transactions:{payments:[{amount:"50.00",payment_method:{id:$method,type:"credit_card",token:$token,installments:$installments}}]}
             }' > "$body_file"
@@ -135,7 +134,7 @@ jobs:
         id: rejected
         shell: bash
         env:
-          CARDHOLDER_NAME: OTHE-NAUT
+          CARDHOLDER_NAME: OTHE
           OUTPUT_PATH: /tmp/mp-rejected-token.json
         run: |
           set -euo pipefail
@@ -144,7 +143,7 @@ jobs:
 
           token="$(jq -r '.token' "$OUTPUT_PATH")"
           method="$(jq -r '.paymentMethodId' "$OUTPUT_PATH")"
-          installments="$(jq -r '.installments' "$OUTPUT_PATH")"
+          installments="$(jq -r '.installments // 1' "$OUTPUT_PATH")"
           [[ -n "$token" && "$token" != "null" && -n "$method" && "$method" != "null" ]]
 
           external_ref="sandbox-card-rejected-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -163,7 +162,6 @@ jobs:
               capture_mode:"automatic",
               external_reference:$external,
               total_amount:"50.00",
-              config:{online:{transaction_security:{validation:"on_fraud_risk",liability_shift:"required"}}},
               payer:{email:"test@testuser.com"},
               transactions:{payments:[{amount:"50.00",payment_method:{id:$method,type:"credit_card",token:$token,installments:$installments}}]}
             }' > "$body_file"
@@ -211,12 +209,12 @@ jobs:
             echo '- Environment: `sandbox`'
             echo '- Real charges allowed: `false`'
             echo '- Real customer data allowed: `false`'
-            echo '- Browser tokenization with test Public Key: `PASS`'
-            echo '- Approved card (`APRO-AUTH`) via Orders API: `PASS`'
-            echo '- Rejected card (`OTHE-NAUT`) via Orders API: `PASS`'
+            echo '- Card Payment Brick tokenization with test Public Key: `PASS`'
+            echo '- Approved card (`APRO`) via Orders API: `PASS`'
+            echo '- Rejected card (`OTHE`) via Orders API: `PASS`'
             echo '- Approved Order ID: `${{ steps.approved.outputs.order_id }}`'
             echo '- Rejected Order ID: `${{ steps.rejected.outputs.order_id }}`'
             echo '- Card token / raw card data persisted or printed: `NO`'
             echo
-            echo 'Este gate não valida ainda challenge 3DS nem liquidação de uma reserva interna da Agenda.'
+            echo 'Este gate valida cartão comum sem 3DS. Challenge 3DS é testado em gate separado.'
           } >> "$GITHUB_STEP_SUMMARY"
