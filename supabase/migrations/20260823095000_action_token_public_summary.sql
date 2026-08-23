@@ -27,7 +27,7 @@ begin
      or v_token.revoked_at is not null
      or v_token.consumed_at is not null
      or v_token.expires_at is null
-     or v_token.expires_at <= clock_timestamp() then
+     or v_token.expires_at <= now() then
     raise exception using errcode = 'P0001', message = 'APPOINTMENT_TOKEN_INVALID';
   end if;
 
@@ -37,7 +37,7 @@ begin
     and deleted_at is null;
 
   if not found
-     or v_appointment.start_at <= clock_timestamp()
+     or v_appointment.start_at <= now()
      or v_token.expires_at <> v_appointment.start_at then
     raise exception using errcode = 'P0001', message = 'APPOINTMENT_TOKEN_INVALID';
   end if;
