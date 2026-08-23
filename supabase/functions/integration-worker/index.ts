@@ -52,6 +52,7 @@ Deno.serve(async (req) => {
     const secret = requireInternal(req)
     const client = adminClient()
     const workerId = `edge:${crypto.randomUUID()}`
+    const transactionalEmailEnabled = (Deno.env.get('TRANSACTIONAL_EMAIL_ENABLED') ?? '').trim().toLowerCase() === 'true'
 
     await client.rpc('release_stale_integration_jobs', { p_stale_after_seconds: 300 })
 
@@ -95,15 +96,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Kommo jobs are safe to claim even when the provider setting is disabled: jobs are
-    // only enqueued while enabled=true and kommo-sync itself fails closed on configuration.
+    const claimJobTypes = [
+      'GOOGLE_CALENDAR_SYNC',
+      'GOOGLE_APPOINTMENT_SYNC',
+      'KOMMO_APPOINTMENT_SYNC',
+    ]
+    // Confirmation-message jobs already exist in the outbox. Do not claim them until
+    // transactional email is explicitly enabled, otherwise a disabled provider could
+    // consume a notification that still needs to be delivered later.
+    if (transactionalEmailEnabled) claimJobTypes.push('APPOINTMENT_CONFIRMED_MESSAGE')
+
     const { data: jobs, error: claimError } = await client.rpc('claim_integration_jobs', {
       p_worker_id: workerId,
-      p_job_types: [
-        'GOOGLE_CALENDAR_SYNC',
-        'GOOGLE_APPOINTMENT_SYNC',
-        'KOMMO_APPOINTMENT_SYNC',
-      ],
+      p_job_types: claimJobTypes,
       p_limit: 10,
     })
     if (claimError) throw new Error(`INTEGRATION_JOB_CLAIM_FAILED:${claimError.message}`)
@@ -133,6 +138,33 @@ Deno.serve(async (req) => {
               workerId,
               result.current_version,
               'GOOGLE_APPOINTMENT_SYNC_STALE_VERSION_MISSING',
+            )
+            discardedStale += 1
+            continue
+          }
+        } else if (job.job_type === 'APPOINTMENT_CONFIRMED_MESSAGE') {
+          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) {
+            throw new Error('APPOINTMENT_CONFIRMED_MESSAGE_VERSION_REQUIRED')
+          }
+          const reason = typeof job.payload_json?.reason === 'string'
+            ? job.payload_json.reason
+            : 'CONFIRMED'
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>(
+            'email-send',
+            secret,
+            {
+              appointment_id: job.entity_id,
+              entity_version: job.entity_version,
+              reason,
+            },
+          )
+          if (result.stale) {
+            await discardStaleJob(
+              client,
+              job,
+              workerId,
+              result.current_version,
+              'APPOINTMENT_CONFIRMED_MESSAGE_STALE_VERSION_MISSING',
             )
             discardedStale += 1
             continue
