@@ -2,11 +2,17 @@ import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts
 import {
   buildContactCustomFields,
   exactContactCandidates,
+  findUniqueLeadBalanceFieldId,
+  findUniqueLeadDateFieldId,
+  findUniqueLeadExtrasFieldId,
   kommoJson,
   kommoLeadName,
+  kommoRentalExtrasValue,
+  kommoReservationDateValue,
   normalizePhone,
   stageIdForAppointment,
   type KommoContact,
+  type KommoCustomField,
 } from '../_shared/kommo.ts'
 
 function requireInternal(req: Request): void {
@@ -26,7 +32,9 @@ type DesiredState = {
   financial_status?: string | null
   service?: { id?: string; name?: string | null } | null
   schedule?: { start_at?: string | null; end_at?: string | null } | null
-  commercial_value?: number | null
+  commercial_value?: number | string | null
+  financial?: { contract_balance?: number | string | null } | null
+  extras?: Array<{ name?: string | null; quantity?: number | null }> | null
   customer?: { id?: string; name?: string | null; email?: string | null; phone?: string | null } | null
 }
 
@@ -44,12 +52,32 @@ type Settings = {
   stage_expired_id: number | null
 }
 
+function money(value: unknown, code: string): number {
+  const parsed = Number(value ?? 0)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(code)
+  return Math.round(parsed * 100) / 100
+}
+
 async function contactFieldIds(baseUrl: string, token: string): Promise<{ email: number | null; phone: number | null }> {
   const payload = await kommoJson<any>(baseUrl, token, '/contacts/custom_fields?limit=250')
   const fields = payload?._embedded?.custom_fields ?? []
   const email = fields.find((field: any) => field.code === 'EMAIL')?.id ?? null
   const phone = fields.find((field: any) => field.code === 'PHONE')?.id ?? null
   return { email: Number.isInteger(email) ? email : null, phone: Number.isInteger(phone) ? phone : null }
+}
+
+async function leadOperationalFields(baseUrl: string, token: string): Promise<{
+  date: number
+  balance: number
+  extras: number
+}> {
+  const payload = await kommoJson<any>(baseUrl, token, '/leads/custom_fields?limit=250')
+  const fields = (payload?._embedded?.custom_fields ?? []) as KommoCustomField[]
+  return {
+    date: findUniqueLeadDateFieldId(fields, 'Data'),
+    balance: findUniqueLeadBalanceFieldId(fields, 'Saldo'),
+    extras: findUniqueLeadExtrasFieldId(fields, 'Extras locação'),
+  }
 }
 
 async function searchContactsByPhone(
@@ -248,6 +276,10 @@ Deno.serve(async (req) => {
     const stageId = stageIdForAppointment(settings, desired.appointment_status ?? 'CREATED', eventKind)
     const contactId = await ensureContact(client, baseUrl, token, desired.customer)
     const leadName = kommoLeadName(desired.service?.name, desired.public_code)
+    const fieldIds = await leadOperationalFields(baseUrl, token)
+    const commercialValue = money(desired.commercial_value, 'KOMMO_COMMERCIAL_VALUE_INVALID')
+    const balance = money(desired.financial?.contract_balance, 'KOMMO_BALANCE_INVALID')
+    const extrasValue = kommoRentalExtrasValue(desired.extras)
 
     const { data: existingLeadLink, error: existingLeadLinkError } = await client
       .from('kommo_appointment_links')
@@ -266,6 +298,13 @@ Deno.serve(async (req) => {
       name: leadName,
       pipeline_id: Number(settings.pipeline_id),
       status_id: stageId,
+      // Kommo's native Venda field is the lead price. The API models it as integer BRL.
+      price: Math.round(commercialValue),
+      custom_fields_values: [
+        { field_id: fieldIds.date, values: [{ value: kommoReservationDateValue(desired.schedule?.start_at) }] },
+        { field_id: fieldIds.balance, values: [{ value: balance }] },
+        { field_id: fieldIds.extras, values: [{ value: extrasValue }] },
+      ],
     }
 
     if (leadId) {
@@ -312,6 +351,12 @@ Deno.serve(async (req) => {
       kommo_contact_id: contactId,
       kommo_lead_id: leadId,
       stage_id: stageId,
+      mirrored: {
+        reservation_date: desired.schedule?.start_at ?? null,
+        sale_value: commercialValue,
+        balance,
+        extras_count: desired.extras?.length ?? 0,
+      },
     })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'KOMMO_SYNC_FAILED'
