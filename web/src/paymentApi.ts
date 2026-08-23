@@ -38,6 +38,10 @@ export type ProviderPayment = {
       ticket_url?: string | null
     } | null
   } | null
+  three_ds_info?: {
+    external_resource_url?: string | null
+    creq?: string | null
+  } | null
 }
 
 export type PaymentResponse = {
