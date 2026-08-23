@@ -23,4 +23,4 @@ set account_subdomain = 'pierriquintproducoes',
 where id = 1;
 
 comment on column public.kommo_integration_settings.stage_initial_contact_id is
-  'BlackSheep pre-booking CRM stage. Existing WhatsApp leads in this stage may be reused by Agenda only after exact phone identity match.';
+  'BlackSheep pre-booking CRM stage. Customer identity is resolved globally in Kommo Contacts by exact normalized phone. This stage is used only to optionally reuse one unclaimed pre-booking lead; one contact may have multiple reservation leads.';
