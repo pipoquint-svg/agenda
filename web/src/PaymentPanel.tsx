@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CardPayment, initMercadoPago } from '@mercadopago/sdk-react'
 import {
   createCardPayment,
@@ -25,6 +25,7 @@ function paymentError(error: unknown): string {
     ['PAYMENT_HOLD_EXPIRED', 'O prazo para pagamento terminou. O horário foi liberado.'],
     ['CONFIRMATION_PAYMENT_ALREADY_SATISFIED', 'A entrada mínima já foi atingida. Atualize a página para ver o saldo.'],
     ['MERCADO_PAGO_PAYMENT_REJECTED', 'O Mercado Pago recusou esta tentativa. Revise o meio de pagamento e tente novamente.'],
+    ['MERCADO_PAGO_PAYMENT_VALIDATION_FAILED', 'O pagamento não pôde ser validado com segurança. Nenhuma reserva foi confirmada.'],
     ['MERCADO_PAGO_TEMPORARY_FAILURE', 'O Mercado Pago está temporariamente indisponível. Tente novamente sem refazer a reserva.'],
     ['APPOINTMENT_TOKEN_INVALID', 'O link de pagamento não é válido.'],
     ['APPOINTMENT_TOKEN_EXPIRED', 'O link de pagamento expirou.'],
@@ -35,6 +36,41 @@ function paymentError(error: unknown): string {
 
 function randomRequestKey(): string {
   return crypto.randomUUID()
+}
+
+function ThreeDSChallenge({ externalResourceUrl, creq }: { externalResourceUrl: string; creq: string }) {
+  const formRef = useRef<HTMLFormElement>(null)
+  const frameName = useMemo(() => `mp-3ds-${crypto.randomUUID()}`, [])
+  const challengeUrl = useMemo(() => {
+    try {
+      const parsed = new URL(externalResourceUrl)
+      return parsed.protocol === 'https:' ? parsed.toString() : null
+    } catch {
+      return null
+    }
+  }, [externalResourceUrl])
+
+  useEffect(() => {
+    if (!challengeUrl || !creq) return
+    formRef.current?.submit()
+  }, [challengeUrl, creq])
+
+  if (!challengeUrl || !creq) {
+    return <div className="form-alert error">Não foi possível iniciar a autenticação segura do cartão.</div>
+  }
+
+  return (
+    <div className="three-ds-box" aria-live="polite">
+      <div>
+        <strong>Confirme o pagamento com seu banco</strong>
+        <p>Conclua a autenticação abaixo. A reserva só será confirmada após o Mercado Pago validar o resultado.</p>
+      </div>
+      <iframe name={frameName} title="Autenticação 3DS do cartão" className="three-ds-frame" />
+      <form ref={formRef} target={frameName} method="post" action={challengeUrl} className="three-ds-form" aria-hidden="true">
+        <input type="hidden" name="creq" value={creq} />
+      </form>
+    </div>
+  )
 }
 
 export function PaymentPanel({ accessToken, onConfirmed }: {
@@ -59,28 +95,36 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     }
   }
 
+  async function syncCurrentPayment(providerPaymentId: string) {
+    const synced = await syncProviderPayment(accessToken, providerPaymentId)
+    setPayment((current) => current ? ({ ...current, ...synced }) : synced)
+    if (synced.state?.appointment_status === 'CONFIRMED' || synced.provider?.status === 'approved') {
+      setConfirmed(true)
+      await reloadContext()
+      onConfirmed?.()
+    }
+    return synced
+  }
+
   useEffect(() => {
     reloadContext().catch((cause) => setError(paymentError(cause)))
   }, [accessToken])
 
   const providerId = payment?.provider?.id || null
   const providerPending = payment?.provider?.status != null && ['pending', 'in_process', 'authorized', 'in_mediation'].includes(payment.provider.status)
+  const challenge = payment?.provider?.status === 'pending' && payment.provider.status_detail === 'pending_challenge'
+    ? payment.provider.three_ds_info
+    : null
 
   useEffect(() => {
     if (!providerId || !providerPending || confirmed) return
     let cancelled = false
     const timer = window.setInterval(async () => {
       try {
-        const synced = await syncProviderPayment(accessToken, providerId)
         if (cancelled) return
-        setPayment((current) => ({ ...current, ...synced }))
-        if (synced.state?.appointment_status === 'CONFIRMED' || synced.provider?.status === 'approved') {
-          setConfirmed(true)
-          await reloadContext()
-          onConfirmed?.()
-        }
+        await syncCurrentPayment(providerId)
       } catch {
-        // Webhook remains authoritative; transient poll failures must not interrupt PIX instructions.
+        // Webhook remains authoritative; transient poll failures must not interrupt PIX/3DS instructions.
       }
     }, 4500)
     return () => {
@@ -88,6 +132,18 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
       window.clearInterval(timer)
     }
   }, [accessToken, providerId, providerPending, confirmed])
+
+  useEffect(() => {
+    if (!providerId || !challenge || confirmed) return
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data && typeof event.data === 'object' ? event.data as Record<string, unknown> : null
+      if (data?.status !== 'COMPLETE') return
+      // The iframe event is only a signal; provider state is always re-fetched server-side.
+      syncCurrentPayment(providerId).catch(() => undefined)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [accessToken, providerId, challenge, confirmed])
 
   const contractAmount = useMemo(() => {
     if (!context) return 0
@@ -224,7 +280,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
             <strong>{money.format(cardAmount)}</strong>
             <small>Os dados do cartão são processados pelo formulário seguro do Mercado Pago.</small>
           </div>
-          {!publicKey ? (
+          {challenge?.external_resource_url && challenge.creq ? (
+            <ThreeDSChallenge externalResourceUrl={challenge.external_resource_url} creq={challenge.creq} />
+          ) : !publicKey ? (
             <div className="form-alert error">Cartão será habilitado assim que a Public Key do Mercado Pago for configurada no ambiente.</div>
           ) : (
             <div className={busy ? 'card-brick busy' : 'card-brick'}>
