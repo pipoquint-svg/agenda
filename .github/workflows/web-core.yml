@@ -1,0 +1,46 @@
+name: Web Core
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-core.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-core.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check web
+        run: npm run check
+
+      - name: Build production bundle
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-public-key
+          VITE_MERCADO_PAGO_PUBLIC_KEY: TEST-public-key
+        run: npm run build
