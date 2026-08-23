@@ -70,6 +70,8 @@ jobs:
             demand-capture
             demand-capture-admin
             admin-agenda
+            admin-dashboard
+            admin-operation-settings
             admin-service-settings
             admin-appointment-actions
             admin-reschedule-actions
