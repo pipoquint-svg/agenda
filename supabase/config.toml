@@ -32,6 +32,11 @@ verify_jwt = false
 [functions.google-appointment-sync]
 verify_jwt = false
 
+# Internal Kommo mirror adapter. It requires x-internal-secret and reads the provider
+# token only from the Edge secret environment.
+[functions.kommo-sync]
+verify_jwt = false
+
 [functions.integration-worker]
 verify_jwt = false
 
