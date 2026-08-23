@@ -1,5 +1,11 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
+import {
+  actionAccessRemainingDelay,
+  isActionOperationAllowed,
+  mapActionAccessError,
+  PERSONAL_LINK_WARNING,
+} from '../_shared/action-token-security.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -14,8 +20,6 @@ const operations = new Set([
   'CANCEL_PREVIEW', 'EXECUTE_CANCEL',
   'RESCHEDULE_SLOTS', 'RESCHEDULE_CREATE_HOLD', 'EXECUTE_RESCHEDULE',
 ])
-const minimumResponseMs = 120
-const personalLinkWarning = 'link pessoal, válido por tempo limitado, não encaminhe'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -37,14 +41,7 @@ function actionScope(value: unknown): string {
 }
 
 function enforceOperationScope(operation: string, scope: string): void {
-  if (operation === 'RESOLVE') return
-  if (operation === 'VERIFY_EMAIL' && (scope === 'CANCEL' || scope === 'RESCHEDULE')) return
-  if ((operation === 'CANCEL_PREVIEW' || operation === 'EXECUTE_CANCEL') && scope === 'CANCEL') return
-  if (
-    (operation === 'RESCHEDULE_SLOTS' || operation === 'RESCHEDULE_CREATE_HOLD' || operation === 'EXECUTE_RESCHEDULE')
-    && scope === 'RESCHEDULE'
-  ) return
-  throw new Error('LINK_INVALID_OR_EXPIRED')
+  if (!isActionOperationAllowed(operation, scope)) throw new Error('LINK_INVALID_OR_EXPIRED')
 }
 
 function requestId(req: Request): string {
@@ -104,36 +101,8 @@ function financialRescheduleConsequence(value: Record<string, unknown>): boolean
 }
 
 async function minimumDelay(startedAt: number): Promise<void> {
-  const remaining = minimumResponseMs - (Date.now() - startedAt)
+  const remaining = actionAccessRemainingDelay(startedAt)
   if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining))
-}
-
-function genericTokenError(raw: string): { code: string; status: number } {
-  if (raw === 'RATE_LIMITED') return { code: 'ACTION_ACCESS_RATE_LIMITED', status: 429 }
-  if (raw.startsWith('RATE_LIMIT_BACKEND_FAILED')) return { code: 'ACTION_ACCESS_TEMPORARY_FAILURE', status: 503 }
-  if (raw.includes('CANCEL_CONFIRMATION_REQUIRED') || raw.includes('RESCHEDULE_CONFIRMATION_REQUIRED')) {
-    return { code: 'ACTION_CONFIRMATION_REQUIRED', status: 400 }
-  }
-  if (raw.includes('CANCEL_EMAIL_VERIFICATION_REQUIRED') || raw.includes('RESCHEDULE_EMAIL_VERIFICATION_REQUIRED')) {
-    return { code: 'ACTION_VERIFICATION_REQUIRED', status: 400 }
-  }
-  if (raw.includes('RESCHEDULE_DIFFERENCE_PAYMENT_REQUIRED')) return { code: 'ACTION_PAYMENT_REQUIRED', status: 409 }
-  if (raw.includes('RESCHEDULE_HOLD_EXPIRED')) return { code: 'RESCHEDULE_HOLD_EXPIRED', status: 409 }
-  if (raw.includes('CLIENT_RESCHEDULE_LIMIT_REACHED')) return { code: 'CLIENT_RESCHEDULE_LIMIT_REACHED', status: 409 }
-  if (raw.includes('RESCHEDULE_PACKAGE_RECONCILIATION_REQUIRED')) return { code: 'RESCHEDULE_REQUIRES_ASSISTANCE', status: 409 }
-  if (raw.includes('RESCHEDULE_DATE_INVALID') || raw.includes('RESCHEDULE_TIME_INVALID')) return { code: 'ACTION_REQUEST_INVALID', status: 400 }
-  if (
-    raw.includes('APPOINTMENT_TOKEN_INVALID')
-    || raw.includes('APPOINTMENT_TOKEN_EXPIRED')
-    || raw.includes('APPOINTMENT_TOKEN_REVOKED')
-    || raw.includes('TOKEN_SCOPE_DENIED')
-    || raw.includes('ACTION_TOKEN_SCOPE_INVALID')
-    || raw.includes('APPOINTMENT_NOT_CANCELLABLE')
-    || raw.includes('APPOINTMENT_NOT_RESCHEDULABLE')
-    || raw.includes('CLIENT_RESCHEDULE_ACTION_INVALID')
-    || raw.includes('LINK_INVALID_OR_EXPIRED')
-  ) return { code: 'LINK_INVALID_OR_EXPIRED', status: 400 }
-  return { code: 'ACTION_ACCESS_TEMPORARY_FAILURE', status: 503 }
 }
 
 Deno.serve(async (req) => {
@@ -178,7 +147,7 @@ Deno.serve(async (req) => {
 
     if (operation === 'RESOLVE') {
       await minimumDelay(startedAt)
-      return json({ data: { valid: true, scope, expires_at: expiresAt, accessed_at: accessedAt, warning: personalLinkWarning } })
+      return json({ data: { valid: true, scope, expires_at: expiresAt, accessed_at: accessedAt, warning: PERSONAL_LINK_WARNING } })
     }
 
     if (operation === 'CANCEL_PREVIEW') {
@@ -199,7 +168,7 @@ Deno.serve(async (req) => {
           scope: 'CANCEL',
           expires_at: expiresAt,
           accessed_at: accessedAt,
-          warning: personalLinkWarning,
+          warning: PERSONAL_LINK_WARNING,
           requires_explicit_confirmation: true,
           requires_email_verification: true,
           financial: {
@@ -228,7 +197,7 @@ Deno.serve(async (req) => {
           slots: Array.isArray(slots) ? slots : [],
           expires_at: expiresAt,
           accessed_at: accessedAt,
-          warning: personalLinkWarning,
+          warning: PERSONAL_LINK_WARNING,
         },
       })
     }
@@ -369,9 +338,7 @@ Deno.serve(async (req) => {
     return json({ data: rescheduled })
   } catch (error) {
     const raw = error instanceof Error ? error.message : 'ACTION_ACCESS_FAILED'
-    const mapped = raw === 'ACTION_OPERATION_INVALID'
-      ? { code: 'ACTION_REQUEST_INVALID', status: 400 }
-      : genericTokenError(raw)
+    const mapped = mapActionAccessError(raw)
     await minimumDelay(startedAt)
     return json({ error: { code: mapped.code } }, mapped.status)
   }
