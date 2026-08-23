@@ -96,12 +96,12 @@ select is(
 );
 
 select ok(
-  (select cancellation_credit_validity_days is null
-          and not cancellation_early_credit_allowed
-          and not cancellation_late_credit_allowed
-   from public.service_change_policies
-   where service_id='97400000-0000-0000-0000-000000000002'),
-  'V2 policy has no expiring automatic cancellation-credit configuration'
+  not exists(
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='service_change_policies'
+      and column_name in ('cancellation_credit_validity_days','cancellation_early_credit_allowed','cancellation_late_credit_allowed')
+  ),
+  'legacy automatic cancellation-credit configuration columns are physically removed'
 );
 
 select lives_ok(
