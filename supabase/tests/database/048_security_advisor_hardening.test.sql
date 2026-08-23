@@ -22,8 +22,16 @@ select ok(has_table_privilege('service_role','public.hour_package_statement_entr
 -- Internal/admin SECURITY DEFINER functions are not callable from public client roles.
 select ok(not has_function_privilege('anon','public.copy_checkout_attribution_to_appointment()','EXECUTE'),'anon cannot execute attribution trigger helper');
 select ok(not has_function_privilege('authenticated','public.copy_checkout_attribution_to_appointment()','EXECUTE'),'authenticated cannot execute attribution trigger helper');
-select ok(not has_function_privilege('anon','public.rls_auto_enable()','EXECUTE'),'anon cannot execute RLS event-trigger helper');
-select ok(not has_function_privilege('authenticated','public.rls_auto_enable()','EXECUTE'),'authenticated cannot execute RLS event-trigger helper');
+select ok(
+  to_regprocedure('public.rls_auto_enable()') is null
+    or coalesce(not has_function_privilege('anon',to_regprocedure('public.rls_auto_enable()'),'EXECUTE'),false),
+  'hosted RLS event-trigger helper is absent or unavailable to anon'
+);
+select ok(
+  to_regprocedure('public.rls_auto_enable()') is null
+    or coalesce(not has_function_privilege('authenticated',to_regprocedure('public.rls_auto_enable()'),'EXECUTE'),false),
+  'hosted RLS event-trigger helper is absent or unavailable to authenticated'
+);
 select ok(not has_function_privilege('anon','public.service_admin_cancel_appointment(uuid,text,text,timestamptz,uuid)','EXECUTE'),'anon cannot execute legacy cancellation admin overload');
 select ok(not has_function_privilege('authenticated','public.service_admin_cancel_appointment(uuid,text,text,timestamptz,uuid)','EXECUTE'),'authenticated cannot execute legacy cancellation admin overload');
 select ok(not has_function_privilege('anon','public.service_admin_create_reschedule_hold(uuid,timestamptz,timestamptz,uuid)','EXECUTE'),'anon cannot execute legacy reschedule admin overload');
