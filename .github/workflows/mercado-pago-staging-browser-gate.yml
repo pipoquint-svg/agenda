@@ -1,0 +1,235 @@
+name: Mercado Pago Staging Browser Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/mercado-pago-staging-browser-gate.yml
+
+permissions:
+  contents: read
+
+env:
+  STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+
+jobs:
+  browser-card-gate:
+    name: Browser HTTPS — APRO e OTHE
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mp-browser
+          cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Run HTTPS browser scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/mp-browser/gate.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const URL = process.env.STAGING_URL;
+          const CARD = '5480832801033311';
+          const EXP = '11/30';
+          const CVV = '123';
+          const CPF = '12345678909';
+          const EMAIL = 'test@testuser.com';
+          const PHONE = '48999999999';
+
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+          async function fillCheckoutFields(page) {
+            const checkboxes = page.locator('input[type="checkbox"]');
+            for (let i = 0; i < await checkboxes.count(); i++) {
+              const box = checkboxes.nth(i);
+              if (await box.isVisible().catch(() => false) && await box.isEnabled().catch(() => false) && !(await box.isChecked().catch(() => false))) {
+                await box.check();
+              }
+            }
+            const textareas = page.locator('textarea');
+            for (let i = 0; i < await textareas.count(); i++) {
+              const el = textareas.nth(i);
+              if (await el.isVisible().catch(() => false) && !(await el.inputValue()).trim()) await el.fill('Teste HTTPS Mercado Pago');
+            }
+            const selects = page.locator('select');
+            for (let i = 0; i < await selects.count(); i++) {
+              const el = selects.nth(i);
+              if (!await el.isVisible().catch(() => false)) continue;
+              const opts = await el.locator('option').evaluateAll(nodes => nodes.map(o => ({value:o.value, disabled:o.disabled})).filter(o => o.value && !o.disabled));
+              if (opts[0]) await el.selectOption(opts[0].value);
+            }
+          }
+
+          async function inputMetadata(frame) {
+            return await frame.locator('input').evaluateAll(nodes => nodes.map(e => ({
+              name:e.getAttribute('name') || '', id:e.id || '', placeholder:e.getAttribute('placeholder') || '',
+              autocomplete:e.getAttribute('autocomplete') || '', aria:e.getAttribute('aria-label') || '', type:e.getAttribute('type') || ''
+            })));
+          }
+
+          function classify(meta) {
+            const s = `${meta.name} ${meta.id} ${meta.placeholder} ${meta.autocomplete} ${meta.aria}`.toLowerCase();
+            if (/card.?number|cc-number|número.*cart|numero.*cart/.test(s)) return 'number';
+            if (/expiration|expiry|expir|cc-exp|validade/.test(s)) return 'expiration';
+            if (/security|cvv|cvc|cc-csc|segurança/.test(s)) return 'cvv';
+            if (/cardholder|holder|titular|nome.*cart/.test(s)) return 'holder';
+            if (/document|identification|cpf/.test(s)) return 'document';
+            if (/e-?mail/.test(s)) return 'email';
+            return null;
+          }
+
+          async function fillBrick(page, scenario) {
+            const deadline = Date.now() + 30000;
+            let found = new Set();
+            while (Date.now() < deadline) {
+              found = new Set();
+              for (const frame of page.frames()) {
+                const inputs = frame.locator('input');
+                for (let i = 0; i < await inputs.count(); i++) {
+                  const el = inputs.nth(i);
+                  if (!await el.isVisible().catch(() => false)) continue;
+                  const meta = await el.evaluate(e => ({
+                    name:e.getAttribute('name') || '', id:e.id || '', placeholder:e.getAttribute('placeholder') || '',
+                    autocomplete:e.getAttribute('autocomplete') || '', aria:e.getAttribute('aria-label') || '', type:e.getAttribute('type') || ''
+                  }));
+                  const kind = classify(meta);
+                  if (!kind || found.has(kind)) continue;
+                  if (kind === 'number') await el.fill(CARD);
+                  if (kind === 'expiration') await el.fill(EXP);
+                  if (kind === 'cvv') await el.fill(CVV);
+                  if (kind === 'holder') await el.fill(scenario);
+                  if (kind === 'document') await el.fill(CPF);
+                  if (kind === 'email') await el.fill(EMAIL);
+                  found.add(kind);
+                }
+                const selects = frame.locator('select');
+                for (let i = 0; i < await selects.count(); i++) {
+                  const sel = selects.nth(i);
+                  if (!await sel.isVisible().catch(() => false)) continue;
+                  const options = await sel.locator('option').evaluateAll(nodes => nodes.map(o => ({value:o.value, disabled:o.disabled})).filter(o => o.value && !o.disabled));
+                  if (options[0]) await sel.selectOption(options[0].value).catch(() => {});
+                }
+              }
+              if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) break;
+              await sleep(500);
+            }
+            if (!(found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder'))) {
+              const diag = [];
+              for (const frame of page.frames()) diag.push({url:new URL(frame.url() || URL).hostname, inputs:await inputMetadata(frame)});
+              console.log('BRICK_DIAGNOSTICS=' + JSON.stringify(diag));
+              throw new Error(`Brick fields incompletos: ${[...found].join(',')}`);
+            }
+
+            let submit = null;
+            for (const frame of page.frames()) {
+              const candidates = frame.getByRole('button', { name: /pagar|pay|continuar|processar/i });
+              if (await candidates.count()) {
+                const candidate = candidates.last();
+                if (await candidate.isVisible().catch(() => false) && await candidate.isEnabled().catch(() => false)) { submit = candidate; break; }
+              }
+            }
+            if (!submit) throw new Error('Botão de submit do Brick não encontrado');
+            await submit.click();
+          }
+
+          async function reachPayment(page, scenario) {
+            await page.goto(URL, {waitUntil:'domcontentloaded', timeout:60000});
+            await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
+
+            await page.getByRole('button', {name:'Continuar'}).click();
+            await page.getByLabel('Quantidade de pessoas').waitFor();
+            await page.getByRole('button', {name:'Continuar'}).click();
+            await page.getByText('Extras', {exact:true}).waitFor();
+            await page.getByRole('button', {name:'Continuar'}).click();
+
+            const day = page.locator('button[role="gridcell"]:not([disabled])').first();
+            await day.waitFor({state:'visible', timeout:45000});
+            await day.click();
+            const time = page.getByRole('button', {name:/^\d{2}:\d{2}$/}).first();
+            await time.waitFor({state:'visible', timeout:20000});
+            await time.click();
+            await page.getByRole('button', {name:'Reservar este horário'}).click();
+
+            await page.getByLabel('Nome completo').fill(`TESTE HTTPS ${scenario}`);
+            await page.getByLabel('E-mail').fill(EMAIL);
+            await page.getByLabel('WhatsApp').fill(PHONE);
+            const tax = page.getByLabel('CPF/CNPJ');
+            if (await tax.count()) await tax.fill(CPF);
+            await page.getByRole('button', {name:'Continuar para a revisão'}).click();
+
+            await page.getByText('Revisão', {exact:true}).waitFor({timeout:20000});
+            await fillCheckoutFields(page);
+            const create = page.getByRole('button', {name:'Criar reserva'});
+            await create.waitFor();
+            if (!await create.isEnabled()) throw new Error('Criar reserva permaneceu desabilitado após preencher termos/campos');
+            await create.click();
+
+            await page.getByText('Pagamento', {exact:true}).waitFor({timeout:30000});
+            const codeText = await page.locator('text=/Reserva .* criada/').first().textContent().catch(() => null);
+            console.log(`${scenario}_RESERVATION=${codeText ?? 'created'}`);
+            await page.getByRole('button', {name:'Cartão'}).click();
+            await page.waitForTimeout(2500);
+          }
+
+          async function scenario(name) {
+            const browser = await chromium.launch({headless:true});
+            const context = await browser.newContext({viewport:{width:1280,height:1000}});
+            const page = await context.newPage();
+            page.on('console', m => { if (m.type()==='error') console.log(`BROWSER_CONSOLE_ERROR[${name}]=${m.text()}`); });
+            try {
+              await reachPayment(page, name);
+              await fillBrick(page, name);
+              if (name === 'APRO') {
+                await page.getByText('Reserva confirmada', {exact:true}).waitFor({timeout:45000});
+                console.log('APRO_BROWSER_HTTPS=PASS');
+              } else {
+                await page.getByText('Pagamento recusado pelo emissor', {exact:false}).waitFor({timeout:45000});
+                console.log('OTHE_BROWSER_HTTPS=PASS');
+              }
+              await page.screenshot({path:`/tmp/mp-browser/${name.toLowerCase()}-final.png`, fullPage:true});
+            } catch (e) {
+              await page.screenshot({path:`/tmp/mp-browser/${name.toLowerCase()}-failure.png`, fullPage:true}).catch(()=>{});
+              throw e;
+            } finally {
+              await browser.close();
+            }
+          }
+
+          await scenario('APRO');
+          await scenario('OTHE');
+          EOF
+          cd /tmp/mp-browser
+          node gate.mjs
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Mercado Pago STAGING_BROWSER — HTTPS'
+            echo
+            echo '- URL: `https://blacksheep-agenda-staging.lovable.app/agenda-e-valores`'
+            echo '- Environment: sandbox only'
+            echo '- Buyer e-mail: official Mercado Pago test buyer'
+            echo '- Real card/customer/charge: NO'
+            echo '- Scenarios requested: APRO + OTHE'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mercado-pago-staging-browser
+          path: /tmp/mp-browser/*.png
+          if-no-files-found: ignore
