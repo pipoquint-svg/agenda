@@ -31,10 +31,6 @@ const html = `<!doctype html>
         const settings = {
           initialization: {
             amount: 50,
-            payer: {
-              email: 'test@testuser.com',
-              identification: { type: 'CPF', number: '12345678909' },
-            },
           },
           callbacks: {
             onReady: () => {
@@ -83,6 +79,21 @@ function fieldHaystack(meta) {
     .toLowerCase()
 }
 
+function sanitizeMessage(value) {
+  return String(value ?? '')
+    .replaceAll(publicKey, '[PUBLIC_KEY]')
+    .slice(0, 500)
+}
+
+function safeUrl(value) {
+  try {
+    const parsed = new URL(value)
+    return `${parsed.origin}${parsed.pathname}`.slice(0, 300)
+  } catch {
+    return sanitizeMessage(value)
+  }
+}
+
 async function fillVisibleField(page, hints, value) {
   const lowered = hints.map((hint) => hint.toLowerCase())
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -120,9 +131,11 @@ async function chooseVisibleSelects(page) {
       const select = selects.nth(index)
       const options = await select.locator('option').evaluateAll((rows) => rows.map((row) => ({
         value: row.value,
+        text: row.textContent || '',
         disabled: row.disabled,
       }))).catch(() => [])
-      const usable = options.find((option) => option.value && !option.disabled)
+      const cpf = options.find((option) => option.value && !option.disabled && /cpf/i.test(`${option.value} ${option.text}`))
+      const usable = cpf || options.find((option) => option.value && !option.disabled)
       if (usable) await select.selectOption(usable.value).catch(() => undefined)
     }
   }
@@ -158,7 +171,7 @@ async function safeFieldInventory(page) {
     for (let index = 0; index < count; index += 1) {
       const node = inputs.nth(index)
       inventory.push({
-        frame: frame.url().slice(0, 120),
+        frame: safeUrl(frame.url()),
         tag: await node.evaluate((el) => el.tagName).catch(() => ''),
         type: await node.getAttribute('type').catch(() => ''),
         placeholder: await node.getAttribute('placeholder').catch(() => ''),
@@ -175,30 +188,54 @@ async function safeFieldInventory(page) {
 const browser = await chromium.launch({ headless: true })
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const diagnostics = []
+  const remember = (kind, message) => {
+    if (diagnostics.length >= 20) return
+    diagnostics.push({ kind, message: sanitizeMessage(message) })
+  }
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') remember(`console:${message.type()}`, message.text())
+  })
+  page.on('pageerror', (error) => remember('pageerror', error?.message || error))
+  page.on('requestfailed', (request) => remember('requestfailed', `${safeUrl(request.url())} ${request.failure()?.errorText || ''}`))
+
   await page.goto(`http://127.0.0.1:${address.port}`, { waitUntil: 'networkidle' })
-  await page.waitForFunction(() => window.__brickReady === true || window.__brickError, null, { timeout: 45000 })
+  try {
+    await page.waitForFunction(() => window.__brickReady === true || window.__brickError, null, { timeout: 45000 })
+  } catch {
+    const inventory = await safeFieldInventory(page)
+    const state = await page.evaluate(() => ({
+      ready: window.__brickReady,
+      error: window.__brickError,
+      hasMercadoPago: typeof window.MercadoPago === 'function',
+      controllerCreated: Boolean(window.__brickController),
+    }))
+    throw new Error(`CARD_BRICK_MOUNT_TIMEOUT:${JSON.stringify({ state, diagnostics, inventory })}`)
+  }
   const brickError = await page.evaluate(() => window.__brickError)
-  if (brickError) throw new Error(`MERCADO_PAGO_BRICK_MOUNT_FAILED:${brickError}`)
+  if (brickError) throw new Error(`MERCADO_PAGO_BRICK_MOUNT_FAILED:${sanitizeMessage(brickError)}`)
 
   await fillVisibleField(page, ['card number', 'número do cartão', 'cardnumber'], '5480832801033311')
   await fillVisibleField(page, ['mm/yy', 'mm/aa', 'expiration', 'validade'], '1130')
   await fillVisibleField(page, ['security code', 'código de segurança', 'cvv'], '123')
-  await fillVisibleField(page, ['cardholder', 'titular', 'nome no cartão', 'name'], cardholderName)
+  await fillVisibleField(page, ['cardholder', 'titular', 'nome no cartão', 'cardholdername'], cardholderName)
+  await fillVisibleField(page, ['email', 'e-mail'], 'test@testuser.com')
 
   await page.waitForTimeout(1500)
   await chooseVisibleSelects(page)
+  await fillVisibleField(page, ['identification number', 'número do documento', 'document number', 'cpf', 'identificationnumber'], '12345678909')
   await clickSubmit(page)
 
   try {
     await page.waitForFunction(() => window.__tokenResult?.token || window.__brickError, null, { timeout: 45000 })
-  } catch (error) {
+  } catch {
     const inventory = await safeFieldInventory(page)
     const state = await page.evaluate(() => ({ ready: window.__brickReady, error: window.__brickError }))
-    throw new Error(`CARD_BRICK_SUBMIT_TIMEOUT:${JSON.stringify({ state, inventory })}`)
+    throw new Error(`CARD_BRICK_SUBMIT_TIMEOUT:${JSON.stringify({ state, diagnostics, inventory })}`)
   }
 
   const result = await page.evaluate(() => ({ result: window.__tokenResult, error: window.__brickError }))
-  if (result.error) throw new Error(`MERCADO_PAGO_BRICK_FAILED:${result.error}`)
+  if (result.error) throw new Error(`MERCADO_PAGO_BRICK_FAILED:${sanitizeMessage(result.error)}`)
   if (!result.result?.token || !result.result?.paymentMethodId) {
     throw new Error('MERCADO_PAGO_TOKENIZE_INCOMPLETE')
   }
