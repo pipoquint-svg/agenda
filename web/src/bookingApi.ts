@@ -348,19 +348,12 @@ export async function loadCheckoutContext(token: string): Promise<CheckoutContex
   return result
 }
 
-export async function setBookingRecoveryContact(token: string, phone: string, enabled = true): Promise<void> {
-  await callPublicGateway<unknown>('booking-checkout', {
-    action: 'SET_RECOVERY_CONTACT', checkout_hold_token: token, phone, enabled,
-  })
-}
-
 export async function bindCheckoutCustomer(input: {
   token: string
   name: string
   email: string
   phone: string
   taxId: string
-  recoveryEnabled: boolean
 }): Promise<{ customer_bound: boolean; customer_created: boolean; recovery_enabled: boolean; has_tax_id: boolean }> {
   const result = await callPublicGateway<{ customer_bound: boolean; customer_created: boolean; recovery_enabled: boolean; has_tax_id: boolean }>('booking-checkout', {
     action: 'BIND_CUSTOMER',
@@ -369,7 +362,6 @@ export async function bindCheckoutCustomer(input: {
     email: input.email,
     phone: input.phone,
     tax_id: input.taxId || null,
-    recovery_enabled: input.recoveryEnabled,
   })
   const context = checkoutContextCache.get(input.token)
   if (context) {
