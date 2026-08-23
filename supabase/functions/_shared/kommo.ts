@@ -107,16 +107,59 @@ export function kommoLeadName(serviceName: string | null | undefined, publicCode
   return code ? `${service} · ${code}` : service
 }
 
-export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
-  const needle = expectedName.trim().toLocaleLowerCase('pt-BR')
-  const named = fields.filter((field) => (field.name ?? '').trim().toLocaleLowerCase('pt-BR') === needle)
-  if (named.length !== 1) throw new Error(named.length === 0 ? 'KOMMO_RESERVATION_DATE_FIELD_MISSING' : 'KOMMO_RESERVATION_DATE_FIELD_AMBIGUOUS')
+export function normalizeKommoFieldName(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+export function findUniqueLeadFieldId(
+  fields: KommoCustomField[],
+  expectedName: string,
+  allowedTypes: string[],
+  errorPrefix: string,
+): number {
+  const needle = normalizeKommoFieldName(expectedName)
+  const named = fields.filter((field) => normalizeKommoFieldName(field.name) === needle)
+  if (named.length !== 1) {
+    throw new Error(named.length === 0 ? `${errorPrefix}_MISSING` : `${errorPrefix}_AMBIGUOUS`)
+  }
 
   const field = named[0]
   const type = (field.type ?? '').trim().toLowerCase()
-  if (type !== 'date' && type !== 'date_time') throw new Error('KOMMO_RESERVATION_DATE_FIELD_INVALID_TYPE')
-  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_RESERVATION_DATE_FIELD_INVALID_ID')
+  if (!allowedTypes.includes(type)) throw new Error(`${errorPrefix}_INVALID_TYPE`)
+  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error(`${errorPrefix}_INVALID_ID`)
   return Number(field.id)
+}
+
+export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
+  return findUniqueLeadFieldId(
+    fields,
+    expectedName,
+    ['date', 'date_time'],
+    'KOMMO_RESERVATION_DATE_FIELD',
+  )
+}
+
+export function findUniqueLeadBalanceFieldId(fields: KommoCustomField[], expectedName = 'Saldo'): number {
+  return findUniqueLeadFieldId(
+    fields,
+    expectedName,
+    ['numeric', 'monetary'],
+    'KOMMO_BALANCE_FIELD',
+  )
+}
+
+export function findUniqueLeadExtrasFieldId(fields: KommoCustomField[], expectedName = 'Extras locação'): number {
+  return findUniqueLeadFieldId(
+    fields,
+    expectedName,
+    ['text', 'textarea'],
+    'KOMMO_RENTAL_EXTRAS_FIELD',
+  )
 }
 
 export function kommoReservationDateValue(startAt: string | null | undefined): string {
@@ -138,6 +181,20 @@ export function kommoReservationDateValue(startAt: string | null | undefined): s
   // Kommo accepts RFC-3339 for date/date_time custom fields. Noon in the business
   // timezone avoids date-boundary shifts while the CRM renders the field as a date.
   return `${year}-${month}-${day}T12:00:00-03:00`
+}
+
+export function kommoRentalExtrasValue(
+  extras: Array<{ name?: string | null; quantity?: number | null }> | null | undefined,
+): string {
+  return (extras ?? [])
+    .map((extra) => {
+      const name = String(extra?.name ?? '').trim()
+      if (!name) return ''
+      const quantity = Number(extra?.quantity ?? 1)
+      return Number.isFinite(quantity) && quantity > 1 ? `${quantity}× ${name}` : name
+    })
+    .filter(Boolean)
+    .join('\n')
 }
 
 export function buildContactCustomFields(
