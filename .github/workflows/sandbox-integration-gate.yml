@@ -19,11 +19,8 @@ jobs:
       MERCADO_PAGO_ENV: sandbox
       MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
       MERCADO_PAGO_TEST_USER_ID: ${{ vars.MERCADO_PAGO_TEST_USER_ID }}
-      WHATSAPP_TEST_MODE: "true"
-      WHATSAPP_TEST_RECIPIENT_ALLOWLIST: ${{ vars.WHATSAPP_TEST_RECIPIENT_ALLOWLIST }}
       ALLOW_REAL_CUSTOMER_DATA: "false"
       ALLOW_REAL_CHARGES: "false"
-      ALLOW_REAL_WHATSAPP_RECIPIENTS: "false"
       DATABASE_URL: ${{ secrets.SANDBOX_DATABASE_URL }}
     steps:
       - name: Checkout
@@ -62,7 +59,9 @@ jobs:
             echo "- Etapa 2 / iPhone Safari: NÃO TESTADO"
             echo "- Etapa 3 / pagamento após expiração: NÃO TESTADO"
             echo "- Etapa 4 / Google real em calendários TESTE: NÃO TESTADO"
-            echo "- Etapa 5 / jornada em dispositivos reais: NÃO TESTADO"
+            echo "- Etapa 5 / Kommo provider: NÃO TESTADO neste workflow; gate próprio #112"
+            echo "- Etapa 6 / jornada em dispositivos reais: NÃO TESTADO"
+            echo "- WhatsApp direto/Meta: FORA DO ESCOPO da Agenda V1.12"
             echo
             echo "Nenhum item NÃO TESTADO pode ser considerado aprovado."
           } >> "$GITHUB_STEP_SUMMARY"
