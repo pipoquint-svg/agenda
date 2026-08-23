@@ -7,6 +7,10 @@ import {
   verifyMercadoPagoWebhookSignature,
 } from '../_shared/mercado-pago.ts'
 
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -43,6 +47,85 @@ function dataIdFrom(url: URL, body: Record<string, unknown>): string {
   if (query) return query
   const data = body.data && typeof body.data === 'object' ? body.data as Record<string, unknown> : null
   return data?.id == null ? '' : String(data.id)
+}
+
+async function tryImmediateConfirmationEmail(
+  client: ReturnType<typeof adminClient>,
+  appointmentId: string,
+  normalizedPaymentStatus: string,
+): Promise<void> {
+  if (normalizedPaymentStatus !== 'APPROVED' || !appointmentId) return
+
+  try {
+    const { data: appointment, error: appointmentError } = await client
+      .from('appointments')
+      .select('id,status,version')
+      .eq('id', appointmentId)
+      .maybeSingle()
+    if (appointmentError || !appointment || appointment.status !== 'CONFIRMED') return
+
+    // Only an actual confirmation outbox event authorizes this best-effort fast path.
+    // The durable job remains pending until integration-worker consumes it, so any
+    // failure here is retried later. Resend idempotency prevents duplicate delivery.
+    const { data: jobs, error: jobError } = await client
+      .from('integration_jobs')
+      .select('entity_version,payload_json')
+      .eq('job_type', 'APPOINTMENT_CONFIRMED_MESSAGE')
+      .eq('entity_id', appointment.id)
+      .eq('entity_version', appointment.version)
+      .eq('status', 'PENDING')
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (jobError || !jobs?.length) return
+
+    const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const internalSecret = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
+    if (!base || !internalSecret) {
+      console.error('Immediate confirmation email skipped: internal runtime not configured', { appointmentId })
+      return
+    }
+
+    const reason = typeof jobs[0]?.payload_json?.reason === 'string'
+      ? jobs[0].payload_json.reason
+      : 'CONFIRMED'
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8000)
+    try {
+      const response = await fetch(`${base}/functions/v1/email-send`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-secret': internalSecret,
+        },
+        body: JSON.stringify({
+          appointment_id: appointment.id,
+          entity_version: appointment.version,
+          reason,
+        }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        console.error('Immediate confirmation email failed; durable outbox retained', {
+          appointmentId,
+          status: response.status,
+        })
+        return
+      }
+
+      console.log('Immediate confirmation email attempt completed', {
+        appointmentId,
+        entityVersion: appointment.version,
+      })
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch (error) {
+    console.error('Immediate confirmation email failed; durable outbox retained', {
+      appointmentId,
+      code: error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN',
+    })
+  }
 }
 
 Deno.serve(async (req) => {
@@ -178,6 +261,11 @@ Deno.serve(async (req) => {
       p_paid_at: snapshot.date_approved,
     })
     if (error) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${error.message}`)
+
+    const appointmentId = applied && typeof applied === 'object' && typeof applied.appointment_id === 'string'
+      ? applied.appointment_id
+      : transaction.appointment_id
+    EdgeRuntime.waitUntil(tryImmediateConfirmationEmail(client, appointmentId, normalized))
 
     return json({ ok: true, state: applied })
   } catch (error) {
