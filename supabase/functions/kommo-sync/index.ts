@@ -60,6 +60,8 @@ async function searchContactsByPhone(
   const normalized = normalizePhone(phone)
   if (!normalized) throw new Error('KOMMO_PHONE_REQUIRED')
 
+  // This search is global in Kommo Contacts. Pipeline/stage is intentionally irrelevant
+  // to customer identity: a person can have zero, one or many leads/reservations.
   const byId = new Map<number, KommoContact>()
   const queries = [...new Set([phone.trim(), normalized].filter(Boolean))]
   for (const query of queries) {
@@ -96,8 +98,8 @@ async function ensureContact(
     return Number(existingLink.kommo_contact_id)
   }
 
-  // Provider lookup by phone is mandatory before creating any new Kommo contact.
-  // E-mail is deliberately not an identity key for this integration.
+  // Provider-wide contact lookup by phone is mandatory before creating any contact.
+  // E-mail is metadata, not an identity key for this integration.
   const candidates = exactContactCandidates(
     await searchContactsByPhone(baseUrl, token, phone),
     null,
@@ -145,6 +147,7 @@ async function recoverLeadByName(baseUrl: string, token: string, expectedName: s
 }
 
 async function recoverInitialLeadForContact(
+  client: ReturnType<typeof adminClient>,
   baseUrl: string,
   token: string,
   contactId: number,
@@ -155,15 +158,31 @@ async function recoverInitialLeadForContact(
     throw new Error('KOMMO_INITIAL_STAGE_NOT_CONFIGURED')
   }
 
+  // Contact may legitimately have several leads because each reservation is a separate lead.
+  // We only reuse an unclaimed pre-booking lead in BlackSheep / CONTATO INICIAL.
   const contact = await kommoJson<any>(baseUrl, token, `/contacts/${contactId}?with=leads`)
   const leadIds = [...new Set(
     (contact?._embedded?.leads ?? [])
       .map((lead: any) => Number(lead?.id))
       .filter((id: number) => Number.isInteger(id) && id > 0),
   )]
+  if (leadIds.length === 0) return null
+
+  const { data: mappedRows, error: mappedError } = await client
+    .from('kommo_appointment_links')
+    .select('kommo_lead_id')
+    .in('kommo_lead_id', leadIds)
+  if (mappedError) throw new Error('KOMMO_APPOINTMENT_LINK_LOOKUP_FAILED')
+
+  const alreadyClaimed = new Set(
+    (mappedRows ?? [])
+      .map((row: any) => Number(row.kommo_lead_id))
+      .filter((id: number) => Number.isInteger(id) && id > 0),
+  )
 
   const matches: number[] = []
   for (const leadId of leadIds) {
+    if (alreadyClaimed.has(leadId)) continue
     const lead = await kommoJson<any>(baseUrl, token, `/leads/${leadId}`)
     if (
       Number(lead?.pipeline_id) === Number(settings.pipeline_id) &&
@@ -250,8 +269,10 @@ Deno.serve(async (req) => {
       .maybeSingle()
     if (existingLeadLinkError) throw new Error('KOMMO_APPOINTMENT_LINK_LOOKUP_FAILED')
 
+    // One appointment maps to one lead. Historical/parallel leads for the same contact are valid.
+    // Only an unclaimed CONTATO INICIAL lead can be converted into this appointment's lead.
     let leadId = existingLeadLink?.kommo_lead_id ? Number(existingLeadLink.kommo_lead_id) : null
-    if (!leadId) leadId = await recoverInitialLeadForContact(baseUrl, token, contactId, settings)
+    if (!leadId) leadId = await recoverInitialLeadForContact(client, baseUrl, token, contactId, settings)
     if (!leadId) leadId = await recoverLeadByName(baseUrl, token, leadName)
 
     const leadBody = {
