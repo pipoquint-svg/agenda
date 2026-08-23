@@ -1,0 +1,80 @@
+import {
+  buildContactCustomFields,
+  contactMatchesExactly,
+  exactContactCandidates,
+  kommoLeadName,
+  normalizePhone,
+  stageIdForAppointment,
+} from './kommo.ts'
+
+Deno.test('normalizePhone keeps only digits', () => {
+  if (normalizePhone('+55 (48) 99999-0000') !== '5548999990000') throw new Error('phone normalization failed')
+})
+
+Deno.test('contact exact match accepts email or phone', () => {
+  const contact = {
+    id: 1,
+    custom_fields_values: [
+      { field_code: 'EMAIL', values: [{ value: 'Cliente@Teste.Com' }] },
+      { field_code: 'PHONE', values: [{ value: '+55 48 99999-0000' }] },
+    ],
+  }
+  if (!contactMatchesExactly(contact, 'cliente@teste.com', null)) throw new Error('email should match')
+  if (!contactMatchesExactly(contact, null, '5548999990000')) throw new Error('phone should match')
+  if (contactMatchesExactly(contact, 'outro@teste.com', '5511999999999')) throw new Error('unrelated contact matched')
+})
+
+Deno.test('ambiguous exact contacts remain visible to caller', () => {
+  const contacts = [
+    { id: 1, custom_fields_values: [{ field_code: 'EMAIL', values: [{ value: 'a@b.com' }] }] },
+    { id: 2, custom_fields_values: [{ field_code: 'EMAIL', values: [{ value: 'a@b.com' }] }] },
+  ]
+  if (exactContactCandidates(contacts, 'a@b.com', null).length !== 2) throw new Error('ambiguity must not be hidden')
+})
+
+Deno.test('stage mapping prioritizes reschedule event then appointment status', () => {
+  const settings = {
+    pipeline_id: 10,
+    stage_awaiting_payment_id: 11,
+    stage_confirmed_id: 12,
+    stage_rescheduled_id: 13,
+    stage_cancelled_id: 14,
+    stage_completed_id: 15,
+    stage_no_show_id: 16,
+    stage_expired_id: 17,
+  }
+  if (stageIdForAppointment(settings, 'CONFIRMED', 'RESCHEDULED') !== 13) throw new Error('reschedule stage failed')
+  if (stageIdForAppointment(settings, 'CONFIRMED', 'UPDATED') !== 12) throw new Error('confirmed stage failed')
+  if (stageIdForAppointment(settings, 'AWAITING_PAYMENT', 'CREATED') !== 11) throw new Error('awaiting stage failed')
+})
+
+Deno.test('missing stage fails closed', () => {
+  let failed = false
+  try {
+    stageIdForAppointment({
+      pipeline_id: 10,
+      stage_awaiting_payment_id: null,
+      stage_confirmed_id: null,
+      stage_rescheduled_id: null,
+      stage_cancelled_id: null,
+      stage_completed_id: null,
+      stage_no_show_id: null,
+      stage_expired_id: null,
+    }, 'CONFIRMED', 'UPDATED')
+  } catch (error) {
+    failed = error instanceof Error && error.message.startsWith('KOMMO_STAGE_NOT_CONFIGURED')
+  }
+  if (!failed) throw new Error('missing stage should fail closed')
+})
+
+Deno.test('contact field payload uses provider field ids only', () => {
+  const fields = buildContactCustomFields(21, 22, ' CLIENTE@TESTE.COM ', '+55 48 99999-0000')
+  if (JSON.stringify(fields) !== JSON.stringify([
+    { field_id: 21, values: [{ value: 'cliente@teste.com', enum_code: 'WORK' }] },
+    { field_id: 22, values: [{ value: '+55 48 99999-0000', enum_code: 'MOB' }] },
+  ])) throw new Error('custom field payload mismatch')
+})
+
+Deno.test('lead name carries public code for recovery/idempotency', () => {
+  if (kommoLeadName('Locação', 'BS-123') !== 'Locação · BS-123') throw new Error('lead name mismatch')
+})
