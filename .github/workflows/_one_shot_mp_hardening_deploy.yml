@@ -1,0 +1,72 @@
+name: One Shot MP Hardening Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/_one_shot_mp_hardening_deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 10
+    env:
+      APP_ENV: staging
+      MERCADO_PAGO_ENV: sandbox
+      ALLOW_REAL_CUSTOMER_DATA: 'false'
+      ALLOW_REAL_CHARGES: 'false'
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      MERCADO_PAGO_WEBHOOK_SECRET: ${{ secrets.MERCADO_PAGO_WEBHOOK_SECRET }}
+      MERCADO_PAGO_WEBHOOK_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-webhook
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail closed on sandbox isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APP_ENV" = staging
+          test "$MERCADO_PAGO_ENV" = sandbox
+          test "$ALLOW_REAL_CUSTOMER_DATA" = false
+          test "$ALLOW_REAL_CHARGES" = false
+          test -n "${SUPABASE_ACCESS_TOKEN:-}"
+          test -n "${MERCADO_PAGO_ACCESS_TOKEN:-}"
+          test -n "${MERCADO_PAGO_WEBHOOK_SECRET:-}"
+          [[ "$MERCADO_PAGO_ACCESS_TOKEN" == TEST-* ]]
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+      - name: Pin sandbox runtime gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" \
+            MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
+            MERCADO_PAGO_WEBHOOK_URL="$MERCADO_PAGO_WEBHOOK_URL" \
+            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET" \
+            MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
+            APP_ENV="$APP_ENV" \
+            ALLOW_REAL_CHARGES="$ALLOW_REAL_CHARGES" \
+            ALLOW_REAL_CUSTOMER_DATA="$ALLOW_REAL_CUSTOMER_DATA"
+      - name: Deploy hardened Mercado Pago adapters from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy mercado-pago-payment --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          supabase functions deploy mercado-pago-webhook --project-ref "$SUPABASE_PROJECT_REF" --use-api
+      - name: Smoke auth boundary without creating charge
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' \
+            --data '{"type":"order","live_mode":false,"data":{"id":"hardening-smoke"}}' \
+            "$MERCADO_PAGO_WEBHOOK_URL")"
+          test "$status" = 401
+          grep -q 'MERCADO_PAGO_SIGNATURE_REQUIRED' "$body"
