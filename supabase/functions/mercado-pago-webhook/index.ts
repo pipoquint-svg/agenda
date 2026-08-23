@@ -1,5 +1,6 @@
 import { adminClient } from '../_shared/supabase.ts'
 import {
+  assertMercadoPagoPaymentMatchesIntent,
   normalizeMercadoPagoPaymentStatus,
   sanitizeMercadoPagoPayment,
   verifyMercadoPagoWebhookSignature,
@@ -77,41 +78,75 @@ Deno.serve(async (req) => {
     if (!snapshot.id || snapshot.id !== dataId) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
 
     const client = adminClient()
-    let transactionId: string | null = null
+    let transaction: { id: string; appointment_id: string; cash_amount: number | string; method: string } | null = null
 
     if (snapshot.external_reference && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(snapshot.external_reference)) {
       const { data } = await client
         .from('payment_transactions')
-        .select('id')
+        .select('id,appointment_id,cash_amount,method')
         .eq('id', snapshot.external_reference)
         .eq('provider', 'MERCADO_PAGO')
         .eq('transaction_type', 'CHARGE')
         .maybeSingle()
-      transactionId = data?.id ?? null
+      transaction = data ?? null
     }
 
-    if (!transactionId) {
+    if (!transaction) {
       const { data } = await client
         .from('payment_transactions')
-        .select('id')
+        .select('id,appointment_id,cash_amount,method')
         .eq('provider', 'MERCADO_PAGO')
         .eq('provider_payment_id', snapshot.id)
         .eq('transaction_type', 'CHARGE')
         .maybeSingle()
-      transactionId = data?.id ?? null
+      transaction = data ?? null
     }
 
-    // A payment from the same Mercado Pago application but unrelated to Agenda
-    // must not trigger retries forever or mutate any booking.
-    if (!transactionId) return json({ ok: true, ignored: 'PAYMENT_NOT_MANAGED_BY_AGENDA' })
+    // Payments unrelated to Agenda must be acknowledged without mutating any booking.
+    if (!transaction) return json({ ok: true, ignored: 'PAYMENT_NOT_MANAGED_BY_AGENDA' })
+    if (transaction.method !== 'PIX' && transaction.method !== 'CARD') {
+      console.error('Mercado Pago managed transaction has invalid method', transaction.id)
+      return json({ ok: true, ignored: 'PAYMENT_INTENT_INVALID' })
+    }
+
+    try {
+      assertMercadoPagoPaymentMatchesIntent(snapshot, {
+        transactionId: transaction.id,
+        cashAmount: transaction.cash_amount,
+        method: transaction.method,
+      })
+    } catch (validationError) {
+      const code = validationError instanceof Error ? validationError.message : 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED'
+      console.error('Mercado Pago webhook payment did not match internal intent', { transactionId: transaction.id, paymentId: snapshot.id, code })
+      const { error: auditError } = await client.from('audit_logs').insert({
+        entity_type: 'PAYMENT_TRANSACTION',
+        entity_id: transaction.id,
+        action: 'MERCADO_PAGO_PAYMENT_INTENT_MISMATCH',
+        before_json: null,
+        after_json: {
+          appointment_id: transaction.appointment_id,
+          provider_payment_id: snapshot.id,
+          external_reference: snapshot.external_reference,
+          transaction_amount: snapshot.transaction_amount,
+          payment_method_id: snapshot.payment_method_id,
+          payment_type_id: snapshot.payment_type_id,
+          validation_code: code,
+          request_id: requestId,
+        },
+        origin: 'SYSTEM',
+      })
+      if (auditError) console.error('Failed to persist Mercado Pago mismatch audit', auditError.message)
+      // Acknowledge a validly signed provider notification to avoid retry storms, but never mutate payment state.
+      return json({ ok: true, ignored: 'PAYMENT_INTENT_MISMATCH' })
+    }
 
     const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
     const notificationId = body.id == null ? requestId : String(body.id)
     const action = typeof body.action === 'string' ? body.action : 'payment.updated'
-    const eventKey = `webhook:${notificationId}:${action}:${dataId}`
+    const eventKey = `webhook:${notificationId}:${action}:${dataId}:${snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`
 
     const { data: applied, error } = await client.rpc('apply_provider_payment_status', {
-      p_transaction_id: transactionId,
+      p_transaction_id: transaction.id,
       p_provider_payment_id: snapshot.id,
       p_normalized_status: normalized,
       p_event_key: eventKey,
