@@ -1,0 +1,58 @@
+name: Integration Worker Schedule
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: integration-worker-schedule
+  cancel-in-progress: false
+
+jobs:
+  run-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request GitHub OIDC token and invoke worker
+        shell: bash
+        env:
+          OIDC_AUDIENCE: blacksheep-agenda-integration-worker
+          WORKER_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/integration-worker-trigger
+        run: |
+          set -euo pipefail
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+
+          separator='&'
+          if [[ "$ACTIONS_ID_TOKEN_REQUEST_URL" != *'?'* ]]; then
+            separator='?'
+          fi
+
+          token_response="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}${separator}audience=${OIDC_AUDIENCE}")"
+          token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<<"$token_response")"
+          test -n "$token"
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error \
+            --output "$body" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${token}" \
+            --header 'Content-Type: application/json' \
+            --data '{}' \
+            "$WORKER_URL")"
+
+          cat "$body"
+          echo
+          if [[ "$status" != '200' ]]; then
+            echo "integration-worker-trigger failed with HTTP $status" >&2
+            exit 1
+          fi
+          grep -q '"ok":true' "$body"

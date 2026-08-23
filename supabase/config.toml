@@ -45,6 +45,12 @@ verify_jwt = false
 [functions.integration-worker]
 verify_jwt = false
 
+# Public HTTP boundary for the scheduled worker. Supabase JWT verification is disabled
+# because this endpoint verifies a GitHub Actions OIDC token itself and pins the exact
+# repository id, owner id, main ref and workflow_ref before calling integration-worker.
+[functions.integration-worker-trigger]
+verify_jwt = false
+
 # Demand capture is public by design. Server-side validation is authoritative.
 [functions.demand-capture]
 verify_jwt = false
