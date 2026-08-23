@@ -5,6 +5,7 @@ import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
+import { ManageReservation } from './ManageReservation'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
 import { trackPublicPage } from './tracking'
@@ -58,6 +59,7 @@ export function App() {
 
   if (path === '/agendar/sabrina') return <PublicBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep') return <PublicBookingRoute slug="blacksheep" />
+  if (path === '/reserva/gerenciar' || path === '/gerenciar-reserva') return <ManageReservation />
 
   const params = new URLSearchParams(window.location.search)
   return (
