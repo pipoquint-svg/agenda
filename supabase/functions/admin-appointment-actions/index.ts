@@ -51,14 +51,19 @@ function changeOrigin(value: unknown): 'CLIENT' | 'OPERATION' {
   return next
 }
 
-function requestEvidence(req: Request, body: Record<string, unknown>) {
+function authorshipEvidence(req: Request) {
   const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
   const userAgent = (req.headers.get('user-agent') ?? '').trim()
   const requestId = (req.headers.get('x-request-id') ?? crypto.randomUUID()).trim()
+  if (!ip || !userAgent || !requestId) throw new Error('AUTHORSHIP_ADMIN_EVIDENCE_REQUIRED')
+  return { ip, userAgent, requestId }
+}
+
+function requestEvidence(req: Request, body: Record<string, unknown>) {
+  const evidence = authorshipEvidence(req)
   const reference = typeof body.admin_request_reference === 'string' ? body.admin_request_reference.trim().slice(0, 500) : ''
-  if (!ip || !userAgent || !requestId) throw new Error('BALANCE_AUTHORSHIP_EVIDENCE_REQUIRED')
   if (!reference) throw new Error('BALANCE_ADMIN_REQUEST_EVIDENCE_REQUIRED')
-  return { ip, userAgent, requestId, reference }
+  return { ...evidence, reference }
 }
 
 async function stableIdempotencyKey(input: string): Promise<string> {
@@ -132,13 +137,18 @@ Deno.serve(async (req) => {
       if (requestedChoice === 'CUSTOMER_BALANCE') await requirePermission('FINANCE_MANAGE')
 
       const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : null
-      const { data, error } = await client.rpc('service_admin_cancel_appointment', {
+      const authorship = authorshipEvidence(req)
+      const { data, error } = await client.rpc('service_admin_cancel_appointment_evidenced', {
         p_appointment_id: appointmentId,
         p_settlement_choice: null,
         p_reason: reason || null,
         p_requested_at: new Date().toISOString(),
         p_change_origin: origin,
         p_admin_id: admin.adminId,
+        p_ip: authorship.ip,
+        p_user_agent: authorship.userAgent,
+        p_request_id: authorship.requestId,
+        p_session_id: null,
       })
       if (error) throw new Error(error.message)
       const cancellation = data as Record<string, unknown>

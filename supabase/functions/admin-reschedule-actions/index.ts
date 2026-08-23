@@ -38,14 +38,19 @@ function changeOrigin(value: unknown): 'CLIENT' | 'OPERATION' {
   return next
 }
 
-function requestEvidence(req: Request, body: Record<string, unknown>) {
+function authorshipEvidence(req: Request) {
   const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
   const userAgent = (req.headers.get('user-agent') ?? '').trim()
   const requestId = (req.headers.get('x-request-id') ?? crypto.randomUUID()).trim()
+  if (!ip || !userAgent || !requestId) throw new Error('AUTHORSHIP_ADMIN_EVIDENCE_REQUIRED')
+  return { ip, userAgent, requestId }
+}
+
+function requestEvidence(req: Request, body: Record<string, unknown>) {
+  const evidence = authorshipEvidence(req)
   const reference = typeof body.admin_request_reference === 'string' ? body.admin_request_reference.trim().slice(0, 500) : ''
-  if (!ip || !userAgent || !requestId) throw new Error('BALANCE_AUTHORSHIP_EVIDENCE_REQUIRED')
   if (!reference) throw new Error('BALANCE_ADMIN_REQUEST_EVIDENCE_REQUIRED')
-  return { ip, userAgent, requestId, reference }
+  return { ...evidence, reference }
 }
 
 Deno.serve(async (req) => {
@@ -110,9 +115,14 @@ Deno.serve(async (req) => {
     if (action === 'APPLY') {
       await requirePermission('AGENDA_MANAGE')
       const policyActionId = uuid(body.policy_action_id, 'POLICY_ACTION_ID_INVALID')
-      const { data, error } = await client.rpc('service_admin_apply_reschedule', {
+      const evidence = authorshipEvidence(req)
+      const { data, error } = await client.rpc('service_admin_apply_reschedule_evidenced', {
         p_policy_action_id: policyActionId,
         p_admin_id: admin.adminId,
+        p_ip: evidence.ip,
+        p_user_agent: evidence.userAgent,
+        p_request_id: evidence.requestId,
+        p_session_id: null,
       })
       if (error) throw new Error(error.message)
       return json(data)
