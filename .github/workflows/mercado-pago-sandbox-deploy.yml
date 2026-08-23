@@ -1,0 +1,150 @@
+name: Mercado Pago Sandbox Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref da Agenda a publicar no sandbox"
+        required: true
+        default: "feature/mercado-pago-sandbox-hardening"
+        type: string
+      confirmation:
+        description: "Digite SANDBOX para confirmar que nenhum dado ou charge real deve ser usado"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Mercado Pago no sandbox
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 20
+    env:
+      APP_ENV: staging
+      MERCADO_PAGO_ENV: sandbox
+      ALLOW_REAL_CUSTOMER_DATA: "false"
+      ALLOW_REAL_CHARGES: "false"
+      SUPABASE_PROJECT_REF: jlyvlmspfjwbcmhmhwz
+      MERCADO_PAGO_WEBHOOK_URL: https://jlyvlmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-webhook
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SANDBOX_DATABASE_URL: ${{ secrets.SANDBOX_DATABASE_URL }}
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      MERCADO_PAGO_WEBHOOK_SECRET: ${{ secrets.MERCADO_PAGO_WEBHOOK_SECRET }}
+
+    steps:
+      - name: Require explicit sandbox confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.confirmation }}" != "SANDBOX" ]]; then
+            echo "Confirmação inválida. Digite SANDBOX." >&2
+            exit 1
+          fi
+
+      - name: Checkout requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Require sandbox secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SUPABASE_ACCESS_TOKEN SANDBOX_DATABASE_URL MERCADO_PAGO_ACCESS_TOKEN MERCADO_PAGO_WEBHOOK_SECRET; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "$name ausente no environment sandbox" >&2
+              exit 1
+            fi
+          done
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Dry-run database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db push --db-url "$SANDBOX_DATABASE_URL" --include-all --dry-run
+
+      - name: Apply database migrations to sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db push --db-url "$SANDBOX_DATABASE_URL" --include-all
+
+      - name: Configure Mercado Pago Edge Function secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase secrets set \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
+            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET" \
+            MERCADO_PAGO_WEBHOOK_URL="$MERCADO_PAGO_WEBHOOK_URL" \
+            MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
+            APP_ENV="$APP_ENV" \
+            ALLOW_REAL_CHARGES="$ALLOW_REAL_CHARGES" \
+            ALLOW_REAL_CUSTOMER_DATA="$ALLOW_REAL_CUSTOMER_DATA"
+
+      - name: Deploy Mercado Pago payment function
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy mercado-pago-payment \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --use-api
+
+      - name: Deploy Mercado Pago webhook function
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy mercado-pago-webhook \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --use-api
+
+      - name: Smoke test webhook authentication boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          body_file="$(mktemp)"
+          status="$(curl --silent --show-error \
+            --output "$body_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header 'content-type: application/json' \
+            --data '{"type":"payment","data":{"id":"sandbox-smoke"}}' \
+            "$MERCADO_PAGO_WEBHOOK_URL")"
+          cat "$body_file"
+          echo
+          if [[ "$status" != "401" ]]; then
+            echo "Webhook respondeu HTTP $status; esperado 401 sem assinatura." >&2
+            exit 1
+          fi
+          if ! grep -q 'MERCADO_PAGO_SIGNATURE_REQUIRED' "$body_file"; then
+            echo "Webhook não retornou o código de assinatura obrigatória esperado." >&2
+            exit 1
+          fi
+
+      - name: Record sandbox deployment evidence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Mercado Pago Sandbox Deploy"
+            echo
+            echo "- Project ref: \`$SUPABASE_PROJECT_REF\`"
+            echo "- Source ref: \`${{ inputs.ref }}\`"
+            echo "- APP_ENV: \`$APP_ENV\`"
+            echo "- MERCADO_PAGO_ENV: \`$MERCADO_PAGO_ENV\`"
+            echo "- ALLOW_REAL_CHARGES: \`$ALLOW_REAL_CHARGES\`"
+            echo "- Webhook URL: \`$MERCADO_PAGO_WEBHOOK_URL\`"
+            echo
+            echo "Este workflow apenas publica/configura o sandbox e testa o boundary de autenticação do webhook."
+            echo "PIX/cartão/3DS/webhook assinado permanecem NÃO TESTADOS até a matriz real de sandbox ser executada."
+          } >> "$GITHUB_STEP_SUMMARY"
