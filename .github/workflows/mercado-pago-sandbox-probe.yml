@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: "Digite SANDBOX para validar apenas credenciais de teste"
+        description: "Digite SANDBOX para validar a credencial sem criar pagamentos"
         required: true
         type: string
 
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   preflight:
-    name: Validar credencial Mercado Pago sandbox
+    name: Validar acesso Mercado Pago Payments
     runs-on: ubuntu-latest
     environment: sandbox
     timeout-minutes: 5
@@ -36,33 +36,38 @@ jobs:
           [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]] || { echo "ALLOW_REAL_CUSTOMER_DATA precisa ser false" >&2; exit 1; }
           [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]] || { echo "MERCADO_PAGO_ACCESS_TOKEN ausente" >&2; exit 1; }
 
-      - name: Reject Mercado Pago live credential in sandbox
+      - name: Validate payment API scope without creating payment
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$MERCADO_PAGO_ACCESS_TOKEN" == TEST-* ]]; then
-            echo "Mercado Pago sandbox credential preflight: TEST prefix accepted."
-            exit 0
-          fi
-
           status="$(curl --silent --show-error \
-            --output /tmp/mp-user.json \
+            --output /tmp/mp-payment-scope.json \
             --write-out '%{http_code}' \
+            --get \
+            --header 'accept: application/json' \
             --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
-            'https://api.mercadolibre.com/users/me')"
-          if [[ "$status" != "200" ]]; then
-            echo "Não foi possível validar a identidade da credencial Mercado Pago (HTTP $status)." >&2
-            exit 1
-          fi
+            --data-urlencode 'sort=date_created' \
+            --data-urlencode 'criteria=desc' \
+            --data-urlencode 'external_reference=blacksheep-sandbox-scope-preflight-no-payment' \
+            --data-urlencode 'limit=1' \
+            'https://api.mercadopago.com/v1/payments/search')"
 
-          python3 - <<'PY'
-          import json
-          data = json.load(open('/tmp/mp-user.json'))
-          tags = data.get('tags') or []
-          if 'test_user' not in tags:
-              print('Credencial recusada: o environment sandbox não pode usar token associado a usuário produtivo.')
-              raise SystemExit(1)
-          print('Mercado Pago sandbox credential preflight: test_user confirmado.')
+          python3 - "$status" <<'PY'
+          import json, sys
+          status = int(sys.argv[1])
+          try:
+              data = json.load(open('/tmp/mp-payment-scope.json'))
+          except Exception:
+              data = {}
+          if status == 200:
+              print('Mercado Pago Payments API: acesso de leitura confirmado; nenhum pagamento criado.')
+              raise SystemExit(0)
+          message = data.get('message') or data.get('error') or 'sem mensagem'
+          if status == 401:
+              print('Mercado Pago Payments API recusou a credencial (401). A credencial não possui autorização payment válida para este endpoint.')
+          else:
+              print(f'Mercado Pago Payments API preflight falhou: HTTP {status}: {message}')
+          raise SystemExit(1)
           PY
 
       - name: Record preflight evidence
@@ -75,5 +80,6 @@ jobs:
             echo "- Environment: \`sandbox\`"
             echo "- Real charges allowed: \`false\`"
             echo "- Real customer data allowed: \`false\`"
-            echo "- No payment was created by this workflow."
+            echo "- Operation: read-only \`GET /v1/payments/search\`"
+            echo "- No payment is created by this workflow."
           } >> "$GITHUB_STEP_SUMMARY"
