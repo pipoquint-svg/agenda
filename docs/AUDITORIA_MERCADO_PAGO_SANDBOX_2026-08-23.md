@@ -2,9 +2,9 @@
 
 Data de consolidação: 23/08/2026
 
-Status: documento de auditoria. Não equivale a `SANDBOX TESTED` completo nem a `LIVE APPROVED`.
+Status: documento de auditoria. Não equivale a `SANDBOX TESTED` completo, `STAGING TESTED` ou `LIVE APPROVED`.
 
-Escopo: reconstruir as falhas, decisões, correções e aprendizados observados desde o início da implantação real do Mercado Pago na Agenda BlackSheep, com foco em distinguir erro de código, erro de arquitetura, hipótese documental e limitação do ambiente de teste.
+Escopo: reconstruir falhas, decisões, correções, evidências e aprendizados desde o início da implantação real do Mercado Pago na Agenda BlackSheep.
 
 ## 1. Resumo executivo
 
@@ -12,9 +12,14 @@ A integração não falhou como um todo. O backend do Mercado Pago via Orders AP
 
 O principal gate ainda aberto é cartão browser-side, seguido de 3DS e jornada financeira end-to-end da Agenda.
 
-O problema central desta implantação foi metodológico: código e automações avançaram antes de o contrato real do fornecedor estar suficientemente provado no ambiente correto. No cartão, várias correções sucessivas foram feitas em um harness headless do GitHub Actions até que a execução 32614465013 demonstrou que o próprio ambiente `http://127.0.0.1:<porta>` do runner não reproduzia adequadamente o contexto necessário para o Card Payment Brick.
+O episódio revelou **duas classes independentes de erro metodológico**, e ambas passam a ser conclusão central desta auditoria:
 
-Conclusão operacional: não executar novo patch incremental no Card Gate headless. A validação de cartão deve migrar para o checkout real da Agenda em staging HTTPS, usando credenciais e dados sintéticos de teste.
+1. **Contrato do fornecedor não provado antes de codificar.** Isso explica principalmente os erros ligados a Payments API versus Orders API, parâmetros obrigatórios e interpretação de respostas do provedor.
+2. **Harness de teste não provado como representante de produção.** Isso explica principalmente a sequência do cartão. O Card Payment Brick foi exercitado em `http://127.0.0.1:<porta>` dentro de runner headless até que o run 32614465013 demonstrou falhas de inicialização associadas ao contexto do ambiente, com CORS, ORB, 403/404 e controller nunca criado.
+
+A segunda classe consumiu a maior parte das tentativas de cartão e tende a reaparecer em OAuth Google, 3DS, redirects, cookies, popups, iframes e outros componentes dependentes de navegador/origem HTTPS.
+
+**Conclusão operacional:** não executar novo patch incremental no Card Gate headless. O próximo passo é provisionar um **staging HTTPS real da Agenda**, usar nele o frontend real conectado ao backend sandbox e executar cartão, 3DS, Google OAuth e jornadas em dispositivo nesse ambiente.
 
 ## 2. Linha do tempo de erros e soluções
 
@@ -48,11 +53,11 @@ O probe pela Payments API retornou 401 mesmo com credencial copiada da área de 
 
 Correção intermediária: PR #92 substituiu o POST por preflight read-only em `GET /v1/payments/search` para não criar cobrança durante o diagnóstico.
 
-Limitação dessa correção: ela reduziu risco, mas continuou validando a família de API que depois deixou de ser o alvo.
+Limitação: reduziu risco, mas ainda validava a família de API que posteriormente deixou de ser o alvo.
 
 Correção estrutural: após a migração para Orders, o preflight passou para `GET /v1/orders`.
 
-Classificação: mensagem do fornecedor potencialmente enganosa + diagnóstico parcial nosso.
+Classificação: mensagem potencialmente enganosa do fornecedor + diagnóstico parcial nosso.
 
 Aprendizado: não tratar a mensagem textual da API como causa raiz antes de validar endpoint, produto, escopo e integração correta.
 
@@ -66,33 +71,23 @@ Classificação: erro de transcrição/configuração.
 
 Aprendizado: IDs de infraestrutura devem ser validados programaticamente; não confiar em transcrição manual.
 
-### 2.4 Workflow de deploy automatizado antes do contrato do provedor estabilizar
+### 2.4 Automação do deploy antes do contrato estabilizar
 
-O PR #89 criou corretamente um deploy seguro com:
-
-- confirmação `SANDBOX`;
-- `APP_ENV=staging`;
-- `MERCADO_PAGO_ENV=sandbox`;
-- `ALLOW_REAL_CHARGES=false`;
-- `ALLOW_REAL_CUSTOMER_DATA=false`;
-- secrets fora do código;
-- migrations;
-- deploy de Edge Functions;
-- boundary de assinatura do webhook.
+O PR #89 criou corretamente um deploy seguro com confirmação `SANDBOX`, segregação de ambiente, charges/dados reais bloqueados, secrets fora do código, migrations e Edge Functions.
 
 Porém o workflow ainda estava acoplado ao modelo anterior de API/evento.
 
-Correção: PR #95 alinhou o deploy à Orders API, ao evento `order`, ao preflight correto e aos secrets definitivos.
+Correção: PR #95 alinhou o deploy à Orders API, evento `order`, preflight correto e secrets definitivos.
 
 Classificação: sequenciamento inadequado.
 
-Aprendizado: primeiro provar contrato mínimo do fornecedor; depois automatizar profundamente o deploy.
+Aprendizado: primeiro provar o contrato mínimo do fornecedor; depois automatizar profundamente o deploy.
 
 ### 2.5 Parâmetros obrigatórios da busca de Orders
 
 A busca read-only em Orders exigia filtros temporais obrigatórios.
 
-Correção: PR #95 passou a enviar `begin_date` e `end_date`, além da paginação mínima.
+Correção: PR #95 passou a enviar `begin_date`, `end_date` e paginação mínima.
 
 Classificação: contrato de API não capturado na primeira tentativa.
 
@@ -100,9 +95,7 @@ Aprendizado: toda integração externa deve começar por uma requisição mínim
 
 ### 2.6 PIX via Orders API
 
-O PR #96 criou gate isolado para PIX no sandbox.
-
-Validado:
+O PR #96 criou gate isolado para PIX no sandbox e validou:
 
 - Order fictícia de R$ 50,00;
 - uma única transação `pix / bank_transfer`;
@@ -115,15 +108,15 @@ Resultado: provider-level PIX funcional no sandbox.
 
 Classificação: evidência positiva.
 
-Aprendizado: gates pequenos e isolados produzem diagnóstico muito melhor do que tentar provar a jornada inteira de uma vez.
+Aprendizado: gates pequenos e isolados produzem diagnóstico melhor do que tentar provar a jornada inteira de uma vez.
 
 ## 3. Sequência específica do cartão
 
 ### 3.1 Gate inicial misturava cartão comum e 3DS
 
-O PR #97 introduziu um Card Gate headless com MercadoPago.js/CardForm e cenários que misturavam conceitos de aprovação/recusa com autenticação.
+O PR #97 introduziu Card Gate headless com MercadoPago.js/CardForm e cenários que misturavam conceitos de aprovação/recusa com autenticação.
 
-Correção posterior:
+Correções posteriores:
 
 - cenários comuns passaram para `APRO` e `OTHE`;
 - `transaction_security` saiu do gate comum;
@@ -131,279 +124,327 @@ Correção posterior:
 
 Classificação: desenho de teste inadequado.
 
-Aprendizado: cartão comum, recusa e 3DS são provas distintas.
-
 ### 3.2 Run 32613205538: input oculto de expiração
 
-Causa: o Playwright varria inputs genericamente e confundiu o campo visível com input interno/oculto de expiração.
+Causa: Playwright varria inputs genericamente e confundiu campo visível com input interno/oculto.
 
-Correção: PR #98 passou a preencher os secure fields por containers/iframes explícitos.
+Correção: PR #98 passou a preencher secure fields por containers/iframes explícitos.
 
-Resultado: não chegou à criação da Order.
+Nenhuma Order criada.
 
-Classificação: erro de automação browser.
+### 3.3 Run 32613510566: issuer/parcelas desnecessários
 
-### 3.3 Run 32613510566: dependência desnecessária de issuer/parcelas
+Causa: o harness aguardava selects dinâmicos de issuer e installments que não eram necessários para validar compra sandbox em uma parcela.
 
-Causa: após preencher os campos seguros, o harness aguardava selects dinâmicos de issuer e installments.
+Correção: PR #99 removeu a dependência e fixou `installments=1` apenas no gate sandbox.
 
-Correção: PR #99 removeu essa dependência e fixou `installments=1` exclusivamente para o gate sandbox.
+Nenhuma prova end-to-end obtida.
 
-Resultado: ainda não houve prova end-to-end do cartão.
+### 3.4 Run 32613806231: CardForm não entregou token no submit headless
 
-Classificação: complexidade desnecessária no teste.
+O formulário montava e era preenchido, mas o submit não produziu token.
 
-### 3.4 Run 32613806231: CardForm não produziu token no submit headless
+Correção: PR #100 substituiu CardForm pelo Card Payment Brick, corrigiu `APRO`/`OTHE`, separou 3DS e adicionou diagnóstico sanitizado.
 
-Causa observada: o formulário montava e era preenchido, mas o submit não entregava token no ambiente headless.
+**Ponto de processo:** após esta terceira falha, o ambiente deveria ter sido revalidado antes de novo patch.
 
-Correção: PR #100 abandonou o CardForm no gate e passou a usar Card Payment Brick, aproximando o teste do componente real do frontend.
+### 3.5 Run 32614277261: Brick não sinalizou `onReady`
 
-Também corrigiu:
+Timeout de 45s antes de o Brick ficar pronto; nenhuma Order criada.
 
-- `APRO` / `OTHE`;
-- separação do 3DS;
-- diagnóstico sanitizado.
+Correção: PR #101 simplificou inicialização e adicionou diagnóstico de console, page errors, requests falhos e inventário de campos.
 
-Ponto de processo: esta deveria ter sido a última tentativa de reproduzir o componente browser-side em localhost headless antes de reavaliar o ambiente.
+A hipótese ainda era que o Brick deveria funcionar no runner; essa hipótese não estava provada.
 
-### 3.5 Run 32614277261: Card Payment Brick não sinalizou `onReady`
+### 3.6 Run 32614465013: ambiente headless inadequado identificado
 
-Causa observada: timeout de 45s antes de o Brick ficar pronto. Nenhuma Order foi criada.
-
-Correção: PR #101 simplificou a inicialização e adicionou diagnóstico de console, page errors, requests falhos e inventário de campos.
-
-Ponto de processo: a correção ainda assumia que o Brick deveria funcionar no contexto do runner; essa hipótese não estava provada.
-
-### 3.6 Run 32614465013: ambiente headless inadequado finalmente identificado
-
-O diagnóstico do PR #101 mostrou:
+O diagnóstico mostrou:
 
 - `MercadoPago` carregado;
 - `controllerCreated=false`;
 - `ready=false`;
 - `Bricks component initialization failed`;
 - requests auxiliares com 404;
-- chamadas auxiliares bloqueadas por CORS;
+- chamadas bloqueadas por CORS;
 - requests bloqueados por ORB;
 - resposta 403 em recurso auxiliar;
 - nenhum campo do Brick renderizado.
 
-Conclusão: nessa execução, o problema não era cartão, CPF, cenário `APRO`, JSON da Order, Access Token ou seletor. O próprio componente não conseguiu inicializar adequadamente no microservidor localhost do GitHub Actions.
+Conclusão: nessa execução, o problema não era cartão, CPF, cenário `APRO`, JSON da Order, Access Token ou seletor. O componente não conseguiu inicializar adequadamente no microservidor localhost do GitHub Actions.
 
 Classificação: estratégia de ambiente de teste inadequada.
 
 Decisão: descontinuar o Card Gate headless como prova autoritativa de integração browser-side.
 
-## 4. O que já está validado
+## 4. O que estava verde antes da prova real
 
-### 4.1 Infraestrutura
+Este ponto passa a ser parte central da auditoria.
 
-- Supabase sandbox disponível;
-- migrations aplicadas;
-- secrets segregados;
-- Edge Functions publicadas;
-- workflow de deploy com travas contra charge/dado real.
+O workflow `Database Core` executa testes locais de helpers para Google, WhatsApp e Mercado Pago. Eles são válidos, mas **não tocam os fornecedores reais**.
 
-### 4.2 Mercado Pago provider-level
+### Google
 
-- acesso read-only à Orders API;
-- criação de Order PIX;
-- consulta de Order;
-- idempotência do provider;
-- QR/ticket retornado;
-- webhook `Order`;
-- boundary de assinatura;
-- HMAC;
-- evento live ignorado no sandbox quando aplicável.
+`supabase/functions/_shared/google_test.ts` prova, entre outros:
 
-### 4.3 Estado correto do gate
+- criptografia/decriptografia local do refresh token;
+- construção da URL OAuth;
+- scopes solicitados;
+- normalização de eventos;
+- hashing.
 
-`IMPLEMENTED`: parcial/avançado.
+Não prova:
 
-`CI PASS`: sim nas frentes já consolidadas.
+- consent screen real;
+- redirect URI real;
+- emissão/renovação real de token;
+- Calendar API real;
+- watch/webhook real;
+- comportamento do app em `Testing` versus publicado.
 
-`SANDBOX TESTED`: parcial.
+### WhatsApp
 
-`LIVE APPROVED`: não.
+`supabase/functions/_shared/whatsapp_test.ts` prova:
 
-## 5. O que continua não validado
+- normalização de recipient;
+- construção de URL de retomada;
+- formato do payload de template.
 
-- cartão aprovado no checkout real;
-- cartão recusado no checkout real;
-- 3DS challenge;
-- 3DS aprovado/falho;
-- liquidação completa de uma reserva sintética da Agenda após cartão;
-- retry completo;
-- pagamento aprovado após expiração;
-- jornada completa em browsers/dispositivos prioritários.
+Não prova:
 
-Todos permanecem `NÃO TESTADO` até execução real. Ausência de erro ou inspeção estática não pode promovê-los.
+- token Meta válido;
+- número/recipient de teste;
+- envio real;
+- template aprovado;
+- webhook/challenge;
+- status de entrega.
 
-## 6. Falhas metodológicas identificadas
+### Mercado Pago
 
-### 6.1 Implementação antes do spike real
+`supabase/functions/_shared/mercado-pago_test.ts` prova helpers locais como HMAC, normalização de status, sanitização e validação de dados tokenizados.
 
-Foi escrito código relevante antes de existir prova mínima completa do contrato do fornecedor.
+Não provava, por si só:
 
-Nova regra: integração externa começa por spike pequeno e descartável ou isolado, não por implementação completa.
+- endpoint/provider correto;
+- tokenização real;
+- Brick real;
+- cartão aprovado/recusado;
+- 3DS.
 
-### 6.2 Documentação de produtos diferentes misturada
+### Regra decorrente
 
-O ecossistema Mercado Pago possui documentação de Payments API, Checkout Bricks e Checkout Transparente/Orders API com contratos e exemplos distintos.
+CI verde precisa declarar seu **escopo de evidência**. Nomes como “Google tests” ou “Mercado Pago tests” não podem ser interpretados como integração aprovada quando são apenas contratos internos.
 
-Nova regra: cada integração deve registrar uma única documentação canônica por produto/fluxo. Qualquer fonte de outra família precisa ser explicitamente justificada.
+Classificação de evidência recomendada para cada suíte:
 
-### 6.3 CI confundido com confiança excessiva
+- `LOCAL_CONTRACT`;
+- `DATABASE_CONTRACT`;
+- `PROVIDER_SANDBOX`;
+- `STAGING_BROWSER`;
+- `END_TO_END`;
+- `LIVE`.
 
-Embora o projeto tenha preservado formalmente `SANDBOX TESTED` separado de `CI PASS`, o código teoricamente correto ainda avançou demais antes da prova remota.
+## 5. pgTAP e a divergência de plano
 
-Nova regra: `IMPLEMENTED`, `CI PASS`, `SANDBOX TESTED` e `LIVE APPROVED` são estados independentes e sequenciais de evidência.
+Durante a migração Orders foram encontrados:
 
-### 6.4 Harness usado para provar ambiente que ele não representava
+- `006_change_policy.test.sql`: plano de 20 para 19 asserts executados;
+- fixture de `046_customer_balance_and_settlement`: UUID OPERATION incorreto na branch em propagação.
 
-O Playwright era útil para testar nossa automação, mas não era prova suficiente de que um componente financeiro client-side funcionaria em staging/produção.
+Nuance importante: o workflow `Database Core` atual executa `supabase test db`. O pgTAP verifica a consistência entre o plano e a quantidade efetivamente executada. Portanto, **a divergência simples 20 versus 19 foi detectada pelo CI; não é correto descrevê-la como um teste que permaneceu verde silenciosamente naquele gate**.
 
-Nova regra: OAuth, pagamento client-side, 3DS, redirects, cookies, CORS, popup e comportamento mobile exigem staging real HTTPS quando o fornecedor depende do ambiente do navegador.
+O aprendizado ainda é relevante por dois motivos:
 
-### 6.5 Falhas sucessivas tratadas como bugs locais
+1. um gate só protege arquivos que realmente executa;
+2. plano correto não prova cobertura semântica correta. Um teste pode executar N asserts e ainda validar a suposição errada.
 
-Foram feitos múltiplos patches incrementais antes de reavaliar o desenho do teste.
+Ação permanente:
 
-Nova regra: após duas falhas consecutivas no mesmo gate externo, acionar `Failure Budget`:
+- preservar `supabase test db` como gate obrigatório;
+- antes de reescrever política financeira, confirmar que todos os arquivos de teste relevantes continuam descobertos pelo runner;
+- revisar semanticamente os testes de política, saldo e liquidação, não apenas contagem de asserts.
 
-1. parar novos patches;
-2. classificar a falha;
+## 6. Estados de evidência revisados
+
+Os quatro estados anteriores eram insuficientes. A partir desta auditoria, integrações externas usam cinco estados mínimos:
+
+1. `IMPLEMENTED` — código existe.
+2. `CI PASS` — contratos locais/banco/build aprovados.
+3. `SANDBOX TESTED` — fornecedor real de teste foi tocado nas camadas aplicáveis de API/webhook.
+4. `STAGING TESTED` — frontend real em origem HTTPS representativa foi provado, incluindo SDK/OAuth/redirect/cookies/iframe/browser e, quando aplicável, jornada E2E com dados sintéticos.
+5. `LIVE APPROVED` — produção explicitamente autorizada e smoke test controlado concluído.
+
+Cada estado pode ser `NO`, `PARTIAL` ou `YES`, mas `PARTIAL` deve listar exatamente quais capacidades foram provadas.
+
+### Estado atual do Mercado Pago
+
+- `IMPLEMENTED`: YES para a arquitetura atual; jornadas finais ainda pendentes.
+- `CI PASS`: YES para as frentes consolidadas.
+- `SANDBOX TESTED`: PARTIAL — Orders API, PIX, webhook e HMAC provados; cartão/3DS não.
+- `STAGING TESTED`: NO — staging HTTPS real ainda não provisionado/testado.
+- `LIVE APPROVED`: NO.
+
+## 7. Staging HTTPS é agora dependência crítica
+
+O ambiente de staging HTTPS não existe como superfície comprovada da Agenda e passa a ser bloqueador explícito do Gate #73.
+
+Ele destrava simultaneamente:
+
+- cartão Mercado Pago;
+- 3DS;
+- OAuth Google com redirect URI real;
+- jornada end-to-end em navegador;
+- iPhone Safari/Android Chrome;
+- cookies, CORS, popups, redirects e iframes em origem representativa.
+
+Requisitos mínimos do staging:
+
+- URL HTTPS estável;
+- frontend real da Agenda;
+- backend e banco sandbox;
+- secrets exclusivamente de teste;
+- dados sintéticos;
+- robots/noindex quando público;
+- nenhum charge, recipient ou dado de cliente real;
+- capacidade de registrar SHA/deploy e evidências.
+
+Não iniciar nova tentativa de cartão ou OAuth real antes desse ambiente existir.
+
+## 8. Failure Budget para integração externa
+
+Após **duas falhas consecutivas no mesmo gate externo**:
+
+1. parar patches incrementais;
+2. classificar a falha: código, contrato, credencial, ambiente ou fornecedor;
 3. reabrir a documentação canônica;
-4. confirmar que o ambiente de teste representa produção;
-5. executar spike alternativo;
-6. só então alterar código novamente.
+4. provar que o harness representa o ambiente real;
+5. verificar se o teste está na camada correta;
+6. executar spike alternativo mínimo;
+7. somente então alterar código novamente.
 
-## 7. Protocolo recomendado para integrações externas
+A regra vale para Mercado Pago, Google, WhatsApp e qualquer integração externa.
+
+## 9. Protocolo por camadas
 
 Fluxo obrigatório:
 
 `Source of Truth -> Spike -> Provider Sandbox -> Staging HTTPS -> Jornada E2E -> Live`.
 
-### Layer A - contrato local
+### Layer A — contrato local
 
-- unitários;
-- typecheck;
-- parsing;
-- validação de payload;
-- idempotência interna.
+Unitários, typecheck, parsing, payload e idempotência interna.
 
-### Layer B - banco
+### Layer B — banco
 
-- constraints;
-- RLS;
-- concorrência;
-- state machine.
+Constraints, RLS, concorrência e state machine.
 
-### Layer C - provider API
+### Layer C — provider API
 
-- credencial real de teste;
-- endpoint real;
-- request mínima;
-- resposta real.
+Credencial real de teste, endpoint real, request mínima e resposta real.
 
-### Layer D - webhook/callback
+### Layer D — webhook/callback
 
-- evento real ou simulador oficial;
-- assinatura;
-- replay;
-- mismatch;
-- idempotência.
+Evento real ou simulador oficial, assinatura, replay, mismatch e idempotência.
 
-### Layer E - browser staging
+### Layer E — browser staging
 
-- domínio HTTPS real;
-- SDK/OAuth/Brick real;
-- redirects;
-- cookies;
-- CORS;
-- popups/iframes;
-- mobile.
+Domínio HTTPS real, SDK/OAuth/Brick, redirects, cookies, CORS, popup/iframe e mobile.
 
-### Layer F - jornada completa
+### Layer F — jornada completa
 
-- entidade sintética interna;
-- ação do usuário;
-- fornecedor;
-- retorno/webhook;
-- estado interno final;
-- compensação/erro.
+Entidade sintética interna, ação do usuário, fornecedor, retorno/webhook, estado interno final e compensação/erro.
 
 Uma layer não aprova automaticamente a seguinte.
 
-## 8. Aplicação imediata a Google e WhatsApp
+## 10. Aplicação imediata a Google e WhatsApp
 
 ### Google Calendar
 
-Antes de implementar automação completa:
+Não considerar o Google “testado” pelo fato de helpers, migrations e Edge Functions passarem CI.
 
-1. projeto Google e consent screen;
-2. Client ID/segredo em ambiente de teste;
-3. redirect URI HTTPS real;
-4. usuário/calendário exclusivamente de teste;
-5. OAuth real;
-6. refresh/reconexão;
-7. leitura mínima;
-8. criação/alteração mínima;
-9. watch/webhook;
-10. somente depois integração com a Agenda.
+Antes de integrar operacionalmente:
 
-Se o app OAuth estiver em `Testing`, não considerar refresh token de curta duração como operação aprovada.
+1. staging HTTPS;
+2. projeto e consent screen;
+3. Client ID/segredo de teste;
+4. redirect URI do staging;
+5. usuário e calendário exclusivamente de teste;
+6. OAuth real em navegador;
+7. verificar estado de publicação do app;
+8. se `Testing`, não aceitar refresh token de 7 dias como solução operacional;
+9. leitura/criação/alteração reais;
+10. watch/webhook;
+11. sync incremental/full, drift/repair e reconexão.
 
 ### WhatsApp
 
 Antes de automações completas:
 
-1. app e número de teste;
+1. app/número de teste;
 2. recipient allowlist;
-3. token;
+3. token real de teste;
 4. envio mínimo;
-5. webhook/challenge;
-6. assinatura;
-7. status de mensagem;
+5. template real aplicável;
+6. webhook/challenge;
+7. assinatura/status;
 8. retry/idempotência;
-9. somente depois fluxo operacional da Agenda.
+9. só então fluxo operacional da Agenda.
 
-## 9. Próxima ação do Mercado Pago
+## 11. Custo observável do episódio
 
-Não executar novo patch no Card Gate headless.
+GitHub permite registrar uma **janela de tempo observável**, não horas humanas exatas.
 
-Próxima prova correta:
+Entre a criação do PR #87, em 23/08/2026 00:26 UTC, e a conclusão do run de cartão 32614465013, em 03:06 UTC, transcorreram aproximadamente **2h40 de janela técnica observável**.
 
-1. publicar o checkout real da Agenda em staging HTTPS;
-2. usar credenciais de teste do Mercado Pago;
-3. usar dados e cartões sintéticos oficiais;
-4. executar cenário aprovado;
-5. executar cenário recusado;
-6. verificar Order no provider;
-7. verificar webhook/reconsulta;
-8. verificar estado financeiro interno;
-9. depois abrir gate separado para 3DS.
+Nesse intervalo aparecem PRs #87 a #101 ligados direta ou indiretamente ao hardening/implantação do Mercado Pago, incluindo PRs funcionais, correções e PRs temporários de CI. Só no cartão há pelo menos cinco runs de falha documentados:
 
-## 10. Referências internas
+- 32613205538;
+- 32613510566;
+- 32613806231;
+- 32614277261;
+- 32614465013.
 
-- Issue #73 - Gate de live: sandbox real, dispositivos e proteção do main.
-- PR #89 - deploy seguro do sandbox.
-- PR #90 - correção do Supabase project ref.
-- PR #91 - probe inicial de PIX/webhook via Payments API.
-- PR #92 - preflight read-only da Payments API.
-- PR #93 - migração para Orders API.
-- PR #95 - alinhamento dos workflows à Orders API.
-- PR #96 - gate PIX Orders API.
-- PR #97 - primeiro gate de cartão.
-- PR #98 - secure iframe fields.
-- PR #99 - remoção de dependência dinâmica de parcelas.
-- PR #100 - migração do harness para Card Payment Brick.
-- PR #101 - diagnóstico do mount do Brick.
-- Runs de cartão relevantes: 32613205538, 32613510566, 32613806231, 32614277261, 32614465013.
+Não interpretar 2h40 como esforço humano líquido. É uma medida de wall-clock mínima observável para justificar a mudança de processo e permitir comparação futura.
 
-## 11. Regra final da auditoria
+Para integrações futuras, registrar:
 
-Integrações externas não devem ser consideradas engenharia comprovada apenas porque o código compila ou segue a documentação.
+- início do spike;
+- número de runs;
+- número de patches/PRs;
+- falhas por categoria;
+- momento em que Failure Budget foi acionado;
+- momento em que o estado avançou.
 
-A evidência autoritativa precisa provar o contrato real com o fornecedor no ambiente apropriado para aquela camada.
+## 12. Próximas ações, em ordem
+
+1. Provisionar staging HTTPS real da Agenda.
+2. Atualizar Gate #73 para tornar staging um bloqueador próprio.
+3. Não executar novo Card Gate headless como evidência autoritativa.
+4. Testar cartão aprovado e recusado no frontend real do staging.
+5. Testar 3DS em gate separado.
+6. Provar OAuth Google no mesmo staging antes de aprofundar sync/watch.
+7. Provar WhatsApp com recipient allowlist e provider real de teste.
+8. Manter inventário explícito de quais testes são apenas `LOCAL_CONTRACT` versus fornecedor real.
+
+## 13. Referências internas
+
+- Issue #73 — Gate de live: sandbox real, dispositivos e proteção do main.
+- PR #89 — deploy seguro do sandbox.
+- PR #90 — correção do Supabase project ref.
+- PR #91 — probe inicial via Payments API.
+- PR #92 — preflight read-only da Payments API.
+- PR #93 — migração para Orders API.
+- PR #95 — alinhamento dos workflows à Orders API.
+- PR #96 — gate PIX Orders API.
+- PR #97 — primeiro gate de cartão.
+- PR #98 — secure iframe fields.
+- PR #99 — remoção de dependência dinâmica de parcelas.
+- PR #100 — migração para Card Payment Brick.
+- PR #101 — diagnóstico do mount do Brick.
+
+## 14. Regra final da auditoria
+
+Integrações externas exigem duas provas antes de serem consideradas confiáveis:
+
+> **provar o contrato real com o fornecedor e provar que o ambiente/harness de teste representa a camada que se pretende validar.**
+
+Código que compila, teste que fica verde ou documentação que parece correta não substituem nenhuma das duas provas.
