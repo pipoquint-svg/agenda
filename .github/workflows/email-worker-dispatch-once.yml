@@ -1,0 +1,25 @@
+name: Email Worker Dispatch Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/email-worker-dispatch-once.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch permanent integration worker workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run integration-worker-schedule.yml --repo pipoquint-svg/agenda --ref main
+          echo 'Permanent integration worker workflow dispatched.'
