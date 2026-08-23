@@ -146,8 +146,28 @@ Deno.serve(async (req) => {
     if (!tokenId || !appointmentId) throw new Error('LINK_INVALID_OR_EXPIRED')
 
     if (operation === 'RESOLVE') {
+      let summary: Record<string, unknown> | null = null
+      if (scope === 'CANCEL' || scope === 'RESCHEDULE') {
+        const { data: safeSummary, error: summaryError } = await client.rpc('service_appointment_action_public_summary', {
+          p_token_id: tokenId,
+        })
+        if (summaryError) throw new Error(summaryError.message)
+        summary = safeSummary && typeof safeSummary === 'object'
+          ? safeSummary as Record<string, unknown>
+          : null
+      }
+
       await minimumDelay(startedAt)
-      return json({ data: { valid: true, scope, expires_at: expiresAt, accessed_at: accessedAt, warning: PERSONAL_LINK_WARNING } })
+      return json({
+        data: {
+          valid: true,
+          scope,
+          expires_at: expiresAt,
+          accessed_at: accessedAt,
+          warning: PERSONAL_LINK_WARNING,
+          summary,
+        },
+      })
     }
 
     if (operation === 'CANCEL_PREVIEW') {
@@ -238,7 +258,7 @@ Deno.serve(async (req) => {
     if (operation === 'VERIFY_EMAIL') {
       if (!email) {
         await minimumDelay(startedAt)
-        return json({ data: { verified: false } }, 400)
+        return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
       const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
         p_token_id: tokenId,
@@ -249,13 +269,15 @@ Deno.serve(async (req) => {
       })
       if (verifyError) throw new Error(verifyError.message)
       await minimumDelay(startedAt)
-      return verified === true ? json({ data: { verified: true } }) : json({ data: { verified: false } }, 400)
+      return verified === true
+        ? json({ data: { verified: true } })
+        : json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
     }
 
     if (operation === 'EXECUTE_CANCEL') {
       if (!email) {
         await minimumDelay(startedAt)
-        return json({ data: { verified: false } }, 400)
+        return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
       if (body.confirmed !== true) throw new Error('CANCEL_CONFIRMATION_REQUIRED')
       const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
@@ -268,7 +290,7 @@ Deno.serve(async (req) => {
       if (verifyError) throw new Error(verifyError.message)
       if (verified !== true) {
         await minimumDelay(startedAt)
-        return json({ data: { verified: false } }, 400)
+        return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
 
       const { data: cancellation, error: cancellationError } = await client.rpc('service_client_cancel_appointment_evidenced', {
@@ -308,7 +330,7 @@ Deno.serve(async (req) => {
     if (requirement.requires_email_verification === true) {
       if (!email) {
         await minimumDelay(startedAt)
-        return json({ error: { code: 'ACTION_VERIFICATION_REQUIRED' } }, 400)
+        return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
       const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
         p_token_id: tokenId,
@@ -320,7 +342,7 @@ Deno.serve(async (req) => {
       if (verifyError) throw new Error(verifyError.message)
       if (verified !== true) {
         await minimumDelay(startedAt)
-        return json({ data: { verified: false } }, 400)
+        return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
     }
 
