@@ -2,6 +2,7 @@ import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 import {
   assertMercadoPagoPaymentMatchesIntent,
+  mercadoPagoPaymentStorageSnapshot,
   normalizeMercadoPagoPaymentStatus,
   payerIdentification,
   sanitizeMercadoPagoPayment,
@@ -117,6 +118,12 @@ async function loadContext(token: string): Promise<PaymentContext> {
   return data as PaymentContext
 }
 
+function mismatchReason(error: unknown): string {
+  return error instanceof Error && error.message.startsWith('MERCADO_PAGO_')
+    ? error.message
+    : 'MERCADO_PAGO_PAYMENT_METHOD_MISMATCH'
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
 
@@ -184,20 +191,46 @@ Deno.serve(async (req) => {
       const provider = await mercadoPagoGetPayment(providerPaymentId)
       if (provider.status < 200 || provider.status >= 300) throw new Error(`MERCADO_PAGO_LOOKUP_FAILED:${provider.status}`)
       const snapshot = sanitizeMercadoPagoPayment(provider.data)
-      if (!snapshot.id || snapshot.id !== providerPaymentId) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
-      assertMercadoPagoPaymentMatchesIntent(snapshot, {
-        transactionId: transaction.id,
-        cashAmount: transaction.cash_amount,
-        method: transaction.method,
-      })
-      const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
+      const storedSnapshot = mercadoPagoPaymentStorageSnapshot(snapshot)
 
+      let validationError: unknown = null
+      if (!snapshot.id) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISSING')
+      else if (snapshot.id !== providerPaymentId) validationError = new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
+      else {
+        try {
+          assertMercadoPagoPaymentMatchesIntent(snapshot, {
+            transactionId: transaction.id,
+            cashAmount: transaction.cash_amount,
+            method: transaction.method,
+          })
+        } catch (cause) {
+          validationError = cause
+        }
+      }
+
+      if (validationError) {
+        const reason = mismatchReason(validationError)
+        console.error('Mercado Pago sync did not match internal intent', { transactionId: transaction.id, providerPaymentId, reason })
+        const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
+          p_transaction_id: transaction.id,
+          p_provider_payment_id: snapshot.id || providerPaymentId,
+          p_reason: reason,
+          p_payload_json: storedSnapshot,
+        })
+        if (quarantineError) {
+          console.error('Failed to quarantine Mercado Pago sync mismatch', quarantineError.message)
+          return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' } }, 503)
+        }
+        return response({ error: { code: 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' } }, 502)
+      }
+
+      const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
       const { data: applied, error: applyError } = await client.rpc('apply_provider_payment_status', {
         p_transaction_id: transaction.id,
         p_provider_payment_id: snapshot.id,
         p_normalized_status: normalized,
         p_event_key: `poll:${snapshot.id}:${snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
-        p_payload_json: snapshot,
+        p_payload_json: storedSnapshot,
         p_paid_at: snapshot.date_approved,
       })
       if (applyError) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${applyError.message}`)
@@ -272,6 +305,7 @@ Deno.serve(async (req) => {
     }
 
     const snapshot = sanitizeMercadoPagoPayment(provider.data)
+    const storedSnapshot = mercadoPagoPaymentStorageSnapshot(snapshot)
     try {
       assertMercadoPagoPaymentMatchesIntent(snapshot, {
         transactionId: intent.transaction_id,
@@ -280,12 +314,18 @@ Deno.serve(async (req) => {
         providerPaymentMethodId,
       })
     } catch (validationError) {
-      console.error('Mercado Pago payment did not match internal intent', validationError)
-      await client.rpc('service_fail_payment_intent', {
+      const reason = mismatchReason(validationError)
+      console.error('Mercado Pago payment did not match internal intent', { transactionId: intent.transaction_id, providerPaymentId: snapshot.id || null, reason })
+      const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
         p_transaction_id: intent.transaction_id,
-        p_reason: 'MERCADO_PAGO_INTENT_MISMATCH',
-        p_payload_json: snapshot,
+        p_provider_payment_id: snapshot.id || null,
+        p_reason: reason,
+        p_payload_json: storedSnapshot,
       })
+      if (quarantineError) {
+        console.error('Failed to quarantine Mercado Pago create mismatch', quarantineError.message)
+        return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
+      }
       return response({ error: { code: 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' } }, 502)
     }
     const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
@@ -295,7 +335,7 @@ Deno.serve(async (req) => {
       p_provider_payment_id: snapshot.id,
       p_normalized_status: normalized,
       p_event_key: `create:${snapshot.id}:${snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
-      p_payload_json: snapshot,
+      p_payload_json: storedSnapshot,
       p_paid_at: snapshot.date_approved,
     })
     if (applyError) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${applyError.message}`)
