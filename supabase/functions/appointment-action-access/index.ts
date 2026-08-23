@@ -9,7 +9,11 @@ const corsHeaders = {
 }
 
 const actionScopes = new Set(['CANCEL', 'RESCHEDULE', 'EDIT_DETAILS', 'EDIT_EXTRAS'])
-const operations = new Set(['RESOLVE', 'VERIFY_EMAIL', 'CANCEL_PREVIEW', 'EXECUTE_CANCEL'])
+const operations = new Set([
+  'RESOLVE', 'VERIFY_EMAIL',
+  'CANCEL_PREVIEW', 'EXECUTE_CANCEL',
+  'RESCHEDULE_SLOTS', 'RESCHEDULE_CREATE_HOLD', 'EXECUTE_RESCHEDULE',
+])
 const minimumResponseMs = 120
 const personalLinkWarning = 'link pessoal, válido por tempo limitado, não encaminhe'
 
@@ -30,6 +34,17 @@ function actionScope(value: unknown): string {
   const scope = typeof value === 'string' ? value.trim().toUpperCase() : ''
   if (!actionScopes.has(scope)) throw new Error('LINK_INVALID_OR_EXPIRED')
   return scope
+}
+
+function enforceOperationScope(operation: string, scope: string): void {
+  if (operation === 'RESOLVE') return
+  if (operation === 'VERIFY_EMAIL' && (scope === 'CANCEL' || scope === 'RESCHEDULE')) return
+  if ((operation === 'CANCEL_PREVIEW' || operation === 'EXECUTE_CANCEL') && scope === 'CANCEL') return
+  if (
+    (operation === 'RESCHEDULE_SLOTS' || operation === 'RESCHEDULE_CREATE_HOLD' || operation === 'EXECUTE_RESCHEDULE')
+    && scope === 'RESCHEDULE'
+  ) return
+  throw new Error('LINK_INVALID_OR_EXPIRED')
 }
 
 function requestId(req: Request): string {
@@ -56,9 +71,36 @@ function text(value: unknown, limit: number): string | null {
   return next || null
 }
 
+function localDate(value: unknown): string {
+  const next = text(value, 10) ?? ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) throw new Error('RESCHEDULE_DATE_INVALID')
+  return next
+}
+
+function isoDateTime(value: unknown): string {
+  const next = text(value, 80) ?? ''
+  const parsed = new Date(next)
+  if (!next || Number.isNaN(parsed.getTime())) throw new Error('RESCHEDULE_TIME_INVALID')
+  return parsed.toISOString()
+}
+
+function uuid(value: unknown): string {
+  const next = text(value, 64) ?? ''
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(next)) {
+    throw new Error('CLIENT_RESCHEDULE_ACTION_INVALID')
+  }
+  return next
+}
+
 function numeric(value: unknown): number {
   const next = Number(value ?? 0)
   return Number.isFinite(next) ? Math.round(next * 100) / 100 : 0
+}
+
+function financialRescheduleConsequence(value: Record<string, unknown>): boolean {
+  return numeric(value.penalty_retained) > 0.005
+    || Math.abs(numeric(value.new_contract_value) - numeric(value.contract_value)) > 0.005
+    || numeric(value.difference_due) > 0.005
 }
 
 async function minimumDelay(startedAt: number): Promise<void> {
@@ -69,8 +111,17 @@ async function minimumDelay(startedAt: number): Promise<void> {
 function genericTokenError(raw: string): { code: string; status: number } {
   if (raw === 'RATE_LIMITED') return { code: 'ACTION_ACCESS_RATE_LIMITED', status: 429 }
   if (raw.startsWith('RATE_LIMIT_BACKEND_FAILED')) return { code: 'ACTION_ACCESS_TEMPORARY_FAILURE', status: 503 }
-  if (raw.includes('CANCEL_CONFIRMATION_REQUIRED')) return { code: 'ACTION_CONFIRMATION_REQUIRED', status: 400 }
-  if (raw.includes('CANCEL_EMAIL_VERIFICATION_REQUIRED')) return { code: 'ACTION_VERIFICATION_REQUIRED', status: 400 }
+  if (raw.includes('CANCEL_CONFIRMATION_REQUIRED') || raw.includes('RESCHEDULE_CONFIRMATION_REQUIRED')) {
+    return { code: 'ACTION_CONFIRMATION_REQUIRED', status: 400 }
+  }
+  if (raw.includes('CANCEL_EMAIL_VERIFICATION_REQUIRED') || raw.includes('RESCHEDULE_EMAIL_VERIFICATION_REQUIRED')) {
+    return { code: 'ACTION_VERIFICATION_REQUIRED', status: 400 }
+  }
+  if (raw.includes('RESCHEDULE_DIFFERENCE_PAYMENT_REQUIRED')) return { code: 'ACTION_PAYMENT_REQUIRED', status: 409 }
+  if (raw.includes('RESCHEDULE_HOLD_EXPIRED')) return { code: 'RESCHEDULE_HOLD_EXPIRED', status: 409 }
+  if (raw.includes('CLIENT_RESCHEDULE_LIMIT_REACHED')) return { code: 'CLIENT_RESCHEDULE_LIMIT_REACHED', status: 409 }
+  if (raw.includes('RESCHEDULE_PACKAGE_RECONCILIATION_REQUIRED')) return { code: 'RESCHEDULE_REQUIRES_ASSISTANCE', status: 409 }
+  if (raw.includes('RESCHEDULE_DATE_INVALID') || raw.includes('RESCHEDULE_TIME_INVALID')) return { code: 'ACTION_REQUEST_INVALID', status: 400 }
   if (
     raw.includes('APPOINTMENT_TOKEN_INVALID')
     || raw.includes('APPOINTMENT_TOKEN_EXPIRED')
@@ -78,6 +129,8 @@ function genericTokenError(raw: string): { code: string; status: number } {
     || raw.includes('TOKEN_SCOPE_DENIED')
     || raw.includes('ACTION_TOKEN_SCOPE_INVALID')
     || raw.includes('APPOINTMENT_NOT_CANCELLABLE')
+    || raw.includes('APPOINTMENT_NOT_RESCHEDULABLE')
+    || raw.includes('CLIENT_RESCHEDULE_ACTION_INVALID')
     || raw.includes('LINK_INVALID_OR_EXPIRED')
   ) return { code: 'LINK_INVALID_OR_EXPIRED', status: 400 }
   return { code: 'ACTION_ACCESS_TEMPORARY_FAILURE', status: 503 }
@@ -101,6 +154,7 @@ Deno.serve(async (req) => {
     if (!operations.has(operation)) throw new Error('ACTION_OPERATION_INVALID')
 
     const scope = actionScope(body.scope)
+    enforceOperationScope(operation, scope)
     const token = actionToken(req)
     const id = requestId(req)
     const ip = clientIp(req)
@@ -124,18 +178,8 @@ Deno.serve(async (req) => {
 
     if (operation === 'RESOLVE') {
       await minimumDelay(startedAt)
-      return json({
-        data: {
-          valid: true,
-          scope,
-          expires_at: expiresAt,
-          accessed_at: accessedAt,
-          warning: personalLinkWarning,
-        },
-      })
+      return json({ data: { valid: true, scope, expires_at: expiresAt, accessed_at: accessedAt, warning: personalLinkWarning } })
     }
-
-    if (scope !== 'CANCEL') throw new Error('LINK_INVALID_OR_EXPIRED')
 
     if (operation === 'CANCEL_PREVIEW') {
       const { data: preview, error: previewError } = await client.rpc('calculate_reservation_change', {
@@ -148,7 +192,6 @@ Deno.serve(async (req) => {
       if (previewError) throw new Error(previewError.message)
       const financial = preview && typeof preview === 'object' ? preview as Record<string, unknown> : {}
       const refundAmount = numeric(financial.refund_due)
-
       await minimumDelay(startedAt)
       return json({
         data: {
@@ -169,13 +212,65 @@ Deno.serve(async (req) => {
       })
     }
 
-    const email = text(body.email, 320)
-    if (!email) {
+    if (operation === 'RESCHEDULE_SLOTS') {
+      const date = localDate(body.local_date)
+      const { data: slots, error: slotsError } = await client.rpc('service_admin_list_reschedule_slots', {
+        p_appointment_id: appointmentId,
+        p_local_date: date,
+      })
+      if (slotsError) throw new Error(slotsError.message)
       await minimumDelay(startedAt)
-      return json({ data: { verified: false } }, 400)
+      return json({
+        data: {
+          valid: true,
+          scope: 'RESCHEDULE',
+          local_date: date,
+          slots: Array.isArray(slots) ? slots : [],
+          expires_at: expiresAt,
+          accessed_at: accessedAt,
+          warning: personalLinkWarning,
+        },
+      })
     }
 
+    if (operation === 'RESCHEDULE_CREATE_HOLD') {
+      const requestedStartAt = isoDateTime(body.requested_start_at)
+      const { data: created, error: createError } = await client.rpc('service_admin_create_reschedule_hold', {
+        p_appointment_id: appointmentId,
+        p_requested_start_at: requestedStartAt,
+        p_requested_at: accessedAt,
+        p_change_origin: 'CLIENT',
+        p_admin_id: null,
+      })
+      if (createError) throw new Error(createError.message)
+      const proposal = created && typeof created === 'object' ? created as Record<string, unknown> : {}
+      const differenceDue = numeric(proposal.difference_due)
+      await minimumDelay(startedAt)
+      return json({
+        data: {
+          policy_action_id: proposal.policy_action_id,
+          new_slot: proposal.new_slot,
+          requires_explicit_confirmation: true,
+          requires_email_verification: financialRescheduleConsequence(proposal),
+          requires_payment: differenceDue > 0.005,
+          financial: {
+            contract_value: numeric(proposal.contract_value),
+            new_contract_value: numeric(proposal.new_contract_value),
+            penalty_amount: numeric(proposal.penalty_retained),
+            difference_due: differenceDue,
+            excess_amount: numeric(proposal.excess_amount),
+          },
+        },
+      })
+    }
+
+    const email = text(body.email, 320)
+
     if (operation === 'VERIFY_EMAIL') {
+      if (!email) {
+        await minimumDelay(startedAt)
+        return json({ data: { verified: false } }, 400)
+      }
       const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
         p_token_id: tokenId,
         p_email: email,
@@ -184,43 +279,94 @@ Deno.serve(async (req) => {
         p_request_id: id,
       })
       if (verifyError) throw new Error(verifyError.message)
-
       await minimumDelay(startedAt)
-      return verified === true
-        ? json({ data: { verified: true } })
-        : json({ data: { verified: false } }, 400)
+      return verified === true ? json({ data: { verified: true } }) : json({ data: { verified: false } }, 400)
     }
 
-    if (body.confirmed !== true) throw new Error('CANCEL_CONFIRMATION_REQUIRED')
+    if (operation === 'EXECUTE_CANCEL') {
+      if (!email) {
+        await minimumDelay(startedAt)
+        return json({ data: { verified: false } }, 400)
+      }
+      if (body.confirmed !== true) throw new Error('CANCEL_CONFIRMATION_REQUIRED')
+      const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
+        p_token_id: tokenId,
+        p_email: email,
+        p_ip_address: ip,
+        p_user_agent: agent,
+        p_request_id: id,
+      })
+      if (verifyError) throw new Error(verifyError.message)
+      if (verified !== true) {
+        await minimumDelay(startedAt)
+        return json({ data: { verified: false } }, 400)
+      }
 
-    // The financial verification and execution deliberately share the same
-    // request id. The database wrapper refuses an older VERIFIED event.
-    const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
+      const { data: cancellation, error: cancellationError } = await client.rpc('service_client_cancel_appointment_evidenced', {
+        p_token_id: tokenId,
+        p_reason: text(body.reason, 500),
+        p_requested_at: accessedAt,
+        p_ip: ip,
+        p_user_agent: agent,
+        p_request_id: id,
+        p_session_id: text(body.session_id, 200),
+      })
+      if (cancellationError) throw new Error(cancellationError.message)
+      await minimumDelay(startedAt)
+      return json({ data: cancellation })
+    }
+
+    if (body.confirmed !== true) throw new Error('RESCHEDULE_CONFIRMATION_REQUIRED')
+    const policyActionId = uuid(body.policy_action_id)
+    const { data: requirements, error: requirementsError } = await client.rpc('service_client_reschedule_requirements', {
       p_token_id: tokenId,
-      p_email: email,
-      p_ip_address: ip,
-      p_user_agent: agent,
-      p_request_id: id,
+      p_policy_action_id: policyActionId,
     })
-    if (verifyError) throw new Error(verifyError.message)
-    if (verified !== true) {
+    if (requirementsError) throw new Error(requirementsError.message)
+    const requirement = requirements && typeof requirements === 'object' ? requirements as Record<string, unknown> : {}
+
+    if (requirement.requires_payment === true) {
       await minimumDelay(startedAt)
-      return json({ data: { verified: false } }, 400)
+      return json({
+        error: { code: 'ACTION_PAYMENT_REQUIRED' },
+        data: {
+          outstanding_difference: numeric(requirement.outstanding_difference),
+          hold_expires_at: requirement.hold_expires_at ?? null,
+        },
+      }, 409)
     }
 
-    const { data: cancellation, error: cancellationError } = await client.rpc('service_client_cancel_appointment_evidenced', {
+    if (requirement.requires_email_verification === true) {
+      if (!email) {
+        await minimumDelay(startedAt)
+        return json({ error: { code: 'ACTION_VERIFICATION_REQUIRED' } }, 400)
+      }
+      const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
+        p_token_id: tokenId,
+        p_email: email,
+        p_ip_address: ip,
+        p_user_agent: agent,
+        p_request_id: id,
+      })
+      if (verifyError) throw new Error(verifyError.message)
+      if (verified !== true) {
+        await minimumDelay(startedAt)
+        return json({ data: { verified: false } }, 400)
+      }
+    }
+
+    const { data: rescheduled, error: rescheduleError } = await client.rpc('service_client_apply_reschedule_evidenced', {
       p_token_id: tokenId,
-      p_reason: text(body.reason, 500),
-      p_requested_at: accessedAt,
+      p_policy_action_id: policyActionId,
       p_ip: ip,
       p_user_agent: agent,
       p_request_id: id,
       p_session_id: text(body.session_id, 200),
     })
-    if (cancellationError) throw new Error(cancellationError.message)
+    if (rescheduleError) throw new Error(rescheduleError.message)
 
     await minimumDelay(startedAt)
-    return json({ data: cancellation })
+    return json({ data: rescheduled })
   } catch (error) {
     const raw = error instanceof Error ? error.message : 'ACTION_ACCESS_FAILED'
     const mapped = raw === 'ACTION_OPERATION_INVALID'
