@@ -1,0 +1,183 @@
+name: Mercado Pago Sandbox PIX Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Digite SANDBOX para criar uma Order PIX fictícia de teste"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pix-gate:
+    name: Validar PIX Orders API no sandbox
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 8
+    env:
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      ALLOW_REAL_CHARGES: "false"
+      ALLOW_REAL_CUSTOMER_DATA: "false"
+
+    steps:
+      - name: Require explicit sandbox confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.confirmation }}" == "SANDBOX" ]] || { echo "Confirmação inválida" >&2; exit 1; }
+          [[ "$ALLOW_REAL_CHARGES" == "false" ]] || { echo "ALLOW_REAL_CHARGES precisa ser false" >&2; exit 1; }
+          [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]] || { echo "ALLOW_REAL_CUSTOMER_DATA precisa ser false" >&2; exit 1; }
+          [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]] || { echo "MERCADO_PAGO_ACCESS_TOKEN ausente" >&2; exit 1; }
+
+      - name: Create official PIX test Order
+        id: create
+        shell: bash
+        run: |
+          set -euo pipefail
+          external_reference="blacksheep-pix-sandbox-$(python3 - <<'PY'
+          import uuid
+          print(uuid.uuid4())
+          PY
+          )"
+          idempotency_key="pix-gate-$(python3 - <<'PY'
+          import uuid
+          print(uuid.uuid4())
+          PY
+          )"
+
+          cat > /tmp/pix-order.json <<JSON
+          {
+            "type": "online",
+            "external_reference": "$external_reference",
+            "processing_mode": "automatic",
+            "total_amount": "50.00",
+            "payer": {
+              "email": "test_user_br@testuser.com",
+              "first_name": "APRO"
+            },
+            "transactions": {
+              "payments": [
+                {
+                  "amount": "50.00",
+                  "payment_method": {
+                    "id": "pix",
+                    "type": "bank_transfer"
+                  }
+                }
+              ]
+            }
+          }
+          JSON
+
+          status="$(curl --silent --show-error \
+            --output /tmp/pix-create.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header 'accept: application/json' \
+            --header 'content-type: application/json' \
+            --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
+            --header "X-Idempotency-Key: ${idempotency_key}" \
+            --data @/tmp/pix-order.json \
+            'https://api.mercadopago.com/v1/orders')"
+
+          python3 - "$status" <<'PY'
+          import json, sys
+          status = int(sys.argv[1])
+          data = json.load(open('/tmp/pix-create.json'))
+          if status < 200 or status >= 300:
+              print('PIX test Order create failed:', status, data.get('message') or data.get('error') or data.get('status_detail'))
+              raise SystemExit(1)
+          payments = ((data.get('transactions') or {}).get('payments') or [])
+          assert len(payments) == 1, 'expected exactly one payment transaction'
+          payment = payments[0]
+          method = payment.get('payment_method') or {}
+          assert method.get('id') == 'pix', 'payment_method.id is not pix'
+          assert method.get('type') == 'bank_transfer', 'payment_method.type is not bank_transfer'
+          assert data.get('status') == 'action_required', f"unexpected order status: {data.get('status')}"
+          assert data.get('status_detail') == 'waiting_transfer', f"unexpected status_detail: {data.get('status_detail')}"
+          assert method.get('qr_code') or method.get('ticket_url'), 'PIX QR/ticket data missing'
+          order_id = str(data.get('id') or '')
+          assert order_id, 'Order ID missing'
+          open('/tmp/order_id', 'w').write(order_id)
+          print('PIX sandbox Order created and validated. QR/ticket intentionally not printed.')
+          PY
+
+          order_id="$(cat /tmp/order_id)"
+          echo "order_id=$order_id" >> "$GITHUB_OUTPUT"
+          echo "idempotency_key=$idempotency_key" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Order with GET
+        shell: bash
+        env:
+          ORDER_ID: ${{ steps.create.outputs.order_id }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error \
+            --output /tmp/pix-get.json \
+            --write-out '%{http_code}' \
+            --header 'accept: application/json' \
+            --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
+            "https://api.mercadopago.com/v1/orders/${ORDER_ID}")"
+          python3 - "$status" "$ORDER_ID" <<'PY'
+          import json, sys
+          status = int(sys.argv[1]); expected = sys.argv[2]
+          data = json.load(open('/tmp/pix-get.json'))
+          assert status == 200, f'GET Order returned HTTP {status}'
+          assert str(data.get('id')) == expected, 'GET returned a different Order'
+          payments = ((data.get('transactions') or {}).get('payments') or [])
+          assert len(payments) == 1, 'GET no longer has exactly one payment transaction'
+          print('GET /v1/orders/{id}: PASS')
+          PY
+
+      - name: Verify provider idempotency
+        shell: bash
+        env:
+          ORDER_ID: ${{ steps.create.outputs.order_id }}
+          IDEMPOTENCY_KEY: ${{ steps.create.outputs.idempotency_key }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error \
+            --output /tmp/pix-replay.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header 'accept: application/json' \
+            --header 'content-type: application/json' \
+            --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
+            --header "X-Idempotency-Key: ${IDEMPOTENCY_KEY}" \
+            --data @/tmp/pix-order.json \
+            'https://api.mercadopago.com/v1/orders')"
+          python3 - "$status" "$ORDER_ID" <<'PY'
+          import json, sys
+          status = int(sys.argv[1]); expected = sys.argv[2]
+          data = json.load(open('/tmp/pix-replay.json'))
+          assert 200 <= status < 300, f'idempotent replay returned HTTP {status}'
+          assert str(data.get('id')) == expected, 'same idempotency key created a different Order'
+          print('Provider idempotency: PASS (same Order ID).')
+          PY
+
+      - name: Record non-sensitive evidence
+        if: always()
+        shell: bash
+        env:
+          ORDER_ID: ${{ steps.create.outputs.order_id }}
+        run: |
+          {
+            echo "## Mercado Pago Sandbox PIX Gate"
+            echo
+            echo "- Environment: \`sandbox\`"
+            echo "- Real charges allowed: \`false\`"
+            echo "- Real customer data allowed: \`false\`"
+            echo "- Provider API: \`Orders API\`"
+            echo "- Test amount: \`R$ 50,00 fictícios\`"
+            echo "- Test payer: Mercado Pago documented sandbox identity"
+            echo "- Order ID: \`${ORDER_ID:-not-created}\`"
+            echo "- QR/ticket data: validated in-memory, never printed"
+            echo "- Expected initial status: \`action_required / waiting_transfer\`"
+            echo "- Provider idempotency: validated by replaying the same request key"
+            echo
+            echo "This gate validates provider-side PIX creation, retrieval and idempotency only."
+            echo "Agenda reservation settlement and late-payment behavior remain separate sandbox scenarios."
+          } >> "$GITHUB_STEP_SUMMARY"
