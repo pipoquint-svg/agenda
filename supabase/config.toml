@@ -64,13 +64,16 @@ verify_jwt = false
 [functions.mercado-pago-webhook]
 verify_jwt = false
 
-# Sandbox-only HTTPS page. It hard-fails unless APP_ENV=staging,
-# MERCADO_PAGO_ENV=sandbox and real charges/customer data are disabled.
+# Historical sandbox slug is tombstoned and returns 410 only.
 [functions.mercado-pago-card-staging]
 verify_jwt = false
 
 # Opaque pre-reservation tokens are resolved only behind distributed rate limiting.
 [functions.prebook-access]
+verify_jwt = false
+
+# Action-specific opaque links resolve/verify through a custom distributed-rate-limited boundary.
+[functions.appointment-action-access]
 verify_jwt = false
 
 # Admin endpoints validate the Supabase Auth bearer token against admin_users manually.
