@@ -1,11 +1,16 @@
 import {
   buildContactCustomFields,
+  buildLeadCardCustomFields,
   contactMatchesExactly,
   exactContactCandidates,
   findUniqueLeadDateFieldId,
+  formatRentalExtras,
+  kommoBalanceValue,
   kommoLeadName,
+  kommoLeadPrice,
   kommoReservationDateValue,
   normalizePhone,
+  resolveLeadCardFields,
   stageIdForAppointment,
 } from './kommo.ts'
 
@@ -109,4 +114,73 @@ Deno.test('reservation Data field is resolved uniquely and must be date-compatib
 Deno.test('reservation date is derived in America/Sao_Paulo and encoded as RFC3339', () => {
   const value = kommoReservationDateValue('2026-08-24T01:00:00Z')
   if (value !== '2026-08-23T12:00:00-03:00') throw new Error(`reservation date timezone mismatch: ${value}`)
+})
+
+Deno.test('shared lead card fields are resolved by exact account-wide names', () => {
+  const fields = resolveLeadCardFields([
+    { id: 101, name: 'Data', type: 'date' },
+    { id: 102, name: 'SALDO', type: 'monetary' },
+    { id: 103, name: 'Extras locação', type: 'textarea' },
+    { id: 104, name: 'Pai', type: 'text' },
+  ])
+  if (fields.reservationDate.id !== 101) throw new Error('Data mapping failed')
+  if (fields.balance.id !== 102) throw new Error('Saldo mapping failed')
+  if (fields.rentalExtras.id !== 103) throw new Error('Extras locação mapping failed')
+})
+
+Deno.test('lead card field mapping fails closed on ambiguity or incompatible type', () => {
+  let ambiguous = false
+  try {
+    resolveLeadCardFields([
+      { id: 1, name: 'Data', type: 'date' },
+      { id: 2, name: 'Saldo', type: 'numeric' },
+      { id: 3, name: 'Saldo', type: 'numeric' },
+      { id: 4, name: 'Extras locação', type: 'text' },
+    ])
+  } catch (error) {
+    ambiguous = error instanceof Error && error.message === 'KOMMO_BALANCE_FIELD_AMBIGUOUS'
+  }
+  if (!ambiguous) throw new Error('Saldo ambiguity should fail closed')
+
+  let invalidExtras = false
+  try {
+    resolveLeadCardFields([
+      { id: 1, name: 'Data', type: 'date' },
+      { id: 2, name: 'Saldo', type: 'numeric' },
+      { id: 4, name: 'Extras locação', type: 'numeric' },
+    ])
+  } catch (error) {
+    invalidExtras = error instanceof Error && error.message === 'KOMMO_RENTAL_EXTRAS_FIELD_INVALID_TYPE'
+  }
+  if (!invalidExtras) throw new Error('Extras locação invalid type should fail closed')
+})
+
+Deno.test('Venda, Saldo and Extras locação values follow Agenda authority', () => {
+  if (kommoLeadPrice(1090) !== 1090) throw new Error('Venda price mismatch')
+  if (kommoBalanceValue(545) !== '545.00') throw new Error('Saldo mismatch')
+  if (formatRentalExtras([{ name: 'Flash adicional', quantity: 1 }, { name: 'Fundo de papel', quantity: 2 }]) !== 'Flash adicional\n2x Fundo de papel') {
+    throw new Error('extras formatting mismatch')
+  }
+
+  const payload = buildLeadCardCustomFields({
+    reservationDate: { id: 101, type: 'date' },
+    balance: { id: 102, type: 'numeric' },
+    rentalExtras: { id: 103, type: 'textarea' },
+  }, '2026-08-24T01:00:00Z', 545, [{ name: 'Flash adicional', quantity: 1 }])
+
+  if (JSON.stringify(payload) !== JSON.stringify([
+    { field_id: 101, values: [{ value: '2026-08-23T12:00:00-03:00' }] },
+    { field_id: 102, values: [{ value: '545.00' }] },
+    { field_id: 103, values: [{ value: 'Flash adicional' }] },
+  ])) throw new Error('lead card payload mismatch')
+})
+
+Deno.test('zero balance and no extras clear the operational values deterministically', () => {
+  const payload = buildLeadCardCustomFields({
+    reservationDate: { id: 101, type: 'date' },
+    balance: { id: 102, type: 'numeric' },
+    rentalExtras: { id: 103, type: 'text' },
+  }, '2026-08-23T15:00:00-03:00', 0, [])
+  if (payload[1].values[0].value !== '0.00') throw new Error('zero Saldo should be explicit')
+  if (payload[2].values[0].value !== '') throw new Error('no extras should clear field')
 })

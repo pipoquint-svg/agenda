@@ -1,12 +1,16 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import {
   buildContactCustomFields,
+  buildLeadCardCustomFields,
   exactContactCandidates,
   kommoJson,
   kommoLeadName,
+  kommoLeadPrice,
   normalizePhone,
+  resolveLeadCardFields,
   stageIdForAppointment,
   type KommoContact,
+  type KommoCustomField,
 } from '../_shared/kommo.ts'
 
 function requireInternal(req: Request): void {
@@ -27,6 +31,15 @@ type DesiredState = {
   service?: { id?: string; name?: string | null } | null
   schedule?: { start_at?: string | null; end_at?: string | null } | null
   commercial_value?: number | null
+  financial?: {
+    contract_settled?: number | null
+    contract_balance?: number | null
+  } | null
+  extras?: Array<{
+    name?: string | null
+    quantity?: number | null
+    total_price?: number | null
+  }> | null
   customer?: { id?: string; name?: string | null; email?: string | null; phone?: string | null } | null
 }
 
@@ -50,6 +63,12 @@ async function contactFieldIds(baseUrl: string, token: string): Promise<{ email:
   const email = fields.find((field: any) => field.code === 'EMAIL')?.id ?? null
   const phone = fields.find((field: any) => field.code === 'PHONE')?.id ?? null
   return { email: Number.isInteger(email) ? email : null, phone: Number.isInteger(phone) ? phone : null }
+}
+
+async function leadCardFieldMapping(baseUrl: string, token: string) {
+  const payload = await kommoJson<any>(baseUrl, token, '/leads/custom_fields?limit=250')
+  const fields = (payload?._embedded?.custom_fields ?? []) as KommoCustomField[]
+  return resolveLeadCardFields(fields)
 }
 
 async function searchContactsByPhone(
@@ -248,6 +267,13 @@ Deno.serve(async (req) => {
     const stageId = stageIdForAppointment(settings, desired.appointment_status ?? 'CREATED', eventKind)
     const contactId = await ensureContact(client, baseUrl, token, desired.customer)
     const leadName = kommoLeadName(desired.service?.name, desired.public_code)
+    const cardFields = await leadCardFieldMapping(baseUrl, token)
+    const customFields = buildLeadCardCustomFields(
+      cardFields,
+      desired.schedule?.start_at,
+      desired.financial?.contract_balance,
+      desired.extras ?? [],
+    )
 
     const { data: existingLeadLink, error: existingLeadLinkError } = await client
       .from('kommo_appointment_links')
@@ -266,6 +292,8 @@ Deno.serve(async (req) => {
       name: leadName,
       pipeline_id: Number(settings.pipeline_id),
       status_id: stageId,
+      price: kommoLeadPrice(desired.commercial_value),
+      custom_fields_values: customFields,
     }
 
     if (leadId) {
@@ -312,6 +340,9 @@ Deno.serve(async (req) => {
       kommo_contact_id: contactId,
       kommo_lead_id: leadId,
       stage_id: stageId,
+      lead_price: leadBody.price,
+      balance: desired.financial?.contract_balance ?? null,
+      extras_count: desired.extras?.length ?? 0,
     })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'KOMMO_SYNC_FAILED'
