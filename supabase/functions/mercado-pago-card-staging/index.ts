@@ -75,6 +75,9 @@ Deno.serve(async (req: Request) => {
         public_key: requiredEnv('MERCADO_PAGO_PUBLIC_KEY'),
         amount: 50,
         currency: 'BRL',
+        payment_method_id: 'master',
+        installments: 1,
+        identification_type: 'CPF',
         order_endpoint: `${url.origin}${url.pathname}?api=order`,
         environment: 'sandbox',
       }), { status: 200, headers: jsonHeaders })
@@ -104,11 +107,12 @@ Deno.serve(async (req: Request) => {
 
     const input = await req.json().catch(() => ({})) as Record<string, unknown>
     const token = typeof input.token === 'string' ? input.token.trim() : ''
-    const paymentMethodId = typeof input.payment_method_id === 'string' ? input.payment_method_id.trim() : ''
+    const requestedPaymentMethod = typeof input.payment_method_id === 'string' ? input.payment_method_id.trim() : ''
+    const paymentMethodId = requestedPaymentMethod || 'master'
     const installments = Number(input.installments ?? 1)
 
     if (token.length < 10 || token.length > 500) throw new Error('CARD_TOKEN_INVALID')
-    if (!/^[A-Za-z0-9_-]{2,80}$/.test(paymentMethodId)) throw new Error('CARD_PAYMENT_METHOD_INVALID')
+    if (paymentMethodId !== 'master') throw new Error('CARD_PAYMENT_METHOD_INVALID')
     if (!Number.isInteger(installments) || installments !== 1) throw new Error('CARD_INSTALLMENTS_INVALID')
 
     const externalReference = `blacksheep-card-staging-${crypto.randomUUID()}`
@@ -126,7 +130,7 @@ Deno.serve(async (req: Request) => {
         payments: [{
           amount: '50.00',
           payment_method: {
-            id: paymentMethodId,
+            id: 'master',
             type: 'credit_card',
             token,
             installments: 1,
