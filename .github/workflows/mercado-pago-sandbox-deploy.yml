@@ -27,8 +27,8 @@ jobs:
       MERCADO_PAGO_ENV: sandbox
       ALLOW_REAL_CUSTOMER_DATA: "false"
       ALLOW_REAL_CHARGES: "false"
-      SUPABASE_PROJECT_REF: jlyvlmspfjwbcmhmhwz
-      MERCADO_PAGO_WEBHOOK_URL: https://jlyvlmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-webhook
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      MERCADO_PAGO_WEBHOOK_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-webhook
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SANDBOX_DATABASE_URL: ${{ secrets.SANDBOX_DATABASE_URL }}
       MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
