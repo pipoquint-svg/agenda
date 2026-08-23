@@ -27,8 +27,8 @@ select is((public.calculate_reservation_change('50000000-0000-0000-0000-00000000
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-08 10:00:00-03','CLIENT',1000)->>'penalty_retained')::numeric,0::numeric,'exactly 48h is outside penalty window');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'theoretical_penalty')::numeric,200::numeric,'late first reschedule calculates 20 percent on R$1000 total');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'penalty_retained')::numeric,200::numeric,'R$200 penalty is retained from customer funds');
-select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'applicable_amount')::numeric,300::numeric,'R$500 paid minus R$200 retained leaves R$300 applicable');
-select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'difference_due')::numeric,700::numeric,'new R$1000 reservation requires R$700 difference');
+select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'applicable_amount')::numeric,300::numeric,'R$500 paid minus R$200 retained leaves R$300 customer money applicable');
+select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'difference_due')::numeric,200::numeric,'R$200 restores the original 50 percent confirmation commitment after the retained penalty');
 
 insert into public.appointment_policy_actions(appointment_id,action_type,status,requested_at,original_start_at,requested_new_start_at,hours_before_start,notice_hours_snapshot,is_inside_notice_window,prior_customer_reschedules,contract_value_snapshot,net_paid_snapshot,penalty_type,penalty_value,penalty_amount,refundable_amount,change_origin)
 values ('50000000-0000-0000-0000-000000000006','RESCHEDULE','APPLIED','2035-01-01 10:00:00-03','2035-01-10 10:00:00-03','2035-01-20 10:00:00-03',216,48,false,0,1000,500,'NONE',0,0,0,'CLIENT');
@@ -43,7 +43,7 @@ select is((public.calculate_reservation_change('50000000-0000-0000-0000-00000000
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'refund_due')::numeric,200::numeric,'mandatory R$1000 paid R$500 cancellation refunds R$200');
 select ok((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'penalty_retained')::numeric <= (public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'contract_applied_before')::numeric,'penalty never exceeds applied customer funds');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','OPERATION',null)->>'penalty_retained')::numeric,0::numeric,'operation-origin cancellation has no penalty');
-select ok(not has_column('public','service_change_policies','cancellation_credit_validity_days'),'legacy expiring cancellation-credit policy field is absent');
+select ok(not exists(select 1 from information_schema.columns where table_schema='public' and table_name='service_change_policies' and column_name='cancellation_credit_validity_days'),'legacy expiring cancellation-credit policy field is absent');
 
 insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people)
 values ('50000000-0000-0000-0000-000000000104','50000000-0000-0000-0000-000000000003','R100 Policy Service','r100-policy-service',60,100,1,10);
@@ -56,7 +56,7 @@ values ('50000000-0000-0000-0000-000000000106','POLICY-R100-1','50000000-0000-00
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
 values ('50000000-0000-0000-0000-000000000106','CHARGE','PIX','MERCADO_PAGO','policy-r100-pay','APPROVED',100,100,now(),'CONTRACT');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000106','RESCHEDULE','2035-03-09 10:01:00-03','CLIENT',100)->>'penalty_retained')::numeric,20::numeric,'R$100 late first reschedule retains R$20');
-select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000106','RESCHEDULE','2035-03-09 10:01:00-03','CLIENT',100)->>'difference_due')::numeric,20::numeric,'R$80 applies to new R$100 booking and R$20 is due');
+select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000106','RESCHEDULE','2035-03-09 10:01:00-03','CLIENT',100)->>'difference_due')::numeric,20::numeric,'R$80 contract coverage remains and R$20 restores the fully-paid commitment');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000106','RESCHEDULE','2035-03-09 10:01:00-03','CLIENT',60)->>'excess_amount')::numeric,20::numeric,'new R$60 booking keeps R$20 customer-owned excess for final settlement');
 
 select * from finish();
