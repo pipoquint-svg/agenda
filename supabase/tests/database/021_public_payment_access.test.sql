@@ -17,7 +17,7 @@ insert into public.services (
 ) values (
   '98000000-0000-0000-0000-000000000010',
   '98000000-0000-0000-0000-000000000001',
-  'MP Service', 'mp-service', 60, 1000, 1, 1, 5000, 40
+  'MP Service', 'mp-service', 60, 1000, 1, 1, 5000, 50
 );
 
 insert into public.service_employees (id, service_id, employee_id)
@@ -56,14 +56,14 @@ select throws_ok(
 
 select is(
   (public.service_get_public_payment_context('manage-token-abcdefghijklmnopqrstuvwxyz-123456')->>'confirmation_percentage')::numeric,
-  40::numeric,
-  'payment context exposes the service confirmation percentage'
+  50::numeric,
+  'payment context exposes the allowed 50 percent service confirmation percentage'
 );
 
 select is(
   (public.service_get_public_payment_context('manage-token-abcdefghijklmnopqrstuvwxyz-123456')->>'minimum_due_contract_amount')::numeric,
-  400::numeric,
-  'payment context calculates minimum amount from the contract target'
+  500::numeric,
+  'payment context calculates the 50 percent contract target'
 );
 
 create temporary table mp_intent as
@@ -74,8 +74,8 @@ select public.service_create_payment_intent_by_token(
   'request_key_123456789'
 ) as payload;
 
-select is((select (payload->>'contract_amount_settled')::numeric from mp_intent),400::numeric,'token-scoped MINIMUM intent settles the configured 40 percent target');
-select is((select (payload->>'cash_amount')::numeric from mp_intent),380::numeric,'token-scoped PIX applies 5 percent only to this transaction');
+select is((select (payload->>'contract_amount_settled')::numeric from mp_intent),500::numeric,'token-scoped MINIMUM intent settles the configured 50 percent target');
+select is((select (payload->>'cash_amount')::numeric from mp_intent),475::numeric,'token-scoped PIX applies 5 percent only to this transaction');
 
 select ok(
   not has_function_privilege('anon','public.service_create_payment_intent_by_token(text,text,text,text)','EXECUTE'),
