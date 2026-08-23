@@ -1,5 +1,6 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
+import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
   assertMercadoPagoPaymentMatchesIntent,
   mercadoPagoPaymentStorageSnapshot,
@@ -63,12 +64,6 @@ function response(body: unknown, status = 200): Response {
   })
 }
 
-function requiredEnv(name: string): string {
-  const value = Deno.env.get(name)?.trim()
-  if (!value) throw new Error(`MISSING_ENV:${name}`)
-  return value
-}
-
 function appointmentToken(req: Request): string {
   const value = req.headers.get('x-appointment-token')?.trim() ?? ''
   if (value.length < 32) throw new Error('APPOINTMENT_TOKEN_INVALID')
@@ -81,18 +76,23 @@ function moneyString(value: number | string): string {
   return (Math.round(amount * 100) / 100).toFixed(2)
 }
 
+function providerCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return /^[A-Za-z0-9_.-]{1,120}$/.test(normalized) ? normalized : null
+}
+
 function providerErrorSnapshot(status: number, raw: unknown): Record<string, unknown> {
   const row = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const errors = Array.isArray(row.errors) ? row.errors : Array.isArray(row.cause) ? row.cause : []
   return {
     http_status: status,
-    error: typeof row.error === 'string' ? row.error : null,
-    message: typeof row.message === 'string' ? row.message.slice(0, 500) : null,
+    error: providerCode(row.error),
     status: typeof row.status === 'number' || typeof row.status === 'string' ? row.status : null,
-    status_detail: typeof row.status_detail === 'string' ? row.status_detail.slice(0, 200) : null,
+    status_detail: providerCode(row.status_detail),
     errors: errors.slice(0, 5).map((item) => {
       const error = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      return { code: error.code ?? null, message: error.message ?? error.description ?? null }
+      return { code: providerCode(error.code) }
     }),
   }
 }
@@ -113,14 +113,24 @@ function shouldUseThreeDS(): boolean {
   throw new Error('MERCADO_PAGO_3DS_MODE_INVALID')
 }
 
-async function mercadoPagoRequest(url: string, init: RequestInit): Promise<ProviderResult> {
+async function mercadoPagoRequest(
+  url: string,
+  init: RequestInit,
+  options: { creatingCharge?: boolean } = {},
+): Promise<ProviderResult> {
+  const runtime = mercadoPagoRuntime({
+    environment: Deno.env.get('MERCADO_PAGO_ENV'),
+    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
+    allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
+    creatingCharge: options.creatingCharge === true,
+  })
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
     const res = await fetch(url, {
       ...init,
       headers: {
-        authorization: `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
+        authorization: `Bearer ${runtime.accessToken}`,
         accept: 'application/json',
         ...(init.headers ?? {}),
       },
@@ -128,6 +138,16 @@ async function mercadoPagoRequest(url: string, init: RequestInit): Promise<Provi
     })
     const data = await res.json().catch(() => ({})) as Record<string, unknown>
     return { status: res.status, data }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('MERCADO_PAGO_PROVIDER_TIMEOUT')
+    if (error instanceof Error && (
+      error.message === 'MERCADO_PAGO_ENV_INVALID'
+      || error.message === 'MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED'
+      || error.message === 'MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED'
+      || error.message === 'REAL_CHARGES_DISABLED'
+      || error.message.startsWith('MISSING_ENV:')
+    )) throw error
+    throw new Error('MERCADO_PAGO_PROVIDER_NETWORK_ERROR')
   } finally {
     clearTimeout(timer)
   }
@@ -138,7 +158,7 @@ async function mercadoPagoCreateOrder(body: Record<string, unknown>, idempotency
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey },
     body: JSON.stringify(body),
-  })
+  }, { creatingCharge: true })
 }
 
 async function mercadoPagoGetOrder(orderId: string) {
@@ -165,7 +185,7 @@ async function loadTransaction(transactionId: string): Promise<TransactionRow | 
     .select('id,cash_amount,method,provider_payment_id,status')
     .eq('id', transactionId)
     .maybeSingle()
-  if (error) throw new Error(`PAYMENT_LOOKUP_FAILED:${error.message}`)
+  if (error) throw new Error('PAYMENT_LOOKUP_FAILED')
   return data as TransactionRow | null
 }
 
@@ -216,7 +236,7 @@ async function validateAndApplyProviderOrder(input: {
       p_reason: reason,
       p_payload_json: storedSnapshot,
     })
-    if (quarantineError) throw new Error(`PAYMENT_MISMATCH_QUARANTINE_FAILED:${quarantineError.message}`)
+    if (quarantineError) throw new Error('PAYMENT_MISMATCH_QUARANTINE_FAILED')
     throw new Error('MERCADO_PAGO_PAYMENT_VALIDATION_FAILED')
   }
 
@@ -229,7 +249,7 @@ async function validateAndApplyProviderOrder(input: {
     p_payload_json: storedSnapshot,
     p_paid_at: snapshot.date_approved,
   })
-  if (applyError) throw new Error(`PAYMENT_STATUS_APPLY_FAILED:${applyError.message}`)
+  if (applyError) throw new Error('PAYMENT_STATUS_APPLY_FAILED')
   return { snapshot, state: applied }
 }
 
@@ -253,7 +273,7 @@ Deno.serve(async (req) => {
         .select('pix_discount_percent')
         .eq('id', 1)
         .single()
-      if (settingsError) throw new Error(`PAYMENT_SETTINGS_LOAD_FAILED:${settingsError.message}`)
+      if (settingsError) throw new Error('PAYMENT_SETTINGS_LOAD_FAILED')
 
       return response({
         appointment: {
@@ -293,7 +313,7 @@ Deno.serve(async (req) => {
         .eq('transaction_type', 'CHARGE')
         .eq('provider_payment_id', providerOrderId)
         .maybeSingle()
-      if (transactionError) throw new Error(`PAYMENT_LOOKUP_FAILED:${transactionError.message}`)
+      if (transactionError) throw new Error('PAYMENT_LOOKUP_FAILED')
       if (!transaction?.id) throw new Error('PAYMENT_NOT_FOUND')
       if (transaction.method !== 'PIX' && transaction.method !== 'CARD') throw new Error('PAYMENT_METHOD_INVALID')
 
@@ -383,9 +403,6 @@ Deno.serve(async (req) => {
         installments: card.installments,
       }
 
-      // Mercado Pago documents `validation=never` as the default when the
-      // transaction_security node is omitted. Ordinary card and 3DS are separate
-      // evidence gates; 3DS is only enabled after its dedicated environment gate.
       if (shouldUseThreeDS()) {
         providerBody.config = {
           online: {
@@ -406,13 +423,19 @@ Deno.serve(async (req) => {
     try {
       provider = await mercadoPagoCreateOrder(providerBody, intent.transaction_id)
     } catch (cause) {
-      console.error('Mercado Pago create Order unavailable', cause)
+      const causeCode = cause instanceof Error ? cause.message : 'MERCADO_PAGO_PROVIDER_ERROR'
+      if (
+        causeCode === 'MERCADO_PAGO_ENV_INVALID'
+        || causeCode === 'MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED'
+        || causeCode === 'MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED'
+        || causeCode === 'REAL_CHARGES_DISABLED'
+        || causeCode.startsWith('MISSING_ENV:')
+      ) throw cause
+      console.error('Mercado Pago create Order unavailable', { code: causeCode.split(':')[0] })
       return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
     }
 
     if (isIdempotencyConflict(provider)) {
-      // A retry can arrive after Mercado Pago accepted the first request but the
-      // client did not receive the response. Never convert this into REJECTED.
       const existing = await loadTransaction(intent.transaction_id)
       if (!existing?.provider_payment_id) {
         return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
@@ -460,12 +483,17 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
     if (code.startsWith('MERCADO_PAGO_') && code.includes('MISMATCH')) console.error('Mercado Pago validation failed', code)
-    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MISSING_ENV)/)?.[1]
+    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
       ?? (code.startsWith('MERCADO_PAGO_') && (code.includes('MISMATCH') || code === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED') ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' : code.split(':')[0])
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'PAYMENT_HOLD_EXPIRED' ? 409
       : publicCode === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' ? 502
-      : publicCode.startsWith('MISSING_ENV') || publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
+      : publicCode.startsWith('MISSING_ENV')
+        || publicCode === 'RATE_LIMIT_BACKEND_FAILED'
+        || publicCode === 'MERCADO_PAGO_ENV_INVALID'
+        || publicCode === 'MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED'
+        || publicCode === 'MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED'
+        || publicCode === 'REAL_CHARGES_DISABLED' ? 503
       : publicCode.startsWith('APPOINTMENT_TOKEN') || publicCode === 'TOKEN_SCOPE_DENIED' ? 401
       : 400
     return response({ error: { code: publicCode } }, status)
