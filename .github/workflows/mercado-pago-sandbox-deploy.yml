@@ -6,7 +6,7 @@ on:
       ref:
         description: "Ref da Agenda a publicar no sandbox"
         required: true
-        default: "feature/mercado-pago-sandbox-hardening"
+        default: "feature/mercado-pago-orders-api"
         type: string
       confirmation:
         description: "Digite SANDBOX para confirmar que nenhum dado ou charge real deve ser usado"
@@ -50,51 +50,49 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
-      - name: Require initial sandbox secrets
+      - name: Require sandbox secrets
         shell: bash
         run: |
           set -euo pipefail
-          for name in SUPABASE_ACCESS_TOKEN SANDBOX_DATABASE_URL MERCADO_PAGO_ACCESS_TOKEN; do
+          for name in SUPABASE_ACCESS_TOKEN SANDBOX_DATABASE_URL MERCADO_PAGO_ACCESS_TOKEN MERCADO_PAGO_WEBHOOK_SECRET; do
             if [[ -z "${!name:-}" ]]; then
               echo "$name ausente no environment sandbox" >&2
               exit 1
             fi
           done
-          if [[ -z "${MERCADO_PAGO_WEBHOOK_SECRET:-}" ]]; then
-            echo "MERCADO_PAGO_WEBHOOK_SECRET ainda ausente: permitido apenas no primeiro deploy, antes de cadastrar a URL no Mercado Pago."
-          fi
 
-      - name: Validate Mercado Pago payment API scope read-only
+      - name: Validate Mercado Pago Orders API access read-only
         shell: bash
         run: |
           set -euo pipefail
+          begin_date="$(date -u -d '1 day ago' +'%Y-%m-%dT%H:%M:%S.000Z')"
+          end_date="$(date -u +'%Y-%m-%dT%H:%M:%S.999Z')"
+
           status="$(curl --silent --show-error \
-            --output /tmp/mp-payment-scope.json \
+            --output /tmp/mp-orders-scope.json \
             --write-out '%{http_code}' \
             --get \
             --header 'accept: application/json' \
             --header "Authorization: Bearer ${MERCADO_PAGO_ACCESS_TOKEN}" \
-            --data-urlencode 'sort=date_created' \
-            --data-urlencode 'criteria=desc' \
-            --data-urlencode 'external_reference=blacksheep-sandbox-scope-preflight-no-payment' \
-            --data-urlencode 'limit=1' \
-            'https://api.mercadopago.com/v1/payments/search')"
+            --data-urlencode "begin_date=${begin_date}" \
+            --data-urlencode "end_date=${end_date}" \
+            --data-urlencode 'external_reference=blacksheep-sandbox-scope-preflight' \
+            --data-urlencode 'page=1' \
+            --data-urlencode 'page_size=1' \
+            'https://api.mercadopago.com/v1/orders')"
 
           python3 - "$status" <<'PY'
           import json, sys
           status = int(sys.argv[1])
           try:
-              data = json.load(open('/tmp/mp-payment-scope.json'))
+              data = json.load(open('/tmp/mp-orders-scope.json'))
           except Exception:
               data = {}
           if status == 200:
-              print('Mercado Pago Payments API: acesso de leitura confirmado; nenhum pagamento criado.')
+              print('Mercado Pago Orders API: acesso de leitura confirmado; nenhuma Order ou cobrança criada.')
               raise SystemExit(0)
-          message = data.get('message') or data.get('error') or 'sem mensagem'
-          if status == 401:
-              print('Mercado Pago Payments API recusou a credencial (401). A credencial não possui autorização payment válida para este endpoint.')
-          else:
-              print(f'Mercado Pago Payments API preflight falhou: HTTP {status}: {message}')
+          message = data.get('message') or data.get('error') or data.get('code') or 'sem mensagem'
+          print(f'Mercado Pago Orders API preflight falhou: HTTP {status}: {message}')
           raise SystemExit(1)
           PY
 
@@ -115,7 +113,7 @@ jobs:
           set -euo pipefail
           supabase db push --db-url "$SANDBOX_DATABASE_URL" --include-all
 
-      - name: Configure non-webhook Mercado Pago Edge Function secrets
+      - name: Configure Mercado Pago Edge Function secrets
         shell: bash
         run: |
           set -euo pipefail
@@ -123,19 +121,11 @@ jobs:
             --project-ref "$SUPABASE_PROJECT_REF" \
             MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
             MERCADO_PAGO_WEBHOOK_URL="$MERCADO_PAGO_WEBHOOK_URL" \
+            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET" \
             MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
             APP_ENV="$APP_ENV" \
             ALLOW_REAL_CHARGES="$ALLOW_REAL_CHARGES" \
             ALLOW_REAL_CUSTOMER_DATA="$ALLOW_REAL_CUSTOMER_DATA"
-
-      - name: Configure webhook signing secret when available
-        if: ${{ env.MERCADO_PAGO_WEBHOOK_SECRET != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase secrets set \
-            --project-ref "$SUPABASE_PROJECT_REF" \
-            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET"
 
       - name: Deploy Mercado Pago payment function
         shell: bash
@@ -153,7 +143,7 @@ jobs:
             --project-ref "$SUPABASE_PROJECT_REF" \
             --use-api
 
-      - name: Smoke test webhook authentication boundary
+      - name: Smoke test Order webhook authentication boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -163,7 +153,7 @@ jobs:
             --write-out '%{http_code}' \
             --request POST \
             --header 'content-type: application/json' \
-            --data '{"type":"payment","data":{"id":"sandbox-smoke"}}' \
+            --data '{"type":"order","live_mode":false,"data":{"id":"sandbox-smoke"}}' \
             "$MERCADO_PAGO_WEBHOOK_URL")"
           cat "$body_file"
           echo
@@ -181,7 +171,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Mercado Pago Sandbox Deploy"
+            echo "## Mercado Pago Sandbox Deploy — Orders API"
             echo
             echo "- Project ref: \`$SUPABASE_PROJECT_REF\`"
             echo "- Source ref: \`${{ inputs.ref }}\`"
@@ -189,12 +179,9 @@ jobs:
             echo "- MERCADO_PAGO_ENV: \`$MERCADO_PAGO_ENV\`"
             echo "- ALLOW_REAL_CHARGES: \`$ALLOW_REAL_CHARGES\`"
             echo "- Webhook URL: \`$MERCADO_PAGO_WEBHOOK_URL\`"
-            if [[ -n "${MERCADO_PAGO_WEBHOOK_SECRET:-}" ]]; then
-              echo "- Webhook signing secret: CONFIGURADO"
-            else
-              echo "- Webhook signing secret: PENDENTE (primeiro deploy)"
-            fi
+            echo "- Webhook signing secret: CONFIGURADO"
+            echo "- Provider API: \`Orders API\`"
             echo
-            echo "Este workflow publica/configura o sandbox somente após um preflight read-only do acesso à Payments API."
+            echo "Este workflow publica/configura o sandbox somente após preflight read-only de Orders."
             echo "PIX/cartão/3DS/webhook assinado permanecem NÃO TESTADOS até a matriz real de sandbox ser executada."
           } >> "$GITHUB_STEP_SUMMARY"
