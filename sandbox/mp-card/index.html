@@ -7,7 +7,7 @@
   <title>BlackSheep · Mercado Pago Sandbox</title>
   <script src="https://sdk.mercadopago.com/js/v2"></script>
   <style>
-    *{box-sizing:border-box}body{margin:0;background:#f4f4f1;color:#171717;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px}main{width:min(760px,100%);margin:0 auto;background:#fff;border:1px solid #ddd;border-radius:18px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.05)}h1{font-size:24px;margin:0 0 6px}.badge{display:inline-block;font-weight:800;font-size:12px;letter-spacing:.06em;padding:5px 9px;border-radius:999px;background:#fff2cc;color:#664d00;margin-bottom:16px}.lead{margin:0 0 18px;color:#555}.info{padding:16px;border-radius:12px;background:#f7f7f4;margin-bottom:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.item{border:1px solid #e4e4df;background:white;border-radius:9px;padding:10px}.label{font-size:11px;text-transform:uppercase;color:#777;margin-bottom:4px}.value{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;word-break:break-all}.status{margin-top:18px;padding:14px;border-radius:10px;background:#111;color:#eee;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;min-height:48px}.muted{color:#777;font-size:13px;margin-top:10px}#form-checkout{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{display:flex;flex-direction:column;gap:5px}.field.full{grid-column:1/-1}.field label{font-size:12px;font-weight:700;color:#555}.secure-field,input,select{height:44px;border:1px solid #d4d4cf;border-radius:9px;background:#fff;padding:10px;font:inherit}.secure-field{padding:0 10px}button{grid-column:1/-1;height:46px;border:0;border-radius:10px;background:#171717;color:white;font-weight:800;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.progress-bar{grid-column:1/-1;width:100%;height:4px}.hidden{display:none!important}@media(max-width:640px){body{padding:10px}main{padding:16px}.grid,#form-checkout{grid-template-columns:1fr}.field.full,button,.progress-bar{grid-column:1}}
+    *{box-sizing:border-box}body{margin:0;background:#f4f4f1;color:#171717;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px}main{width:min(760px,100%);margin:0 auto;background:#fff;border:1px solid #ddd;border-radius:18px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.05)}h1{font-size:24px;margin:0 0 6px}.badge{display:inline-block;font-weight:800;font-size:12px;letter-spacing:.06em;padding:5px 9px;border-radius:999px;background:#fff2cc;color:#664d00;margin-bottom:16px}.lead{margin:0 0 18px;color:#555}.info{padding:16px;border-radius:12px;background:#f7f7f4;margin-bottom:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.item{border:1px solid #e4e4df;background:white;border-radius:9px;padding:10px}.label{font-size:11px;text-transform:uppercase;color:#777;margin-bottom:4px}.value{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;word-break:break-all}.status{margin-top:18px;padding:14px;border-radius:10px;background:#111;color:#eee;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;min-height:48px}.muted{color:#777;font-size:13px;margin-top:10px}.form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{display:flex;flex-direction:column;gap:5px}.field.full{grid-column:1/-1}.field label{font-size:12px;font-weight:700;color:#555}.secure-field,input{height:44px;border:1px solid #d4d4cf;border-radius:9px;background:#fff;padding:10px;font:inherit}.secure-field{padding:0 10px}button{grid-column:1/-1;height:46px;border:0;border-radius:10px;background:#171717;color:white;font-weight:800;cursor:pointer}button:disabled{opacity:.5;cursor:wait}@media(max-width:640px){body{padding:10px}main{padding:16px}.grid,.form{grid-template-columns:1fr}.field.full,button{grid-column:1}}
   </style>
 </head>
 <body>
@@ -28,195 +28,119 @@
     </div>
   </section>
 
-  <p id="mount">Carregando formulário seguro…</p>
+  <p id="mount">Carregando campos seguros…</p>
 
-  <form id="form-checkout">
+  <div class="form" id="card-form">
     <div class="field full">
       <label>Número do cartão</label>
-      <div id="form-checkout__cardNumber" class="secure-field"></div>
+      <div id="cardNumber" class="secure-field"></div>
     </div>
     <div class="field">
       <label>Validade</label>
-      <div id="form-checkout__expirationDate" class="secure-field"></div>
+      <div id="expirationDate" class="secure-field"></div>
     </div>
     <div class="field">
       <label>CVV</label>
-      <div id="form-checkout__securityCode" class="secure-field"></div>
+      <div id="securityCode" class="secure-field"></div>
     </div>
     <div class="field full">
       <label>Nome do titular</label>
-      <input type="text" id="form-checkout__cardholderName" autocomplete="cc-name" placeholder="APRO" />
+      <input type="text" id="cardholderName" value="APRO" autocomplete="cc-name" />
     </div>
-
-    <div class="field hidden" aria-hidden="true">
-      <label>Banco emissor</label>
-      <select id="form-checkout__issuer"><option value="0" selected>Sandbox</option></select>
-    </div>
-    <div class="field hidden" aria-hidden="true">
-      <label>Parcelas</label>
-      <select id="form-checkout__installments"><option value="1" selected>1 parcela</option></select>
-    </div>
-    <div class="field hidden" aria-hidden="true">
-      <label>Tipo de documento</label>
-      <select id="form-checkout__identificationType"><option value="CPF" selected>CPF</option></select>
-    </div>
-
-    <div class="field full">
-      <label>CPF</label>
-      <input type="text" id="form-checkout__identificationNumber" value="12345678909" inputmode="numeric" />
-    </div>
-    <div class="field full">
-      <label>E-mail</label>
-      <input type="email" id="form-checkout__cardholderEmail" value="test@testuser.com" />
-    </div>
-    <button type="submit" id="form-checkout__submit">Pagar R$ 50,00 no sandbox</button>
-    <progress value="0" class="progress-bar hidden">Carregando…</progress>
-  </form>
+    <button type="button" id="payButton">Pagar R$ 50,00 no sandbox</button>
+  </div>
 
   <div id="result" class="status">Inicializando sandbox…</div>
-  <p class="muted">CPF e 1 parcela estão fixados para este teste. O token é gerado pelo MercadoPago.js e enviado ao backend sandbox; não é exibido nem armazenado.</p>
+  <p class="muted">CPF, e-mail, Mastercard e 1 parcela são fixos neste teste. O token é criado pelo MercadoPago.js e nunca é exibido.</p>
 </main>
 
 <script>
 const API_BASE = 'https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/mercado-pago-card-staging';
 const mount = document.getElementById('mount');
 const result = document.getElementById('result');
-const submit = document.getElementById('form-checkout__submit');
-const progress = document.querySelector('.progress-bar');
-const issuerSelect = document.getElementById('form-checkout__issuer');
-const installmentsSelect = document.getElementById('form-checkout__installments');
-const identificationTypeSelect = document.getElementById('form-checkout__identificationType');
-const show = (value) => { result.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); };
+const payButton = document.getElementById('payButton');
+const cardholderName = document.getElementById('cardholderName');
+const show = value => { result.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); };
 
-function ensureFixedAuxiliaryFields() {
-  if (!issuerSelect.options.length) issuerSelect.add(new Option('Sandbox', '0', true, true));
-  issuerSelect.value = issuerSelect.options[0]?.value || '0';
+let mp = null;
+let config = null;
 
-  if (![...installmentsSelect.options].some(option => option.value === '1')) {
-    installmentsSelect.add(new Option('1 parcela', '1', true, true));
-  }
-  installmentsSelect.value = '1';
+async function sendOrder(tokenId) {
+  show('TOKEN_CREATED → enviando Order para o sandbox…');
+  const response = await fetch(config.order_endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-sandbox-confirmation': 'SANDBOX'
+    },
+    body: JSON.stringify({
+      token: tokenId,
+      payment_method_id: 'master',
+      installments: 1
+    })
+  });
 
-  if (![...identificationTypeSelect.options].some(option => option.value === 'CPF')) {
-    identificationTypeSelect.add(new Option('CPF', 'CPF', true, true));
-  }
-  identificationTypeSelect.value = 'CPF';
+  const body = await response.json().catch(() => ({}));
+  const safe = {
+    http_status: response.status,
+    ok: body.ok === true,
+    order_id: body.provider?.id || null,
+    status: body.provider?.status || null,
+    status_detail: body.provider?.status_detail || null,
+    error: body.error?.code || null,
+    provider_error: body.error?.provider || null
+  };
+  show(safe);
+  if (!response.ok) throw new Error(body.error?.code || 'ORDER_FAILED');
 }
+
+async function handlePayClick() {
+  payButton.disabled = true;
+  show('CLICK_RECEIVED → criando CardToken…');
+  try {
+    if (!mp || !config) throw new Error('SDK_NOT_READY');
+    const name = cardholderName.value.trim();
+    if (!['APRO','OTHE'].includes(name)) throw new Error('USE_APRO_OR_OTHE');
+
+    const token = await mp.fields.createCardToken({
+      cardholderName: name,
+      identificationType: 'CPF',
+      identificationNumber: '12345678909'
+    });
+
+    if (!token?.id) throw new Error('TOKEN_NOT_CREATED');
+    await sendOrder(token.id);
+  } catch (error) {
+    show({
+      stage: 'card_token_or_order',
+      message: error?.message || String(error)
+    });
+  } finally {
+    payButton.disabled = false;
+  }
+}
+
+payButton.addEventListener('click', handlePayClick);
 
 (async () => {
   try {
     const configResponse = await fetch(API_BASE + '?api=config', { cache: 'no-store' });
-    const config = await configResponse.json();
+    config = await configResponse.json();
     if (!configResponse.ok || !config.public_key) throw new Error(config?.error?.code || 'CONFIG_NOT_AVAILABLE');
     if (!window.MercadoPago) throw new Error('MERCADO_PAGO_SDK_NOT_LOADED');
 
-    const mp = new MercadoPago(config.public_key, { locale: 'pt-BR' });
+    mp = new MercadoPago(config.public_key, { locale: 'pt-BR' });
 
-    try {
-      const types = await mp.getIdentificationTypes();
-      const cpf = Array.isArray(types) ? types.find(type => type?.id === 'CPF' || type?.name === 'CPF') : null;
-      if (cpf) {
-        identificationTypeSelect.innerHTML = '';
-        identificationTypeSelect.add(new Option(cpf.name || 'CPF', cpf.id || 'CPF', true, true));
-      }
-    } catch (_) {
-      // Fallback CPF is already present. This page is sandbox-only for Brazil.
-    }
+    mp.fields.create('cardNumber', { placeholder: 'Número do cartão' }).mount('cardNumber');
+    mp.fields.create('expirationDate', { placeholder: 'MM/AA' }).mount('expirationDate');
+    mp.fields.create('securityCode', { placeholder: 'CVV' }).mount('securityCode');
 
-    ensureFixedAuxiliaryFields();
-
-    const cardForm = mp.cardForm({
-      amount: String(config.amount || 50),
-      iframe: true,
-      form: {
-        id: 'form-checkout',
-        cardNumber: { id: 'form-checkout__cardNumber', placeholder: 'Número do cartão' },
-        expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/AA' },
-        securityCode: { id: 'form-checkout__securityCode', placeholder: 'CVV' },
-        cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Titular do cartão' },
-        issuer: { id: 'form-checkout__issuer', placeholder: 'Banco emissor' },
-        installments: { id: 'form-checkout__installments', placeholder: 'Parcelas' },
-        identificationType: { id: 'form-checkout__identificationType', placeholder: 'Tipo de documento' },
-        identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'Número do documento' },
-        cardholderEmail: { id: 'form-checkout__cardholderEmail', placeholder: 'E-mail' }
-      },
-      callbacks: {
-        onFormMounted: error => {
-          if (error) {
-            mount.textContent = 'Falha ao carregar o formulário seguro.';
-            show({ stage: 'cardform_mount', message: error?.message || String(error) });
-            return;
-          }
-          ensureFixedAuxiliaryFields();
-          mount.textContent = 'Formulário carregado. Preencha cartão, validade, CVV e titular.';
-          show('CARDFORM_READY');
-        },
-        onSubmit: event => {
-          event.preventDefault();
-          ensureFixedAuxiliaryFields();
-          submit.disabled = true;
-          show('Gerando token e criando Order no sandbox…');
-
-          const data = cardForm.getCardFormData();
-          const payload = {
-            token: data.token,
-            payment_method_id: data.paymentMethodId || 'master',
-            installments: 1
-          };
-
-          if (!payload.token) {
-            show({
-              stage: 'token',
-              message: 'TOKEN_NOT_CREATED',
-              payment_method_id: payload.payment_method_id,
-              installments: 1
-            });
-            submit.disabled = false;
-            return;
-          }
-
-          fetch(config.order_endpoint, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'x-sandbox-confirmation': 'SANDBOX'
-            },
-            body: JSON.stringify(payload)
-          }).then(async response => {
-            const body = await response.json().catch(() => ({}));
-            const safe = {
-              http_status: response.status,
-              ok: body.ok === true,
-              order_id: body.provider?.id || null,
-              status: body.provider?.status || null,
-              status_detail: body.provider?.status_detail || null,
-              error: body.error?.code || null,
-              provider_error: body.error?.provider || null
-            };
-            show(safe);
-            if (!response.ok) throw new Error(body.error?.code || 'ORDER_FAILED');
-          }).catch(error => {
-            show({ stage: 'order', message: error.message });
-          }).finally(() => {
-            submit.disabled = false;
-          });
-        },
-        onFetching: resource => {
-          progress.classList.remove('hidden');
-          progress.removeAttribute('value');
-          mount.textContent = `Consultando Mercado Pago: ${resource || 'dados do cartão'}…`;
-          return () => {
-            progress.setAttribute('value', '0');
-            progress.classList.add('hidden');
-            ensureFixedAuxiliaryFields();
-            mount.textContent = 'Formulário carregado. Preencha cartão, validade, CVV e titular.';
-          };
-        }
-      }
-    });
+    mount.textContent = 'Campos seguros carregados. Preencha cartão, validade, CVV e titular.';
+    show('FIELDS_READY');
   } catch (error) {
-    mount.textContent = 'Não foi possível iniciar o sandbox.';
+    mount.textContent = 'Não foi possível iniciar os campos seguros.';
     show({ stage: 'initialization', message: error?.message || String(error) });
+    payButton.disabled = true;
   }
 })();
 </script>
