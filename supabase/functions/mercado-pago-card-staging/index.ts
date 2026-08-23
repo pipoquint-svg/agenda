@@ -1,9 +1,3 @@
-const htmlHeaders = {
-  'content-type': 'text/html; charset=utf-8',
-  'cache-control': 'no-store, max-age=0',
-  'x-robots-tag': 'noindex, nofollow, noarchive',
-}
-
 const jsonHeaders = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store, max-age=0',
@@ -65,93 +59,6 @@ function sanitizeOrder(raw: Record<string, unknown>) {
   }
 }
 
-function renderPage(publicKey: string): string {
-  const publicKeyJson = JSON.stringify(publicKey)
-  return `<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex,nofollow,noarchive" />
-  <title>BlackSheep · Mercado Pago Sandbox</title>
-  <script src="https://sdk.mercadopago.com/js/v2"></script>
-  <style>
-    body{font-family:Inter,system-ui,sans-serif;background:#f7f7f5;color:#171717;margin:0;padding:24px}
-    main{max-width:760px;margin:0 auto;background:#fff;border:1px solid #ddd;border-radius:16px;padding:24px}
-    h1{font-size:24px;margin:0 0 8px} p{line-height:1.45}.note{background:#f3f3ef;padding:14px;border-radius:10px;margin:16px 0}
-    code{background:#eee;padding:2px 5px;border-radius:4px}.status{white-space:pre-wrap;background:#111;color:#eee;border-radius:10px;padding:14px;min-height:48px;margin-top:16px;overflow:auto}
-    .ok{color:#176b2c}.warn{color:#8a4b00}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid div{background:#fafafa;border:1px solid #eee;padding:10px;border-radius:8px}
-    @media(max-width:640px){body{padding:12px}main{padding:16px}.grid{grid-template-columns:1fr}}
-  </style>
-</head>
-<body>
-<main>
-  <h1>Mercado Pago · cartão sandbox</h1>
-  <p>Origem HTTPS real no Supabase sandbox. Valor fixo: <strong>R$ 50,00</strong>. Nenhum cartão real deve ser usado.</p>
-  <div class="note">
-    <strong>Cartão de teste Mastercard</strong>
-    <div class="grid">
-      <div>Número: <code>5480 8328 0103 3311</code></div>
-      <div>CVV: <code>123</code></div>
-      <div>Validade: <code>11/30</code></div>
-      <div>CPF: <code>12345678909</code></div>
-    </div>
-    <p>Nome do titular: <code>APRO</code> para aprovado ou <code>OTHE</code> para recusado. E-mail: <code>test@testuser.com</code>.</p>
-  </div>
-  <p id="mount-status" class="warn">Carregando Card Payment Brick…</p>
-  <div id="cardPaymentBrick_container"></div>
-  <div id="result" class="status">MP_CARD_STAGING_READY</div>
-</main>
-<script>
-(async () => {
-  const result = document.getElementById('result');
-  const mountStatus = document.getElementById('mount-status');
-  const show = (value) => { result.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); };
-  try {
-    if (!window.MercadoPago) throw new Error('MercadoPago.js não carregou');
-    const mp = new MercadoPago(${publicKeyJson}, { locale: 'pt-BR' });
-    const bricksBuilder = mp.bricks();
-    const settings = {
-      initialization: { amount: 50 },
-      customization: { paymentMethods: { maxInstallments: 1 } },
-      callbacks: {
-        onReady: () => {
-          mountStatus.textContent = 'Brick pronto. Use somente os dados de teste acima.';
-          mountStatus.className = 'ok';
-          show('BRICK_READY');
-        },
-        onError: (error) => {
-          mountStatus.textContent = 'Erro no Brick';
-          show({ stage: 'brick', message: error?.message || String(error) });
-        },
-        onSubmit: (formData) => new Promise((resolve, reject) => {
-          show('Enviando token para Orders API sandbox…');
-          fetch(location.pathname + '?api=order', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-sandbox-confirmation': 'SANDBOX' },
-            body: JSON.stringify(formData),
-          })
-          .then(async (response) => {
-            const data = await response.json().catch(() => ({}));
-            show({ http_status: response.status, ...data });
-            if (!response.ok) throw new Error(data?.error?.message || data?.error?.code || 'ORDER_FAILED');
-            resolve(data);
-          })
-          .catch((error) => { show({ stage: 'order', message: error.message }); reject(error); });
-        }),
-      },
-    };
-    window.cardPaymentBrickController = await bricksBuilder.create('cardPayment', 'cardPaymentBrick_container', settings);
-  } catch (error) {
-    mountStatus.textContent = 'Falha ao montar o Brick';
-    show({ stage: 'mount', message: error?.message || String(error) });
-  }
-})();
-</script>
-</body>
-</html>`
-}
-
 Deno.serve(async (req: Request) => {
   try {
     assertSandbox()
@@ -159,11 +66,30 @@ Deno.serve(async (req: Request) => {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: jsonHeaders })
 
     const url = new URL(req.url)
-    if (req.method === 'GET' && url.searchParams.get('api') !== 'order') {
-      return new Response(renderPage(requiredEnv('MERCADO_PAGO_PUBLIC_KEY')), { status: 200, headers: htmlHeaders })
+    const api = url.searchParams.get('api')
+
+    if (req.method === 'GET' && api === 'config') {
+      return new Response(JSON.stringify({
+        ok: true,
+        marker: 'MP_CARD_STAGING_READY',
+        public_key: requiredEnv('MERCADO_PAGO_PUBLIC_KEY'),
+        amount: 50,
+        currency: 'BRL',
+        order_endpoint: `${url.origin}${url.pathname}?api=order`,
+        environment: 'sandbox',
+      }), { status: 200, headers: jsonHeaders })
     }
 
-    if (req.method !== 'POST' || url.searchParams.get('api') !== 'order') {
+    if (req.method === 'GET') {
+      return new Response(JSON.stringify({
+        ok: true,
+        marker: 'MP_CARD_STAGING_READY',
+        message: 'Use the visual staging frontend. API is healthy.',
+        config: `${url.origin}${url.pathname}?api=config`,
+      }), { status: 200, headers: jsonHeaders })
+    }
+
+    if (req.method !== 'POST' || api !== 'order') {
       return new Response(JSON.stringify({ error: { code: 'METHOD_NOT_ALLOWED' } }), { status: 405, headers: jsonHeaders })
     }
 
