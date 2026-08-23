@@ -127,6 +127,25 @@ async function recoverLeadByName(baseUrl: string, token: string, expectedName: s
   return Number.isInteger(id) && id > 0 ? id : null
 }
 
+async function ensureLeadContactLink(baseUrl: string, token: string, leadId: number, contactId: number): Promise<void> {
+  const filter = `filter[to_entity_id]=${contactId}&filter[to_entity_type]=contacts`
+  const payload = await kommoJson<any>(baseUrl, token, `/leads/${leadId}/links?${filter}`)
+  const links = payload?._embedded?.links ?? []
+  const alreadyLinked = links.some((link: any) =>
+    Number(link?.to_entity_id) === contactId && String(link?.to_entity_type ?? '') === 'contacts'
+  )
+  if (alreadyLinked) return
+
+  await kommoJson(baseUrl, token, `/leads/${leadId}/link`, {
+    method: 'POST',
+    body: JSON.stringify([{
+      to_entity_id: contactId,
+      to_entity_type: 'contacts',
+      metadata: { main_contact: true },
+    }]),
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
@@ -187,7 +206,6 @@ Deno.serve(async (req) => {
       name: leadName,
       pipeline_id: Number(settings.pipeline_id),
       status_id: stageId,
-      _embedded: { contacts: [{ id: contactId }] },
     }
 
     if (leadId) {
@@ -203,6 +221,8 @@ Deno.serve(async (req) => {
       leadId = created?._embedded?.leads?.[0]?.id ?? null
       if (!Number.isInteger(leadId) || Number(leadId) <= 0) throw new Error('KOMMO_LEAD_CREATE_INVALID_RESPONSE')
     }
+
+    await ensureLeadContactLink(baseUrl, token, Number(leadId), contactId)
 
     const now = new Date().toISOString()
     const { error: appointmentLinkError } = await client.from('kommo_appointment_links').upsert({
