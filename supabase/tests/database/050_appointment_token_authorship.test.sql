@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(27);
+select plan(29);
 
 insert into public.categories(id,name,slug)
 values ('96000000-0000-0000-0000-000000000001','Token Authorship','token-authorship-test');
