@@ -115,3 +115,6 @@ verify_jwt = false
 
 [functions.admin-pre-reservations]
 verify_jwt = false
+
+[functions.admin-read-models]
+verify_jwt = false
