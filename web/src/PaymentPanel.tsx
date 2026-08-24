@@ -10,7 +10,8 @@ import {
 } from './paymentApi'
 
 const publicKey = import.meta.env.VITE_MERCADO_PAGO_PUBLIC_KEY?.trim() ?? ''
-if (publicKey) initMercadoPago(publicKey, { locale: 'pt-BR' })
+const cardConfigured = publicKey.length > 0
+if (cardConfigured) initMercadoPago(publicKey, { locale: 'pt-BR' })
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -75,6 +76,15 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
   const [payment, setPayment] = useState<PaymentResponse | null>(null)
   const [confirmed, setConfirmed] = useState(false)
 
+  useEffect(() => {
+    if (!cardConfigured) {
+      console.error('[OPERATION_ALERT] CARD_PAYMENT_CONFIGURATION_MISSING', {
+        component: 'PaymentPanel',
+        configuration: 'mercado_pago_public_client_configuration',
+      })
+    }
+  }, [])
+
   async function reloadContext() {
     const next = await getPaymentContext(accessToken)
     setContext(next)
@@ -128,7 +138,6 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     const onMessage = (event: MessageEvent) => {
       const data = event.data && typeof event.data === 'object' ? event.data as Record<string, unknown> : null
       if (data?.status !== 'COMPLETE') return
-      // The iframe event is only a signal; provider Order state is always re-fetched server-side.
       syncCurrentPayment(providerId).catch(() => undefined)
     }
     window.addEventListener('message', onMessage)
@@ -237,8 +246,10 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
 
       <div className="payment-method-tabs" role="tablist" aria-label="Forma de pagamento">
         <button type="button" className={method === 'PIX' ? 'active' : ''} onClick={() => { setMethod('PIX'); setPayment(null) }}>PIX</button>
-        <button type="button" className={method === 'CARD' ? 'active' : ''} onClick={() => { setMethod('CARD'); setPayment(null) }}>Cartão</button>
+        <button type="button" className={method === 'CARD' ? 'active' : ''} disabled={!cardConfigured} aria-disabled={!cardConfigured} onClick={() => { if (!cardConfigured) return; setMethod('CARD'); setPayment(null) }}>Cartão</button>
       </div>
+
+      {!cardConfigured ? <div className="form-alert error" role="status">O pagamento por cartão está temporariamente indisponível. Você pode continuar pelo PIX.</div> : null}
 
       {method === 'PIX' ? (
         <div className="payment-method-body">
@@ -272,9 +283,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
           </div>
           {challenge?.external_resource_url ? (
             <ThreeDSChallenge externalResourceUrl={challenge.external_resource_url} />
-          ) : !publicKey ? (
-            <div className="form-alert error">Cartão será habilitado assim que a Public Key do Mercado Pago for configurada no ambiente.</div>
-          ) : (
+          ) : cardConfigured ? (
             <div className={busy ? 'card-brick busy' : 'card-brick'}>
               <CardPayment
                 key={`${kind}:${cardAmount}`}
@@ -284,7 +293,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
                 onError={() => setError('Não foi possível carregar ou validar o formulário de cartão.')}
               />
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
