@@ -36,6 +36,12 @@ insert into public.services (
   50.00
 );
 
+insert into public.service_change_policies(
+  service_id, notice_hours,
+  reschedule_first_early_percent, reschedule_first_late_percent,
+  reschedule_repeat_percent, cancellation_late_percent
+) values ('29000000-0000-0000-0000-000000000030', 48, 0, 20, 20, 20);
+
 insert into public.service_employees (id, service_id, employee_id)
 values (
   '29000000-0000-0000-0000-000000000040',
@@ -87,31 +93,9 @@ select public.public_create_checkout_hold_duration(
   '2035-01-15 09:00:00-03'::timestamptz
 ) as payload;
 
-select is(
-  (select payload->>'booking_page_slug' from duration_origin_hold),
-  'duration-origin-test',
-  'duration hold returns the originating booking page slug'
-);
-
-select is(
-  (
-    select ch.booking_page_id::text
-    from public.checkout_holds ch
-    where ch.id = ((select payload->>'checkout_hold_id' from duration_origin_hold))::uuid
-  ),
-  '29000000-0000-0000-0000-000000000050',
-  'duration hold persists booking_page_id'
-);
-
-select is(
-  (
-    select public.public_get_checkout_context(
-      (select payload->>'checkout_hold_token' from duration_origin_hold)
-    )->>'booking_page_slug'
-  ),
-  'duration-origin-test',
-  'checkout context accepts duration hold and preserves origin'
-);
+select is((select payload->>'booking_page_slug' from duration_origin_hold),'duration-origin-test','duration hold returns the originating booking page slug');
+select is((select ch.booking_page_id::text from public.checkout_holds ch where ch.id=((select payload->>'checkout_hold_id' from duration_origin_hold))::uuid),'29000000-0000-0000-0000-000000000050','duration hold persists booking_page_id');
+select is((select public.public_get_checkout_context((select payload->>'checkout_hold_token' from duration_origin_hold))->>'booking_page_slug'),'duration-origin-test','checkout context accepts duration hold and preserves origin');
 
 select * from finish();
 rollback;
