@@ -65,9 +65,11 @@ begin
 end;
 $$;
 
+-- Keep the production hardening contract: state-changing public RPCs are callable
+-- only through the Edge gateway, never directly from anon/authenticated clients.
 revoke all on function public.public_create_checkout_hold_duration(
   text, uuid, uuid, integer, jsonb, integer, timestamptz
-) from public;
+) from public, anon, authenticated;
 grant execute on function public.public_create_checkout_hold_duration(
   text, uuid, uuid, integer, jsonb, integer, timestamptz
-) to anon, authenticated;
+) to service_role;
