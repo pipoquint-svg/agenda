@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
 
     const timeline = [
       ...(auditResult.data ?? []).map((row) => ({ kind: 'AUDIT', occurred_at: row.created_at, ...row })),
-      ...(tokenEventsResult.data ?? []).map((row) => ({ kind: 'TOKEN_EVENT', occurred_at: row.occurred_at, ...row })),
+      ...(tokenEventsResult.data ?? []).map((row) => ({ kind: 'TOKEN_EVENT', ...row })),
     ].sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)))
 
     return json({
