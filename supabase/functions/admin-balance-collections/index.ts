@@ -32,7 +32,7 @@ function evidence(req: Request) {
 async function cancelCollectionProvider(input: {
   collectionId: string
   adminId: string
-  reason: 'SETTLED' | 'PARTIAL'
+  reason: 'SETTLED'
   evidence: ReturnType<typeof evidence>
 }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
   const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
@@ -114,13 +114,25 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message)
       const result = data && typeof data === 'object' ? data as Record<string, unknown> : {}
       const activeCollectionId = typeof result.active_collection_id === 'string' ? result.active_collection_id : null
+      const settled = result.settled === true
 
-      if (activeCollectionId) {
-        const settled = result.settled === true
+      // Human decision deliberately preserved: a partial in-person payment changes the
+      // reservation balance, but we do not cancel/reissue the existing provider charge
+      // until the commercial policy for that case is explicitly defined.
+      if (activeCollectionId && !settled) {
+        return json({
+          data: result,
+          partial_collection_policy_pending: true,
+          existing_collection_preserved: true,
+        }, 201)
+      }
+
+      // Full in-person settlement must invalidate any still-payable provider collection.
+      if (activeCollectionId && settled) {
         const cancellation = await cancelCollectionProvider({
           collectionId: activeCollectionId,
           adminId: admin.adminId,
-          reason: settled ? 'SETTLED' : 'PARTIAL',
+          reason: 'SETTLED',
           evidence: requestEvidence,
         })
         if (!cancellation.ok) {
@@ -130,23 +142,6 @@ Deno.serve(async (req) => {
             provider_cleanup_pending: true,
             data: result,
           }, 409)
-        }
-
-        if (!settled) {
-          const { data: reissued, error: reissueError } = await client.rpc('service_admin_reissue_balance_collection', {
-            p_appointment_id: appointmentId,
-            p_admin_id: admin.adminId,
-          })
-          if (reissueError) {
-            return json({
-              error: { code: reissueError.message.split(':')[0] },
-              payment_recorded: true,
-              prior_collection_cancelled: true,
-              balance_after: result.balance_after,
-              reissue_failed: true,
-            }, 409)
-          }
-          return json({ data: result, prior_collection_cancelled: true, collection_reissued: true, reissued }, 201)
         }
       }
 
