@@ -21,7 +21,6 @@ function actionError(error: unknown): string {
   if (code==='ADMIN_PERMISSION_DENIED') return 'Sua sessão não possui permissão para esta operação financeira.'
   if (code==='BALANCE_COLLECTION_STILL_ACTIVE') return 'Já existe uma cobrança ativa. Aguarde o vencimento antes de reemitir.'
   if (code==='BALANCE_COLLECTION_REISSUE_NOT_ALLOWED') return 'Esta cobrança ainda não está em um estado que permita reemissão.'
-  if (code==='BALANCE_COLLECTION_REISSUE_LIMIT_REACHED') return 'Esta reserva já atingiu o limite de duas reemissões de cobrança.'
   if (code==='BALANCE_PROVIDER_CLEANUP_PENDING') return 'Ainda existe uma cobrança anterior pendente no provedor. Resolva essa divergência antes de reemitir.'
   if (code==='MANUAL_PAYMENT_EXCEEDS_BALANCE') return 'O valor informado é maior que o saldo em aberto.'
   return 'Não foi possível concluir a operação financeira.'
@@ -72,13 +71,8 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
       const result=await recordManualBalancePayment({appointmentId:paymentRow.appointment_id,accessToken,amount:value,method})
       if(result.provider_cleanup_pending){
         setNotice('Pagamento presencial registrado, mas a cobrança do provedor não pôde ser cancelada. A divergência ficou registrada para resolução administrativa.')
-      }else if(result.reissue_failed){
-        const reason=result.error_code==='BALANCE_COLLECTION_REISSUE_LIMIT_REACHED'
-          ? 'O pagamento parcial foi registrado e a cobrança anterior foi cancelada, mas esta reserva já atingiu o limite de duas reemissões.'
-          : 'O pagamento parcial foi registrado e a cobrança anterior foi cancelada, mas a nova cobrança não pôde ser emitida. Revise a reserva no financeiro.'
-        setNotice(reason)
-      }else if(result.collection_reissued){
-        setNotice('Pagamento parcial registrado. A cobrança anterior foi cancelada e uma nova cobrança foi emitida pelo saldo atualizado, com validade de 48 horas.')
+      }else if(result.partial_collection_policy_pending){
+        setNotice('Pagamento parcial registrado e saldo atualizado. A cobrança existente foi preservada; o tratamento de cobrança após pagamento parcial aguarda definição comercial.')
       }else{
         setNotice('Pagamento presencial registrado e saldo atualizado.')
       }
@@ -101,29 +95,32 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
     <div className="dashboard-pending-list">
       {rows.map(row=>{
         const active=row.collection_status==='PENDING'
-        const remaining=Math.max(0,Number(row.reissues_remaining ?? 2))
-        const limitReached=remaining<=0
+        const terminal=row.collection_status==='EXPIRED'||row.collection_status==='CANCELLED_SETTLED'||row.collection_status==='CANCELLED_NO_SHOW'
+        const canReissue=terminal&&!active
+        const reissueTitle=active
+          ? `Cobrança ativa até ${dateTime(row.collection_expires_at)}`
+          : canReissue
+            ? 'Emitir novo link com validade de 48 horas'
+            : 'A reemissão só é permitida após o encerramento da cobrança anterior'
         return <article key={row.appointment_id}>
           <div>
             <strong>{row.customer_name ?? 'Cliente'}</strong>
             <span>{row.service_name ?? row.public_code ?? 'Reserva'}</span>
             <small>Atendimento: {dateTime(row.start_at)}</small>
-            {row.appointment_status==='NO_SHOW'?<small>Não comparecimento: locação considerada realizada para fins financeiros.</small>:null}
           </div>
           <div>
             <span>Total: {money(row.total_value)}</span>
             <span>Pago: {money(row.paid_value)}</span>
             <strong>Em aberto: {money(row.balance_value)}</strong>
             {active?<small>Cobrança ativa até {dateTime(row.collection_expires_at)}</small>:<small>{row.collection_status==='EXPIRED'?'Cobrança vencida':'Sem cobrança ativa'}</small>}
-            <small>Reemissões disponíveis: {remaining} de 2</small>
           </div>
           <div className="agenda-header-actions">
             <button className="secondary" type="button" onClick={()=>openPayment(row)}>Registrar pagamento presencial</button>
             <button
               className="secondary"
               type="button"
-              disabled={active||limitReached}
-              title={active?`Cobrança ativa até ${dateTime(row.collection_expires_at)}`:limitReached?'Limite de duas reemissões atingido':'Emitir novo link por 48 horas'}
+              disabled={!canReissue}
+              title={reissueTitle}
               onClick={()=>void reissue(row)}
             >Reemitir cobrança</button>
           </div>
@@ -137,7 +134,7 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
       <p>{paymentRow.customer_name ?? 'Cliente'} · saldo atual {money(paymentRow.balance_value)}</p>
       <label><span>Valor recebido</span><input inputMode="decimal" required value={amount} onChange={event=>setAmount(event.target.value)} /></label>
       <label><span>Forma</span><select value={method} onChange={event=>setMethod(event.target.value as 'CASH'|'OTHER')}><option value="CASH">Dinheiro</option><option value="OTHER">Outra forma presencial</option></select></label>
-      <p className="field-help">Se o pagamento for parcial, a cobrança ativa será cancelada e uma nova será emitida pelo saldo restante.</p>
+      <p className="field-help">Pagamento integral encerra o saldo e cancela uma cobrança ainda viva no provedor. Em pagamento parcial, o saldo é atualizado e a cobrança existente é preservada até definição da política comercial.</p>
       <div className="agenda-header-actions"><button className="primary" type="submit">Registrar pagamento</button><button className="secondary" type="button" onClick={()=>setPaymentRow(null)}>Cancelar</button></div>
     </form>:null}
   </section>
