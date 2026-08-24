@@ -35,7 +35,13 @@ jobs:
           PY
           chmod +x /tmp/run-browser.sh
       - name: Executar APRO e OTHE no staging HTTPS
-        run: /tmp/run-browser.sh
+        run: |
+          mkdir -p evidence
+          set +e
+          /tmp/run-browser.sh > evidence/mp-browser-run.log 2>&1
+          code=$?
+          cat evidence/mp-browser-run.log
+          exit $code
       - name: Persist evidence
         if: always()
         env:
