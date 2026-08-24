@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   provider:
@@ -80,3 +81,24 @@ jobs:
           [[ "$code" == "402" ]]
           jq -e '.errors[]? | select(.code == "failed")' /tmp/order-othe.json >/dev/null
           echo "CARD_OTHE_PROVIDER_PASS"
+
+  official-browser-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Dispatch official browser gate on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          before=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mercado-pago-staging-browser-gate.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+          gh workflow run mercado-pago-staging-browser-gate.yml --repo "$GITHUB_REPOSITORY" --ref main
+          id=""
+          for i in $(seq 1 30); do
+            candidate=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mercado-pago-staging-browser-gate.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+            if [[ "$candidate" != "0" && "$candidate" != "$before" ]]; then id="$candidate"; break; fi
+            sleep 2
+          done
+          [[ -n "$id" ]] || { echo "Browser workflow run not found" >&2; exit 1; }
+          echo "OFFICIAL_BROWSER_RUN_ID=$id"
+          gh run watch "$id" --repo "$GITHUB_REPOSITORY" --exit-status
