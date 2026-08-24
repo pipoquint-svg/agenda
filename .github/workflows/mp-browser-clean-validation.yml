@@ -30,6 +30,7 @@ jobs:
           s=open(p).read()
           s=s.replace('for (let i = 0; i < 12; i++) {', 'for (let i = 0; i < 60; i++) {')
           s=s.replace('/pagar|pagamento|confirmar|reservar|finalizar|continuar/i.test(text)', '/criar reserva|pagar|pagamento|confirmar|reservar|finalizar|continuar/i.test(text)')
+          s=s.replace("{ name: /pagar|pay|continuar|processar|confirmar/i }", "{ name: /^(pagar|pay|processar|confirmar)$/i }")
           open(p,'w').write(s)
           PY
           xvfb-run -a node scripts/mp-browser-clean-gate.mjs
