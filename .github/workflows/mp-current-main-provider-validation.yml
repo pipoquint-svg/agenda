@@ -1,151 +1,31 @@
-name: MP Current Main Provider Validation
+name: MP Current Main Remote Gate
 
 on:
-  push:
-    branches:
-      - audit/mp-current-main-validation-20260824
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
-  provider:
+  dispatch-browser:
     runs-on: ubuntu-latest
-    environment: sandbox
-    timeout-minutes: 12
-    env:
-      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
-      ALLOW_REAL_CHARGES: "false"
-      ALLOW_REAL_CUSTOMER_DATA: "false"
+    timeout-minutes: 25
     steps:
-      - name: Safety gates
+      - name: Dispatch and wait official Mercado Pago browser gate
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [[ "$ALLOW_REAL_CHARGES" == "false" ]]
-          [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]]
-          [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]]
-
-      - name: PIX Orders API creation, GET and idempotency
-        run: |
-          set -euo pipefail
-          ext="audit-pix-${GITHUB_RUN_ID}"
-          key="audit-pix-key-${GITHUB_RUN_ID}"
-          cat >/tmp/pix.json <<JSON
-          {"type":"online","external_reference":"$ext","processing_mode":"automatic","total_amount":"50.00","payer":{"email":"test_user_br@testuser.com","first_name":"APRO"},"transactions":{"payments":[{"amount":"50.00","payment_method":{"id":"pix","type":"bank_transfer"}}]}}
-          JSON
-          code=$(curl -sS -o /tmp/pix-create.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $key" --data @/tmp/pix.json)
-          [[ "$code" == "200" || "$code" == "201" ]]
-          id=$(jq -r '.id // empty' /tmp/pix-create.json); [[ -n "$id" ]]
-          [[ "$(jq -r '.status' /tmp/pix-create.json)" == "action_required" ]]
-          [[ "$(jq -r '.status_detail' /tmp/pix-create.json)" == "waiting_transfer" ]]
-          jq -e '.transactions.payments | length == 1' /tmp/pix-create.json >/dev/null
-          code=$(curl -sS -o /tmp/pix-get.json -w '%{http_code}' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" "https://api.mercadopago.com/v1/orders/$id")
-          [[ "$code" == "200" ]]
-          [[ "$(jq -r '.id' /tmp/pix-get.json)" == "$id" ]]
-          code=$(curl -sS -o /tmp/pix-replay.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $key" --data @/tmp/pix.json)
-          [[ "$code" == "200" || "$code" == "201" ]]
-          [[ "$(jq -r '.id' /tmp/pix-replay.json)" == "$id" ]]
-
-      - name: Approved card APRO
-        run: |
-          set -euo pipefail
-          jq -n '{card_number:"5480832801033311",expiration_month:11,expiration_year:2030,security_code:"123",cardholder:{name:"APRO",identification:{type:"CPF",number:"12345678909"}}}' >/tmp/card.json
-          code=$(curl -sS -o /tmp/card-token.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/card_tokens -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' --data @/tmp/card.json)
-          [[ "$code" == "200" || "$code" == "201" ]]
-          tok=$(jq -r '.id // empty' /tmp/card-token.json); [[ -n "$tok" ]]
-          ext="audit-card-apro-${GITHUB_RUN_ID}"
-          jq -n --arg e "$ext" --arg t "$tok" '{type:"online",processing_mode:"automatic",capture_mode:"automatic",external_reference:$e,total_amount:"50.00",payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$t,installments:1}}]}}' >/tmp/order.json
-          code=$(curl -sS -o /tmp/order-apro.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $ext" --data @/tmp/order.json)
-          [[ "$code" == "200" || "$code" == "201" ]]
-          [[ "$(jq -r '.status' /tmp/order-apro.json)" == "processed" ]]
-          [[ "$(jq -r '.status_detail' /tmp/order-apro.json)" == "accredited" ]]
-
-      - name: Rejected card OTHE
-        run: |
-          set -euo pipefail
-          jq -n '{card_number:"5480832801033311",expiration_month:11,expiration_year:2030,security_code:"123",cardholder:{name:"OTHE",identification:{type:"CPF",number:"12345678909"}}}' >/tmp/card.json
-          code=$(curl -sS -o /tmp/card-token.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/card_tokens -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' --data @/tmp/card.json)
-          [[ "$code" == "200" || "$code" == "201" ]]
-          tok=$(jq -r '.id // empty' /tmp/card-token.json); [[ -n "$tok" ]]
-          ext="audit-card-othe-${GITHUB_RUN_ID}"
-          jq -n --arg e "$ext" --arg t "$tok" '{type:"online",processing_mode:"automatic",capture_mode:"automatic",external_reference:$e,total_amount:"50.00",payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$t,installments:1}}]}}' >/tmp/order.json
-          code=$(curl -sS -o /tmp/order-othe.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $ext" --data @/tmp/order.json)
-          [[ "$code" == "402" ]]
-          jq -e '.errors[]? | select(.code == "failed")' /tmp/order-othe.json >/dev/null
-
-  corrected-browser:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - name: Install Playwright
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/mp-browser
-          cd /tmp/mp-browser
-          npm init -y >/dev/null
-          npm install playwright@1.55.0 >/dev/null
-          npx playwright install --with-deps chromium >/dev/null
-      - name: Extract official harness and patch only journey order
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          src = Path('.github/workflows/mercado-pago-staging-browser-gate.yml').read_text()
-          start = src.index("cat > /tmp/mp-browser/gate.mjs <<'EOF'") + len("cat > /tmp/mp-browser/gate.mjs <<'EOF'\n")
-          end = src.index('\n          EOF', start)
-          js = src[start:end]
-          js = '\n'.join(line[10:] if line.startswith('          ') else line for line in js.splitlines()) + '\n'
-          old = """  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-  await page.getByLabel('Quantidade de pessoas').waitFor();
-  await page.getByRole('button', {name:'Continuar'}).click();
-  await page.getByText('Extras', {exact:true}).waitFor();
-  await page.getByRole('button', {name:'Continuar'}).click();
-
-  const day = page.locator('button[role=\"gridcell\"]:not([disabled])').first();
-  await day.waitFor({state:'visible', timeout:45000});
-  await day.click();
-  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
-  await time.waitFor({state:'visible', timeout:20000});
-  await time.click();
-  await page.getByRole('button', {name:'Reservar este horário'}).click();
-"""
-          new = """  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-
-  const day = page.locator('button[role=\"gridcell\"]:not([disabled])').first();
-  await day.waitFor({state:'visible', timeout:45000});
-  await day.click();
-  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
-  await time.waitFor({state:'visible', timeout:20000});
-  await time.click();
-  await page.getByRole('button', {name:'Reservar este horário'}).click();
-
-  await page.getByLabel('Quantidade de pessoas').waitFor({timeout:20000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-  await page.getByText('Extras', {exact:true}).waitFor({timeout:20000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-"""
-          if old not in js: raise SystemExit('official harness shape changed')
-          Path('/tmp/mp-browser/gate.mjs').write_text(js.replace(old, new))
-          PY
-      - name: Run corrected browser scenarios
-        run: |
-          set -euo pipefail
-          cd /tmp/mp-browser
-          xvfb-run -a node gate.mjs
-      - name: Upload browser evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mp-current-main-browser-corrected
-          path: /tmp/mp-browser/*.png
-          if-no-files-found: ignore
+          before=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mercado-pago-staging-browser-gate.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+          gh workflow run mercado-pago-staging-browser-gate.yml --repo "$GITHUB_REPOSITORY" --ref main
+          run_id=""
+          for i in $(seq 1 30); do
+            candidate=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mercado-pago-staging-browser-gate.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+            if [[ "$candidate" != "0" && "$candidate" != "$before" ]]; then run_id="$candidate"; break; fi
+            sleep 2
+          done
+          [[ -n "$run_id" ]] || { echo "Official browser run not found" >&2; exit 1; }
+          echo "OFFICIAL_BROWSER_RUN_ID=$run_id"
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
