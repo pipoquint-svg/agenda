@@ -17,8 +17,13 @@ insert into public.services(
   ('96200000-0000-0000-0000-000000000003', '96200000-0000-0000-0000-000000000001',
    'Com Política', 'com-politica-publicacao', 60, 100, 1, 3, 365);
 
-insert into public.service_change_policies(service_id)
-values ('96200000-0000-0000-0000-000000000003');
+insert into public.service_change_policies(
+  service_id, notice_hours,
+  reschedule_first_early_percent, reschedule_first_late_percent,
+  reschedule_repeat_percent, cancellation_late_percent
+) values (
+  '96200000-0000-0000-0000-000000000003', 48, 0, 20, 20, 20
+);
 
 select throws_ok(
   $$
