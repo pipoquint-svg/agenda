@@ -3,7 +3,7 @@ import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
+  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
   'access-control-allow-methods': 'POST, OPTIONS',
 }
 
@@ -49,6 +49,23 @@ Deno.serve(async (req) => {
     const coupon = typeof body?.coupon_code === 'string' ? body.coupon_code.trim() || null : null
     const ip = requestIp(req)
     const userAgent = (req.headers.get('user-agent') ?? '').slice(0, 500) || null
+    const requestId = (() => {
+      const supplied = req.headers.get('x-request-id')?.trim() ?? ''
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(supplied)
+        ? supplied
+        : crypto.randomUUID()
+    })()
+
+    const { error: accessError } = await client.rpc('service_public_check_customer_access', {
+      p_checkout_hold_token: token,
+      p_ip: ip,
+      p_user_agent: userAgent ?? '',
+      p_request_id: requestId,
+    })
+    if (accessError) {
+      const code = accessError.message.match(/(ONLINE_BOOKING_NOT_AVAILABLE|FREE_VISIT_NOT_AVAILABLE|FREE_VISIT_ACTIVE_LIMIT_REACHED|CHECKOUT_CUSTOMER_REQUIRED)/)?.[1]
+      throw new Error(code ?? 'CHECKOUT_ACCESS_CHECK_FAILED')
+    }
 
     const { data, error } = await client.rpc('service_submit_public_checkout', {
       p_checkout_hold_token: token,
@@ -60,7 +77,7 @@ Deno.serve(async (req) => {
     })
 
     if (error) {
-      const known = error.message.match(/(CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_CUSTOMER_REQUIRED|REQUIRED_SERVICE_FIELDS_MISSING|INVALID_SERVICE_ANSWERS|INVALID_SERVICE_ANSWER_VALUE|TERMS_NOT_ACCEPTED|TERMS_CONFIGURATION_MISSING|INVALID_COUPON|COUPON_USAGE_LIMIT_REACHED|COUPON_CUSTOMER_MISMATCH|COUPON_PACKAGE_POLICY_REQUIRES_DECISION)/)?.[1]
+      const known = error.message.match(/(CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_CUSTOMER_REQUIRED|REQUIRED_SERVICE_FIELDS_MISSING|INVALID_SERVICE_ANSWERS|INVALID_SERVICE_ANSWER_VALUE|TERMS_NOT_ACCEPTED|TERMS_CONFIGURATION_MISSING|INVALID_COUPON|COUPON_USAGE_LIMIT_REACHED|COUPON_CUSTOMER_MISMATCH|COUPON_PACKAGE_POLICY_REQUIRES_DECISION|ONLINE_BOOKING_NOT_AVAILABLE|FREE_VISIT_NOT_AVAILABLE|FREE_VISIT_ACTIVE_LIMIT_REACHED)/)?.[1]
       throw new Error(known ?? `CHECKOUT_SUBMIT_FAILED:${error.message}`)
     }
 
@@ -68,10 +85,14 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CHECKOUT_SUBMIT_FAILED'
     const publicCode = code.split(':')[0]
-    const status = publicCode === 'RATE_LIMITED' ? 429
-      : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
-      : publicCode === 'CHECKOUT_HOLD_NOT_ACTIVE' ? 409
+    const neutral = ['ONLINE_BOOKING_NOT_AVAILABLE', 'FREE_VISIT_NOT_AVAILABLE'].includes(publicCode)
+      ? 'ONLINE_BOOKING_NOT_AVAILABLE'
+      : publicCode
+    const status = neutral === 'RATE_LIMITED' ? 429
+      : neutral === 'RATE_LIMIT_BACKEND_FAILED' ? 503
+      : neutral === 'CHECKOUT_HOLD_NOT_ACTIVE' ? 409
+      : neutral === 'ONLINE_BOOKING_NOT_AVAILABLE' ? 403
       : 400
-    return response({ error: { code: publicCode } }, status)
+    return response({ error: { code: neutral } }, status)
   }
 })
