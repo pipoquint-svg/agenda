@@ -21,25 +21,16 @@ function cpfFrom9(s) {
 
 function identity(name) {
   const raw = String(Date.now()) + (name === 'APRO' ? '1' : '2');
-  return {
-    email: `mp-${name.toLowerCase()}-${raw}@example.com`,
-    phone: `489${raw.slice(-8)}`,
-    cpf: cpfFrom9(raw.slice(-9)),
-  };
+  return { email: `mp-${name.toLowerCase()}-${raw}@example.com`, phone: `489${raw.slice(-8)}`, cpf: cpfFrom9(raw.slice(-9)) };
 }
 
-async function pageText(page) {
-  return page.locator('body').innerText().catch(() => '');
-}
+async function pageText(page) { return page.locator('body').innerText().catch(() => ''); }
 
 async function clickVisible(page, name) {
   const buttons = page.getByRole('button', { name, exact: true });
   for (let i = 0; i < await buttons.count(); i++) {
     const b = buttons.nth(i);
-    if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) {
-      await b.click();
-      return true;
-    }
+    if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) { await b.click(); return true; }
   }
   return false;
 }
@@ -48,13 +39,11 @@ async function chooseAndHold(page) {
   const days = page.locator('button[role="gridcell"]:not([disabled])');
   await days.first().waitFor({ state: 'visible', timeout: 30000 });
   const max = Math.min(await days.count(), 24);
-
   for (let d = 0; d < max; d++) {
     const day = days.nth(d);
     if (!await day.isVisible().catch(() => false)) continue;
     await day.click().catch(() => {});
     await sleep(800);
-
     const times = page.getByRole('button', { name: /^\d{2}:\d{2}$/ });
     for (let i = 0; i < await times.count(); i++) {
       const t = times.nth(i);
@@ -63,7 +52,6 @@ async function chooseAndHold(page) {
       const reserve = page.getByRole('button', { name: 'Reservar este horário' });
       if (!await reserve.isEnabled().catch(() => false)) continue;
       await reserve.click();
-
       for (let n = 0; n < 30; n++) {
         const body = await pageText(page);
         if (/Horário reservado temporariamente para você por|Quantas pessoas estarão no estúdio|Seus dados/i.test(body)) return;
@@ -84,13 +72,28 @@ async function advanceToCustomer(page) {
   for (let i = 0; i < 12; i++) {
     const body = await pageText(page);
     if (/Seus dados\s+Nome completo\s+E-mail\s+WhatsApp/i.test(body)) return;
-    if (await clickVisible(page, 'Continuar')) {
-      await sleep(650);
-      continue;
-    }
+    if (await clickVisible(page, 'Continuar')) { await sleep(650); continue; }
     await sleep(500);
   }
   throw new Error('CUSTOMER_STEP_NOT_REACHED');
+}
+
+async function waitForReview(page) {
+  for (let i = 0; i < 60; i++) {
+    const body = await pageText(page);
+    const saving = /Salvando…|Salvando\.\.\./i.test(body);
+    const customerButton = page.getByRole('button', { name: /Continuar para a revisão/i });
+    let customerButtonVisible = false;
+    for (let j = 0; j < await customerButton.count(); j++) {
+      if (await customerButton.nth(j).isVisible().catch(() => false)) { customerButtonVisible = true; break; }
+    }
+    const visibleInputs = page.locator('input:visible');
+    const inputCount = await visibleInputs.count();
+    if (!saving && !customerButtonVisible && inputCount < 4 && /Revisão/i.test(body)) return;
+    if (/Revise os dados informados e tente novamente/i.test(body)) throw new Error('CUSTOMER_SAVE_REJECTED');
+    await sleep(250);
+  }
+  throw new Error('REVIEW_TRANSITION_TIMEOUT');
 }
 
 async function fillCustomer(page, name, id) {
@@ -105,12 +108,12 @@ async function fillCustomer(page, name, id) {
   await visible[1].fill(id.email);
   await visible[2].fill(id.phone);
   await visible[3].fill(id.cpf);
-
   const btn = page.getByRole('button', { name: /Continuar para a revisão/i });
   for (let i = 0; i < await btn.count(); i++) {
     const b = btn.nth(i);
     if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) {
       await b.click();
+      await waitForReview(page);
       return;
     }
   }
@@ -118,12 +121,8 @@ async function fillCustomer(page, name, id) {
 }
 
 async function fillReview(page) {
-  for (const e of await page.locator('input[type=checkbox]').all()) {
-    if (await e.isVisible().catch(() => false) && await e.isEnabled().catch(() => false) && !await e.isChecked().catch(() => false)) await e.check();
-  }
-  for (const e of await page.locator('textarea').all()) {
-    if (await e.isVisible().catch(() => false) && !(await e.inputValue()).trim()) await e.fill('Teste HTTPS Mercado Pago');
-  }
+  for (const e of await page.locator('input[type=checkbox]').all()) if (await e.isVisible().catch(() => false) && await e.isEnabled().catch(() => false) && !await e.isChecked().catch(() => false)) await e.check();
+  for (const e of await page.locator('textarea').all()) if (await e.isVisible().catch(() => false) && !(await e.inputValue()).trim()) await e.fill('Teste HTTPS Mercado Pago');
   for (const e of await page.locator('select').all()) {
     if (!await e.isVisible().catch(() => false)) continue;
     const opts = await e.locator('option').evaluateAll((ns) => ns.map((x) => ({ v: x.value, d: x.disabled })).filter((x) => x.v && !x.d));
@@ -139,10 +138,7 @@ async function submitReview(page) {
     if (!await b.isVisible().catch(() => false) || !await b.isEnabled().catch(() => false)) continue;
     const text = (await b.innerText().catch(() => '')).trim();
     labels.push(text);
-    if (/pagar|pagamento|confirmar|reservar|finalizar|continuar/i.test(text) && !/voltar|tentar novamente|reserve agora/i.test(text)) {
-      await b.click();
-      return;
-    }
+    if (/pagar|pagamento|confirmar|reservar|finalizar|continuar/i.test(text) && !/voltar|tentar novamente|reserve agora/i.test(text)) { await b.click(); return; }
   }
   console.log('REVIEW_VISIBLE_BUTTONS=' + JSON.stringify(labels));
   throw new Error('NO_REVIEW_SUBMIT');
@@ -159,15 +155,7 @@ function classify(m, u) {
   return null;
 }
 
-async function meta(e) {
-  return e.evaluate((x) => ({
-    name: x.getAttribute('name') || '',
-    id: x.id || '',
-    placeholder: x.getAttribute('placeholder') || '',
-    autocomplete: x.getAttribute('autocomplete') || '',
-    aria: x.getAttribute('aria-label') || '',
-  }));
-}
+async function meta(e) { return e.evaluate((x) => ({ name: x.getAttribute('name') || '', id: x.id || '', placeholder: x.getAttribute('placeholder') || '', autocomplete: x.getAttribute('autocomplete') || '', aria: x.getAttribute('aria-label') || '' })); }
 
 async function fillBrick(page, name, id) {
   if (await page.getByText('Pagamento com cartão indisponível no momento', { exact: false }).isVisible().catch(() => false)) throw new Error('PUBLIC_KEY_UNAVAILABLE');
@@ -199,10 +187,7 @@ async function fillBrick(page, name, id) {
           const buttons = frame.getByRole('button', { name: /pagar|pay|continuar|processar|confirmar/i });
           for (let i = 0; i < await buttons.count(); i++) {
             const b = buttons.nth(i);
-            if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) {
-              await b.click();
-              return;
-            }
+            if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) { await b.click(); return; }
           }
         } catch {}
       }
@@ -221,19 +206,18 @@ async function reach(page, name, id) {
   await chooseAndHold(page);
   await advanceToCustomer(page);
   await fillCustomer(page, name, id);
-  await page.getByText(/Revisão/i).first().waitFor({ timeout: 30000 });
   await fillReview(page);
   await submitReview(page);
-  await page.getByText('Pagamento', { exact: true }).waitFor({ timeout: 30000 });
+  for (let i = 0; i < 60; i++) {
+    const body = await pageText(page);
+    if (/Pagamento/i.test(body) && /Cartão|PIX/i.test(body)) break;
+    await sleep(250);
+  }
   const cards = page.getByRole('button', { name: 'Cartão' });
   let clicked = false;
   for (let i = 0; i < await cards.count(); i++) {
     const b = cards.nth(i);
-    if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) {
-      await b.click();
-      clicked = true;
-      break;
-    }
+    if (await b.isVisible().catch(() => false) && await b.isEnabled().catch(() => false)) { await b.click(); clicked = true; break; }
   }
   if (!clicked) throw new Error('CARD_OPTION_NOT_AVAILABLE');
   await page.waitForTimeout(4000);
@@ -243,9 +227,7 @@ async function scenario(name) {
   const id = identity(name);
   const browser = await chromium.launch({ headless: false });
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-  page.on('response', async (r) => {
-    if (r.status() >= 400 && /supabase|functions|mercado/i.test(r.url())) console.log(`HTTP_ERROR ${r.status()} ${r.url()} ${(await r.text().catch(() => '')).slice(0, 800)}`);
-  });
+  page.on('response', async (r) => { if (r.status() >= 400 && /supabase|functions|mercado/i.test(r.url())) console.log(`HTTP_ERROR ${r.status()} ${r.url()} ${(await r.text().catch(() => '')).slice(0, 800)}`); });
   try {
     await reach(page, name, id);
     await fillBrick(page, name, id);
@@ -261,9 +243,7 @@ async function scenario(name) {
     console.log(`${name}_PAGE_TEXT=` + (await pageText(page)).slice(0, 7000));
     await page.screenshot({ path: `/tmp/mp-browser/${name.toLowerCase()}-failure.png`, fullPage: true }).catch(() => {});
     throw e;
-  } finally {
-    await browser.close();
-  }
+  } finally { await browser.close(); }
 }
 
 await scenario('APRO');
