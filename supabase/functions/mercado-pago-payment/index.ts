@@ -116,8 +116,10 @@ function providerRuntime(options: { creatingCharge?: boolean } = {}) {
 }
 
 function providerPayerEmail(contextEmail: string): string {
-  const runtime = providerRuntime()
-  return runtime.environment === 'sandbox' ? 'test@testuser.com' : contextEmail
+  // Keep the payer identity consistent between Brick tokenization and Orders API.
+  // Sandbox/test behavior is controlled by test credentials and cardholder test data,
+  // never by replacing the customer's email after the token has been created.
+  return contextEmail
 }
 
 function providerPaymentsConfigured(): boolean {
@@ -430,8 +432,6 @@ Deno.serve(async (req) => {
       description: providerDescription,
       total_amount: amount,
       payer: {
-        // Orders API test-card purchases require Mercado Pago's canonical test email.
-        // This adapter never mutates the reservation/customer data and is sandbox-only.
         email: providerPayerEmail(context.payer.email),
         identification,
       },
