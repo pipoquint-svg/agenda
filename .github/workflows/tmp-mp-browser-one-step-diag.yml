@@ -1,0 +1,46 @@
+name: TMP Mercado Pago Browser One Step Diagnostic
+on:
+  push:
+    branches: [test/mp-browser-direct-current]
+    paths: [.github/workflows/tmp-mp-browser-one-step-diag.yml]
+permissions:
+  contents: write
+env:
+  STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diagnose and run without early abort
+        run: |
+          set +e
+          rm -rf evidence-current /tmp/mp-browser-current
+          mkdir -p evidence-current /tmp/mp-browser-current
+          echo "$GITHUB_SHA" > evidence-current/run-sha.txt
+          chrome=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          echo "chrome=$chrome code=$?" > evidence-current/01-chrome.txt
+          cp scripts/tmp-mp-browser-current.mjs /tmp/mp-browser-current/gate.mjs
+          echo "copy=$?" > evidence-current/02-copy.txt
+          cd /tmp/mp-browser-current
+          npm init -y > "$GITHUB_WORKSPACE/evidence-current/03-npm-init.log" 2>&1
+          echo "$?" > "$GITHUB_WORKSPACE/evidence-current/03-npm-init.exit"
+          npm install playwright@1.55.0 > "$GITHUB_WORKSPACE/evidence-current/04-npm-install.log" 2>&1
+          npm_code=$?
+          echo "$npm_code" > "$GITHUB_WORKSPACE/evidence-current/04-npm-install.exit"
+          command -v xvfb-run > "$GITHUB_WORKSPACE/evidence-current/05-xvfb.txt" 2>&1
+          echo "$?" > "$GITHUB_WORKSPACE/evidence-current/05-xvfb.exit"
+          export CHROME_PATH="$chrome"
+          xvfb-run -a node gate.mjs > "$GITHUB_WORKSPACE/evidence-current/06-browser.log" 2>&1
+          browser_code=$?
+          echo "$browser_code" > "$GITHUB_WORKSPACE/evidence-current/06-browser.exit"
+          cp /tmp/mp-browser-current/*.png "$GITHUB_WORKSPACE/evidence-current/" 2>/dev/null
+          exit 0
+      - name: Persist diagnostic
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add evidence-current
+          git commit -m 'test: persistir diagnóstico completo browser gate' || true
+          git push
