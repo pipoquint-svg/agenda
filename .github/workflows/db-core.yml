@@ -46,9 +46,10 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Gate autonomous appointment hold expiry wiring
+      - name: Gate autonomous expiry wiring
         run: |
           grep -Fq "client.rpc('expire_due_appointment_holds')" supabase/functions/integration-worker/index.ts
+          grep -Fq "client.rpc('expire_unconfirmed_free_visits')" supabase/functions/integration-worker/index.ts
           grep -Fq "PAYMENT_AFTER_EXPIRATION" supabase/tests/database/009_payment_state_machine.test.sql
 
       - name: Setup Supabase CLI
