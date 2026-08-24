@@ -63,6 +63,18 @@ function dataIdFrom(url: URL, body: Record<string, unknown>): string {
   return data?.id == null ? '' : String(data.id)
 }
 
+function signatureTimestamp(signature: string): string | null {
+  const match = signature.match(/(?:^|,)\s*ts=([^,]+)/)
+  const value = match?.[1]?.trim() ?? ''
+  return /^\d{1,20}$/.test(value) ? value : null
+}
+
+function safeRequestId(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return trimmed.length <= 12 ? trimmed : `${trimmed.slice(0, 12)}…`
+}
+
 async function tryImmediateConfirmationEmail(
   client: ReturnType<typeof adminClient>,
   appointmentId: string,
@@ -144,7 +156,19 @@ Deno.serve(async (req) => {
   const dataId = dataIdFrom(url, body)
   const signature = req.headers.get('x-signature') ?? ''
   const requestId = req.headers.get('x-request-id') ?? ''
-  if (!dataId || !signature || !requestId) return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_REQUIRED' } }, 401)
+  const type = typeof body.type === 'string' ? body.type : ''
+  const liveMode = typeof body.live_mode === 'boolean' ? body.live_mode : null
+
+  if (!dataId || !signature || !requestId) {
+    console.error('[OPERATION_ALERT] MERCADO_PAGO_WEBHOOK_SIGNATURE_COMPONENT_MISSING', {
+      has_data_id: Boolean(dataId),
+      has_signature: Boolean(signature),
+      has_request_id: Boolean(requestId),
+      event_type: type || null,
+      live_mode: liveMode,
+    })
+    return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_REQUIRED' } }, 401)
+  }
 
   try {
     const valid = await verifyMercadoPagoWebhookSignature({
@@ -153,9 +177,18 @@ Deno.serve(async (req) => {
       dataId,
       secret: requiredEnv('MERCADO_PAGO_WEBHOOK_SECRET'),
     })
-    if (!valid) return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_INVALID' } }, 401)
+    if (!valid) {
+      console.error('[OPERATION_ALERT] MERCADO_PAGO_WEBHOOK_SIGNATURE_INVALID', {
+        data_id: dataId,
+        data_id_alphanumeric: /[A-Za-z]/.test(dataId),
+        request_id_prefix: safeRequestId(requestId),
+        signature_ts: signatureTimestamp(signature),
+        event_type: type || null,
+        live_mode: liveMode,
+      })
+      return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_INVALID' } }, 401)
+    }
 
-    const type = typeof body.type === 'string' ? body.type : ''
     if (type && type !== 'order' && type !== 'orders') {
       return json({ ok: true, ignored: 'UNSUPPORTED_EVENT_TYPE' })
     }
