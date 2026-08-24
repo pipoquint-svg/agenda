@@ -30,7 +30,7 @@ function requiredIso(url: URL, key: string): string {
 
 function redactFinancialPendingItems(data: unknown): unknown {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data
-  const output = { ...(data as Record<string, unknown>) }
+  const output: Record<string, unknown> = { ...(data as Record<string, unknown>) }
   if (Array.isArray(output.pending_items)) {
     output.pending_items = output.pending_items.filter((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return true
@@ -65,9 +65,9 @@ Deno.serve(async (req) => {
     })
     if (error) throw new Error(error.message)
 
-    const output = data && typeof data === 'object' && !Array.isArray(data)
+    const output: Record<string, unknown> = data && typeof data === 'object' && !Array.isArray(data)
       ? { ...(data as Record<string, unknown>) }
-      : { pending_items: [] }
+      : { pending_items: [] as unknown[] }
 
     if (canSeeFinance) {
       let openQuery = client.from('appointment_open_balances').select('*').order('start_at', { ascending: true }).limit(200)
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
       const { data: balances, error: balanceError } = await openQuery
       if (balanceError) throw new Error('ADMIN_OPEN_BALANCES_QUERY_FAILED')
 
-      const current = Array.isArray(output.pending_items) ? output.pending_items : []
+      const current: unknown[] = Array.isArray(output.pending_items) ? output.pending_items : []
       output.pending_items = [
         ...current,
         ...(balances ?? []).map((row) => ({
