@@ -10,6 +10,8 @@ insert into public.resources (id,name,resource_type) values
 insert into public.employees (id,name,resource_id) values ('99000000-0000-0000-0000-000000000004','Adversarial Employee','99000000-0000-0000-0000-000000000003');
 insert into public.services (id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,maximum_booking_horizon_days,checkout_hold_minutes,payment_hold_minutes,requires_terms,confirmation_percentage)
 values ('99000000-0000-0000-0000-000000000005','99000000-0000-0000-0000-000000000001','Adversarial Service','adversarial-service',60,500,1,2,5000,10,30,false,50);
+insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
+values ('99000000-0000-0000-0000-000000000005',48,0,20,20,20);
 insert into public.service_employees (id,service_id,employee_id) values ('99000000-0000-0000-0000-000000000006','99000000-0000-0000-0000-000000000005','99000000-0000-0000-0000-000000000004');
 insert into public.service_resources (service_id,resource_id,is_required) values
  ('99000000-0000-0000-0000-000000000005','99000000-0000-0000-0000-000000000002',true),
