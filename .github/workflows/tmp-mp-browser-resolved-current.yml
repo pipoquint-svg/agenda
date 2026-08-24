@@ -1,0 +1,50 @@
+name: TMP Mercado Pago Browser Resolved Current
+on:
+  push:
+    branches: [test/mp-browser-direct-current]
+    paths: [.github/workflows/tmp-mp-browser-resolved-current.yml]
+permissions:
+  contents: write
+env:
+  STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare browser runner
+        run: |
+          set -euo pipefail
+          mkdir -p evidence /tmp/mp-browser
+          chrome=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          [[ -n "$chrome" ]]
+          echo "$chrome" > evidence/chrome-path.txt
+          cp scripts/tmp-mp-browser-current.mjs /tmp/mp-browser/gate.mjs
+          cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          command -v xvfb-run > "$GITHUB_WORKSPACE/evidence/xvfb-path.txt"
+      - name: Run APRO and OTHE
+        run: |
+          set +e
+          export CHROME_PATH=$(cat evidence/chrome-path.txt)
+          cd /tmp/mp-browser
+          xvfb-run -a node gate.mjs > "$GITHUB_WORKSPACE/evidence/mp-browser-resolved.log" 2>&1
+          code=$?
+          echo "$code" > "$GITHUB_WORKSPACE/evidence/mp-browser-resolved.exit"
+          cat "$GITHUB_WORKSPACE/evidence/mp-browser-resolved.log"
+          exit $code
+      - name: Persist evidence
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p evidence
+          printf '{"gate":"browser_https_current_resolved","status":"%s","sha":"%s","staging":"%s","real_charges":false,"real_customer_data":false}\n' "$JOB_STATUS" "$GITHUB_SHA" "$STAGING_URL" > evidence/mp-browser-resolved.json
+          cp /tmp/mp-browser/*.png evidence/ 2>/dev/null || true
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add evidence
+          git commit -m 'test: registrar browser gate resolvido atual' || true
+          git push
