@@ -1,0 +1,86 @@
+name: MP Current Main Browser Corrected
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+
+jobs:
+  browser-corrected:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Install Playwright
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mp-browser
+          cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Extract official harness and patch only journey order
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('.github/workflows/mercado-pago-staging-browser-gate.yml').read_text()
+          start = src.index("cat > /tmp/mp-browser/gate.mjs <<'EOF'") + len("cat > /tmp/mp-browser/gate.mjs <<'EOF'\n")
+          end = src.index('\n          EOF', start)
+          js = src[start:end]
+          lines = js.splitlines()
+          js = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          old = '''  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+  await page.getByLabel('Quantidade de pessoas').waitFor();
+  await page.getByRole('button', {name:'Continuar'}).click();
+  await page.getByText('Extras', {exact:true}).waitFor();
+  await page.getByRole('button', {name:'Continuar'}).click();
+
+  const day = page.locator('button[role="gridcell"]:not([disabled])').first();
+  await day.waitFor({state:'visible', timeout:45000});
+  await day.click();
+  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
+  await time.waitFor({state:'visible', timeout:20000});
+  await time.click();
+  await page.getByRole('button', {name:'Reservar este horário'}).click();
+'''
+          new = '''  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+
+  const day = page.locator('button[role="gridcell"]:not([disabled])').first();
+  await day.waitFor({state:'visible', timeout:45000});
+  await day.click();
+  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
+  await time.waitFor({state:'visible', timeout:20000});
+  await time.click();
+  await page.getByRole('button', {name:'Reservar este horário'}).click();
+
+  await page.getByLabel('Quantidade de pessoas').waitFor({timeout:20000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+  await page.getByText('Extras', {exact:true}).waitFor({timeout:20000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+'''
+          if old not in js:
+              raise SystemExit('official harness shape changed; refusing blind patch')
+          Path('/tmp/mp-browser/gate.mjs').write_text(js.replace(old, new))
+          PY
+      - name: Run corrected browser scenarios
+        run: |
+          set -euo pipefail
+          cd /tmp/mp-browser
+          xvfb-run -a node gate.mjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp-current-main-browser-corrected
+          path: /tmp/mp-browser/*.png
+          if-no-files-found: ignore
