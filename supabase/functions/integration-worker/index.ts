@@ -97,6 +97,9 @@ Deno.serve(async (req) => {
     const { error: holdExpiryError } = await client.rpc('expire_due_checkout_holds')
     if (holdExpiryError) throw new Error('CHECKOUT_HOLD_EXPIRY_FAILED')
 
+    const { error: appointmentHoldExpiryError } = await client.rpc('expire_due_appointment_holds')
+    if (appointmentHoldExpiryError) throw new Error('APPOINTMENT_HOLD_EXPIRY_FAILED')
+
     let calendarIds: string[] = []
     if (googleIntegrationEnabled) {
       // Periodic reconciliation is only active after the explicit Google provider gate.
