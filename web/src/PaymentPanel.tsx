@@ -20,6 +20,13 @@ function numeric(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function payerIdentification(taxId: string): { type: 'CPF' | 'CNPJ'; number: string } | undefined {
+  const digits = taxId.replace(/\D/g, '')
+  if (digits.length === 11) return { type: 'CPF', number: digits }
+  if (digits.length === 14) return { type: 'CNPJ', number: digits }
+  return undefined
+}
+
 function paymentError(error: unknown): string {
   const raw = error instanceof Error ? error.message : 'PAYMENT_FAILED'
   const map: Array<[string, string]> = [
@@ -165,6 +172,7 @@ export function PaymentPanel({ accessToken, onConfirmed, mode = 'BOOKING' }: {
   const pixDiscount = context ? numeric(context.financial.pix_discount_percent) : 0
   const pixAmount = Math.max(contractAmount * (1 - pixDiscount / 100), 0)
   const cardAmount = contractAmount
+  const identification = context ? payerIdentification(context.payer.tax_id) : undefined
 
   async function payPix() {
     setBusy(true)
@@ -308,15 +316,21 @@ export function PaymentPanel({ accessToken, onConfirmed, mode = 'BOOKING' }: {
           <div className="payment-amount">
             <span>Valor no cartão</span>
             <strong>{money.format(cardAmount)}</strong>
-            <small>Os dados do cartão são processados pelo formulário seguro do Mercado Pago.</small>
+            <small>Os dados da reserva já conhecidos são reaproveitados. Os dados do cartão são processados pelo formulário seguro do Mercado Pago.</small>
           </div>
           {challenge?.external_resource_url ? (
             <ThreeDSChallenge externalResourceUrl={challenge.external_resource_url} />
           ) : (
             <div className={busy ? 'card-brick busy' : 'card-brick'}>
               <CardPayment
-                key={`${kind}:${cardAmount}`}
-                initialization={{ amount: cardAmount }}
+                key={`${kind}:${cardAmount}:${context.payer.email}:${context.payer.tax_id}`}
+                initialization={{
+                  amount: cardAmount,
+                  payer: {
+                    email: context.payer.email,
+                    ...(identification ? { identification } : {}),
+                  },
+                }}
                 customization={{ paymentMethods: { types: { excluded: ['debit_card', 'prepaid_card'] } } }}
                 onSubmit={submitCard}
                 onError={() => setError('Não foi possível carregar ou validar o formulário de cartão.')}
