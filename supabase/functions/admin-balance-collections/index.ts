@@ -116,9 +116,6 @@ Deno.serve(async (req) => {
       const activeCollectionId = typeof result.active_collection_id === 'string' ? result.active_collection_id : null
       const settled = result.settled === true
 
-      // Human decision deliberately preserved: a partial in-person payment changes the
-      // reservation balance, but we do not cancel/reissue the existing provider charge
-      // until the commercial policy for that case is explicitly defined.
       if (activeCollectionId && !settled) {
         return json({
           data: result,
@@ -127,7 +124,6 @@ Deno.serve(async (req) => {
         }, 201)
       }
 
-      // Full in-person settlement must invalidate any still-payable provider collection.
       if (activeCollectionId && settled) {
         const cancellation = await cancelCollectionProvider({
           collectionId: activeCollectionId,
@@ -155,7 +151,6 @@ Deno.serve(async (req) => {
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
       : code === 'BALANCE_COLLECTION_STILL_ACTIVE' ? 409
       : code === 'BALANCE_COLLECTION_REISSUE_NOT_ALLOWED' ? 409
-      : code === 'BALANCE_COLLECTION_REISSUE_LIMIT_REACHED' ? 409
       : code === 'BALANCE_PROVIDER_CLEANUP_PENDING' ? 409
       : code === 'BALANCE_COLLECTION_NOT_DUE' ? 409
       : code === 'APPOINTMENT_ALREADY_SETTLED' ? 409
