@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
     await client.rpc('release_stale_integration_jobs',{p_stale_after_seconds:300})
 
-    const jobTypes = ['RENTAL_BALANCE_CANCEL_NO_SHOW']
+    const jobTypes = ['RENTAL_BALANCE_CANCEL_NO_SHOW','RENTAL_BALANCE_CANCEL_EXPIRED']
     if (emailEnabled) jobTypes.push('RENTAL_BALANCE_DUE_EMAIL')
     if (kommoEnabled) jobTypes.push('RENTAL_BALANCE_DUE_KOMMO')
 
@@ -70,9 +70,10 @@ Deno.serve(async (req) => {
           await invokeFunction('balance-collection-notify-email',secret,{collection_id:job.entity_id})
         } else if (job.job_type==='RENTAL_BALANCE_CANCEL_NO_SHOW') {
           await invokeFunction('balance-collection-provider-cancel',secret,{collection_id:job.entity_id,reason:'NO_SHOW'})
+        } else if (job.job_type==='RENTAL_BALANCE_CANCEL_EXPIRED') {
+          await invokeFunction('balance-collection-provider-cancel',secret,{collection_id:job.entity_id,reason:'EXPIRED'})
         } else if (job.job_type==='RENTAL_BALANCE_DUE_KOMMO') {
           if (!kommoEnabled) throw new Error('KOMMO_INTEGRATION_DISABLED')
-          // The durable job is intentionally preserved until the Kommo WhatsApp provider gate is enabled.
           await invokeFunction('balance-collection-notify-kommo',secret,{collection_id:job.entity_id})
         } else {
           throw new Error('UNSUPPORTED_BALANCE_JOB_TYPE')
