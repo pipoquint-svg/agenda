@@ -55,10 +55,20 @@ async function diagnostics(page, label) {
       const host = (() => { try { return new globalThis.URL(frame.url() || STAGING).hostname } catch { return 'invalid-url' } })()
       const inputs = []
       for (let i = 0; i < await frame.locator('input').count(); i++) inputs.push(await metadata(frame.locator('input').nth(i)))
+      const selects = []
+      for (let i = 0; i < await frame.locator('select').count(); i++) {
+        const select = frame.locator('select').nth(i)
+        selects.push({
+          visible: await select.isVisible().catch(() => false),
+          value: await select.inputValue().catch(() => ''),
+          text: (await select.textContent().catch(() => '') || '').trim().slice(0, 300),
+        })
+      }
       diag.push({
         host,
         url: (frame.url() || '').slice(0, 180),
         inputs,
+        selects,
         buttons: (await frame.locator('button').allTextContents().catch(() => [])).map((x) => x.trim()).filter(Boolean).slice(0, 20),
       })
     } catch {
@@ -113,6 +123,46 @@ async function reachPayment(page, scenario) {
   await page.waitForTimeout(4000)
 }
 
+async function chooseInstallments(page, scenario) {
+  const deadline = Date.now() + 20000
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      try {
+        const selects = frame.locator('select')
+        for (let i = 0; i < await selects.count(); i++) {
+          const select = selects.nth(i)
+          if (!await select.isVisible().catch(() => false)) continue
+          const current = await select.inputValue().catch(() => '')
+          const text = (await select.textContent().catch(() => '') || '').toLowerCase()
+          const options = await select.locator('option').evaluateAll((nodes) => nodes.map((o) => ({ value: o.value, disabled: o.disabled, text: o.textContent || '' })).filter((o) => o.value && !o.disabled))
+          if (!current && options[0] && (/parcela|installment|selecione uma opção/.test(text) || options.some((o) => /parcela|installment/i.test(o.text)))) {
+            await select.selectOption(options[0].value)
+            console.log(`${scenario}_INSTALLMENTS=${options[0].text.trim() || options[0].value}`)
+            return true
+          }
+        }
+      } catch {
+        // Frame may detach while Mercado Pago refreshes the Brick.
+      }
+    }
+
+    const placeholder = page.getByText('Selecione uma opção', { exact: true }).first()
+    if (await placeholder.isVisible().catch(() => false)) {
+      await placeholder.click().catch(() => undefined)
+      await sleep(250)
+      const option = page.getByRole('option').filter({ hasText: /parcela|R\$/i }).first()
+      if (await option.isVisible().catch(() => false)) {
+        const label = (await option.textContent().catch(() => '') || '').trim()
+        await option.click()
+        console.log(`${scenario}_INSTALLMENTS=${label || 'selected'}`)
+        return true
+      }
+    }
+    await sleep(500)
+  }
+  return false
+}
+
 async function fillBrick(page, scenario) {
   const unavailable = page.getByText('Pagamento com cartão indisponível no momento', { exact: false })
   if (await unavailable.isVisible().catch(() => false)) throw new Error('MERCADO_PAGO_PUBLIC_KEY_NOT_AVAILABLE_IN_STAGING')
@@ -143,6 +193,11 @@ async function fillBrick(page, scenario) {
     }
 
     if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) {
+      const installmentsSelected = await chooseInstallments(page, scenario)
+      if (!installmentsSelected) {
+        await diagnostics(page, 'INSTALLMENTS')
+        throw new Error('BRICK_INSTALLMENTS_NOT_SELECTED')
+      }
       for (const frame of page.frames()) {
         try {
           const exactPay = frame.getByRole('button', { name: /^pagar$/i })
