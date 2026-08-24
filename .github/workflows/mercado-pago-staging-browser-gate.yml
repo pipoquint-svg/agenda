@@ -89,11 +89,16 @@ jobs:
           async function brickDiagnostics(page) {
             const diag = [];
             for (const frame of page.frames()) {
-              const host = (() => { try { return new globalThis.URL(frame.url() || STAGING).hostname } catch { return 'invalid-url' } })();
-              const inputs = [];
-              for (let i = 0; i < await frame.locator('input').count(); i++) inputs.push(await metadata(frame.locator('input').nth(i)));
-              const buttons = await frame.locator('button').allTextContents().catch(() => []);
-              diag.push({host, inputs, buttons:buttons.map(x => x.trim()).filter(Boolean).slice(0,20)});
+              try {
+                const host = (() => { try { return new globalThis.URL(frame.url() || STAGING).hostname } catch { return 'invalid-url' } })();
+                const inputs = [];
+                const count = await frame.locator('input').count();
+                for (let i = 0; i < count; i++) inputs.push(await metadata(frame.locator('input').nth(i)));
+                const buttons = await frame.locator('button').allTextContents().catch(() => []);
+                diag.push({host, inputs, buttons:buttons.map(x => x.trim()).filter(Boolean).slice(0,20)});
+              } catch {
+                // Mercado Pago creates and destroys transient anti-fraud frames. Ignore detached frames.
+              }
             }
             console.log('BRICK_DIAGNOSTICS=' + JSON.stringify(diag));
           }
@@ -102,44 +107,55 @@ jobs:
             const unavailable = page.getByText('Pagamento com cartão indisponível no momento', {exact:false});
             if (await unavailable.isVisible().catch(() => false)) throw new Error('MERCADO_PAGO_PUBLIC_KEY_NOT_AVAILABLE_IN_STAGING');
 
-            const deadline = Date.now() + 45000;
+            const deadline = Date.now() + 60000;
             let found = new Set();
             while (Date.now() < deadline) {
               found = new Set();
               for (const frame of page.frames()) {
-                const inputs = frame.locator('input');
-                for (let i = 0; i < await inputs.count(); i++) {
-                  const el = inputs.nth(i);
-                  if (!await el.isVisible().catch(() => false)) continue;
-                  const meta = await metadata(el);
-                  const kind = classify(meta, frame.url());
-                  if (!kind || found.has(kind)) continue;
-                  if (kind === 'number') await el.fill(CARD);
-                  if (kind === 'expiration') await el.fill(EXP);
-                  if (kind === 'cvv') await el.fill(CVV);
-                  if (kind === 'holder') await el.fill(scenario);
-                  if (kind === 'document') await el.fill(CPF);
-                  if (kind === 'email') await el.fill(EMAIL);
-                  found.add(kind);
-                }
-                const selects = frame.locator('select');
-                for (let i = 0; i < await selects.count(); i++) {
-                  const sel = selects.nth(i);
-                  if (!await sel.isVisible().catch(() => false)) continue;
-                  const options = await sel.locator('option').evaluateAll(nodes => nodes.map(o => ({value:o.value, disabled:o.disabled})).filter(o => o.value && !o.disabled));
-                  if (options[0]) await sel.selectOption(options[0].value).catch(() => {});
+                try {
+                  const inputs = frame.locator('input');
+                  const count = await inputs.count();
+                  for (let i = 0; i < count; i++) {
+                    const el = inputs.nth(i);
+                    if (!await el.isVisible().catch(() => false)) continue;
+                    const meta = await metadata(el);
+                    const kind = classify(meta, frame.url());
+                    if (!kind || found.has(kind)) continue;
+                    if (kind === 'number') await el.fill(CARD);
+                    if (kind === 'expiration') await el.fill(EXP);
+                    if (kind === 'cvv') await el.fill(CVV);
+                    if (kind === 'holder') await el.fill(scenario);
+                    if (kind === 'document') await el.fill(CPF);
+                    if (kind === 'email') await el.fill(EMAIL);
+                    found.add(kind);
+                  }
+                  const selects = frame.locator('select');
+                  const selectCount = await selects.count();
+                  for (let i = 0; i < selectCount; i++) {
+                    const sel = selects.nth(i);
+                    if (!await sel.isVisible().catch(() => false)) continue;
+                    const options = await sel.locator('option').evaluateAll(nodes => nodes.map(o => ({value:o.value, disabled:o.disabled})).filter(o => o.value && !o.disabled));
+                    if (options[0]) await sel.selectOption(options[0].value).catch(() => {});
+                  }
+                } catch {
+                  continue;
                 }
               }
 
               if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) {
                 for (const frame of page.frames()) {
-                  const candidates = frame.getByRole('button', {name:/pagar|pay|continuar|processar|confirmar/i});
-                  for (let i = 0; i < await candidates.count(); i++) {
-                    const button = candidates.nth(i);
-                    if (await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false)) {
-                      await button.click();
-                      return;
+                  try {
+                    const candidates = frame.getByRole('button', {name:/pagar|pay|continuar|processar|confirmar/i});
+                    const count = await candidates.count();
+                    for (let i = 0; i < count; i++) {
+                      const button = candidates.nth(i);
+                      if (await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false)) {
+                        await button.click();
+                        return;
+                      }
                     }
+                  } catch {
+                    continue;
                   }
                 }
               }
@@ -152,7 +168,6 @@ jobs:
           async function reachPayment(page, scenario) {
             await page.goto(STAGING, {waitUntil:'domcontentloaded', timeout:60000});
             await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
-
             await page.getByRole('button', {name:'Continuar'}).click();
             await page.getByLabel('Quantidade de pessoas').waitFor();
             await page.getByRole('button', {name:'Continuar'}).click();
@@ -173,7 +188,6 @@ jobs:
             const tax = page.getByLabel('CPF/CNPJ');
             if (await tax.count()) await tax.fill(CPF);
             await page.getByRole('button', {name:'Continuar para a revisão'}).click();
-
             await page.getByText('Revisão', {exact:true}).waitFor({timeout:20000});
             await fillReviewFields(page);
             const create = page.getByRole('button', {name:'Criar reserva'});
@@ -185,11 +199,11 @@ jobs:
             const codeText = await page.locator('text=/Reserva .* criada/').first().textContent().catch(() => null);
             console.log(`${scenario}_RESERVATION=${codeText ?? 'created'}`);
             await page.getByRole('button', {name:'Cartão'}).click();
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(4000);
           }
 
           async function scenario(name) {
-            const browser = await chromium.launch({headless:true});
+            const browser = await chromium.launch({headless:false});
             const context = await browser.newContext({viewport:{width:1280,height:1000}});
             const page = await context.newPage();
             page.on('console', msg => { if (msg.type()==='error') console.log(`BROWSER_CONSOLE_ERROR[${name}]=${msg.text()}`); });
@@ -217,7 +231,7 @@ jobs:
           await scenario('OTHE');
           EOF
           cd /tmp/mp-browser
-          node gate.mjs
+          xvfb-run -a node gate.mjs
 
       - name: Summary
         if: always()
@@ -228,6 +242,7 @@ jobs:
             echo
             echo '- URL: `https://blacksheep-agenda-staging.lovable.app/agenda-e-valores`'
             echo '- Environment: sandbox only'
+            echo '- Browser: Chromium headed under Xvfb'
             echo '- Real card/customer/charge: NO'
             echo '- Scenarios: APRO + OTHE'
           } >> "$GITHUB_STEP_SUMMARY"
