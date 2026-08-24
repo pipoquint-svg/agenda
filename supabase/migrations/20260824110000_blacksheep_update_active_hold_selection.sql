@@ -150,3 +150,11 @@ $function$;
 
 revoke all on function public.public_update_checkout_hold_selection(text,jsonb,integer) from public, anon, authenticated;
 grant execute on function public.public_update_checkout_hold_selection(text,jsonb,integer) to service_role;
+
+-- BlackSheep rentals require 24h advance notice. Visits remain separately configurable.
+update public.services
+set minimum_booking_notice_minutes = 1440,
+    updated_at = now()
+where operation_scope = 'BLACKSHEEP'
+  and duration_mode = 'BLOCKS'
+  and minimum_booking_notice_minutes <> 1440;
