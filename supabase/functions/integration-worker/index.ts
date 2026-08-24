@@ -46,7 +46,6 @@ async function invokeFunction<T = Record<string, unknown>>(name: string, secret:
 
   const text = await response.text()
   if (!response.ok) {
-    // Downstream bodies can contain customer/provider data. Persist only function + HTTP status.
     throw new Error(`${name.toUpperCase().replaceAll('-', '_')}_HTTP_${response.status}`)
   }
   if (!text) return {} as T
@@ -81,7 +80,6 @@ Deno.serve(async (req) => {
     const client = adminClient()
     const workerId = `edge:${crypto.randomUUID()}`
     const transactionalEmailWorkerEnabled = envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED')
-    // Google is deliberately fail-closed until the user explicitly returns to its provider gate.
     const googleIntegrationEnabled = envEnabled('GOOGLE_INTEGRATION_ENABLED')
 
     const { data: kommoSettings, error: kommoSettingsError } = await client
@@ -100,9 +98,11 @@ Deno.serve(async (req) => {
     const { error: appointmentHoldExpiryError } = await client.rpc('expire_due_appointment_holds')
     if (appointmentHoldExpiryError) throw new Error('APPOINTMENT_HOLD_EXPIRY_FAILED')
 
+    const { data: expiredFreeVisits, error: freeVisitExpiryError } = await client.rpc('expire_unconfirmed_free_visits')
+    if (freeVisitExpiryError) throw new Error('FREE_VISIT_CONFIRMATION_EXPIRY_FAILED')
+
     let calendarIds: string[] = []
     if (googleIntegrationEnabled) {
-      // Periodic reconciliation is only active after the explicit Google provider gate.
       const { data: mappings, error: mappingsError } = await client
         .from('google_calendar_resources')
         .select('google_calendar_id')
@@ -138,7 +138,6 @@ Deno.serve(async (req) => {
           try {
             await invokeFunction('google-watch', secret, { google_calendar_id: calendarId })
           } catch (error) {
-            // Never log calendar identifiers or downstream provider bodies.
             console.error('GOOGLE_WATCH_RENEWAL_FAILED', error instanceof Error ? error.message : 'UNKNOWN')
           }
         }
@@ -173,14 +172,8 @@ Deno.serve(async (req) => {
           await invokeFunction('google-sync', secret, { google_calendar_id: job.entity_id, force_full: false })
         } else if (job.job_type === 'GOOGLE_APPOINTMENT_SYNC') {
           if (!googleIntegrationEnabled) throw new Error('GOOGLE_INTEGRATION_DISABLED')
-          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) {
-            throw new Error('GOOGLE_APPOINTMENT_SYNC_VERSION_REQUIRED')
-          }
-          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>(
-            'google-appointment-sync',
-            secret,
-            { appointment_id: job.entity_id, entity_version: job.entity_version },
-          )
+          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) throw new Error('GOOGLE_APPOINTMENT_SYNC_VERSION_REQUIRED')
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>('google-appointment-sync', secret, { appointment_id: job.entity_id, entity_version: job.entity_version })
           if (result.stale) {
             await discardStaleJob(client, job, workerId, result.current_version, 'GOOGLE_APPOINTMENT_SYNC_STALE_VERSION_MISSING')
             discardedStale += 1
@@ -188,15 +181,9 @@ Deno.serve(async (req) => {
           }
         } else if (job.job_type === 'APPOINTMENT_CONFIRMED_MESSAGE') {
           if (!transactionalEmailWorkerEnabled) throw new Error('TRANSACTIONAL_EMAIL_WORKER_DISABLED')
-          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) {
-            throw new Error('APPOINTMENT_CONFIRMED_MESSAGE_VERSION_REQUIRED')
-          }
+          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) throw new Error('APPOINTMENT_CONFIRMED_MESSAGE_VERSION_REQUIRED')
           const reason = typeof job.payload_json?.reason === 'string' ? job.payload_json.reason : 'CONFIRMED'
-          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>(
-            'email-send',
-            secret,
-            { appointment_id: job.entity_id, entity_version: job.entity_version, reason },
-          )
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>('email-send', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, reason })
           if (result.stale) {
             await discardStaleJob(client, job, workerId, result.current_version, 'APPOINTMENT_CONFIRMED_MESSAGE_STALE_VERSION_MISSING')
             discardedStale += 1
@@ -204,15 +191,9 @@ Deno.serve(async (req) => {
           }
         } else if (job.job_type === 'KOMMO_APPOINTMENT_SYNC') {
           if (!kommoIntegrationEnabled) throw new Error('KOMMO_INTEGRATION_DISABLED')
-          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) {
-            throw new Error('KOMMO_APPOINTMENT_SYNC_VERSION_REQUIRED')
-          }
+          if (!Number.isInteger(job.entity_version) || job.entity_version < 1) throw new Error('KOMMO_APPOINTMENT_SYNC_VERSION_REQUIRED')
           const eventKind = typeof job.payload_json?.event_kind === 'string' ? job.payload_json.event_kind : 'UPDATED'
-          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>(
-            'kommo-sync',
-            secret,
-            { appointment_id: job.entity_id, entity_version: job.entity_version, event_kind: eventKind },
-          )
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>('kommo-sync', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, event_kind: eventKind })
           if (result.stale) {
             await discardStaleJob(client, job, workerId, result.current_version, 'KOMMO_APPOINTMENT_SYNC_STALE_VERSION_MISSING')
             discardedStale += 1
@@ -250,6 +231,7 @@ Deno.serve(async (req) => {
       google_enabled: googleIntegrationEnabled,
       kommo_enabled: kommoIntegrationEnabled,
       email_worker_enabled: transactionalEmailWorkerEnabled,
+      expired_unconfirmed_free_visits: Number(expiredFreeVisits ?? 0),
       calendars_reconciled: calendarIds.length,
       claimed: jobs.length,
       succeeded,
