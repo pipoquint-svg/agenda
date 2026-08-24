@@ -12,7 +12,7 @@ const permissionByView: Record<View, string> = {
   finance: 'FINANCE_VIEW',
   packages: 'PACKAGES_VIEW',
   audit: 'AUDIT_VIEW',
-  team: 'TEAM_VIEW',
+  team: 'TEAM_MANAGE',
   integrations: 'INTEGRATIONS_VIEW',
 }
 
