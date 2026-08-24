@@ -1,0 +1,53 @@
+name: MP Provider Fresh Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  provider:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 8
+    env:
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      ALLOW_REAL_CHARGES: 'false'
+      ALLOW_REAL_CUSTOMER_DATA: 'false'
+    steps:
+      - name: Safety gates
+        run: |
+          set -euo pipefail
+          [[ "$ALLOW_REAL_CHARGES" == "false" ]]
+          [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]]
+          [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]]
+
+      - name: Fresh APRO and OTHE Orders
+        shell: bash
+        run: |
+          set -euo pipefail
+          make_token() {
+            local holder="$1" out="$2"
+            jq -n --arg holder "$holder" '{card_number:"5480832801033311",expiration_month:11,expiration_year:2030,security_code:"123",cardholder:{name:$holder,identification:{type:"CPF",number:"12345678909"}}}' >/tmp/card.json
+            code=$(curl -sS -o "$out" -w '%{http_code}' -X POST https://api.mercadopago.com/v1/card_tokens -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' --data @/tmp/card.json)
+            [[ "$code" == "200" || "$code" == "201" ]]
+          }
+          make_order() {
+            local holder="$1" token_file="$2" out="$3"
+            token=$(jq -r '.id // empty' "$token_file"); [[ -n "$token" ]]
+            key="fresh-${holder,,}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
+            jq -n --arg e "$key" --arg t "$token" '{type:"online",processing_mode:"automatic",capture_mode:"automatic",external_reference:$e,total_amount:"50.00",payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$t,installments:1}}]}}' >/tmp/order.json
+            code=$(curl -sS -o "$out" -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $key" --data @/tmp/order.json)
+            echo "${holder}_HTTP=$code status=$(jq -r '.status // empty' "$out") detail=$(jq -r '.status_detail // empty' "$out")"
+          }
+
+          make_token APRO /tmp/apro-token.json
+          make_order APRO /tmp/apro-order.json
+          [[ "$(jq -r '.status' /tmp/apro-order.json)" == "processed" ]]
+          [[ "$(jq -r '.status_detail' /tmp/apro-order.json)" == "accredited" ]]
+
+          make_token OTHE /tmp/othe-token.json
+          make_order OTHE /tmp/othe-order.json
+          jq -e '(.status == "failed") or (.errors[]?.code == "failed")' /tmp/othe-order.json >/dev/null
