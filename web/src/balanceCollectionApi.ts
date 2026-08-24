@@ -25,6 +25,8 @@ export type AdminBalanceRow = {
   collection_sequence: number | null
   collection_expires_at: string | null
   collection_status: string | null
+  reissue_count?: number | null
+  reissues_remaining?: number | null
 }
 
 export async function verifyBalanceCollection(input: { collectionId: string; email: string }): Promise<{
@@ -79,7 +81,13 @@ export async function recordManualBalancePayment(input: {
 }): Promise<{
   payment_recorded?: boolean
   provider_cleanup_pending?: boolean
+  prior_collection_cancelled?: boolean
+  collection_reissued?: boolean
+  reissue_failed?: boolean
+  balance_after?: number | string
+  error_code?: string
   data?: Record<string, unknown>
+  reissued?: Record<string, unknown>
 }> {
   const response = await fetch(`${functionsBaseUrl}/admin-balance-collections`, {
     method: 'POST',
@@ -96,7 +104,15 @@ export async function recordManualBalancePayment(input: {
   const body = await response.json().catch(() => ({}))
   if (!response.ok && body?.payment_recorded !== true) throw new BalanceCollectionApiError(body?.error?.code ?? 'ADMIN_BALANCE_COLLECTION_FAILED')
   if (!response.ok && body?.payment_recorded === true) {
-    return { payment_recorded: true, provider_cleanup_pending: true, data: body.data }
+    return {
+      payment_recorded: true,
+      provider_cleanup_pending: body.provider_cleanup_pending === true,
+      prior_collection_cancelled: body.prior_collection_cancelled === true,
+      reissue_failed: body.reissue_failed === true,
+      balance_after: body.balance_after,
+      error_code: body?.error?.code,
+      data: body.data,
+    }
   }
   return body
 }
