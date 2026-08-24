@@ -37,6 +37,7 @@ export type CancelPreview = ActionResolve & {
   requires_email_verification: true
   financial: {
     contract_value: number
+    paid_amount: number
     penalty_amount: number
     refund_amount: number
     settlement_default: 'REFUND' | null
