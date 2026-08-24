@@ -1,0 +1,82 @@
+name: MP Current Browser Validation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/mp-current-browser-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Playwright
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mp-browser && cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: APRO and OTHE through current staging flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/mp-browser/gate.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const STAGING=process.env.STAGING_URL;
+          const CARD='5480832801033311', EXP='11/30', CVV='123', CPF='12345678909', EMAIL='test@testuser.com', PHONE='48999999999';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function visibleButton(page,re){ const b=page.getByRole('button',{name:re}).filter({visible:true}); return b.first(); }
+          async function fillReview(page){
+            for(const el of await page.locator('input[type=checkbox]').all()) if(await el.isVisible().catch(()=>false)&&await el.isEnabled().catch(()=>false)&&!await el.isChecked().catch(()=>false)) await el.check();
+            for(const el of await page.locator('textarea').all()) if(await el.isVisible().catch(()=>false)&&!(await el.inputValue()).trim()) await el.fill('Teste HTTPS Mercado Pago');
+            for(const el of await page.locator('select').all()) if(await el.isVisible().catch(()=>false)){ const o=await el.locator('option').evaluateAll(ns=>ns.map(x=>({v:x.value,d:x.disabled})).filter(x=>x.v&&!x.d)); if(o[0]) await el.selectOption(o[0].v); }
+          }
+          function classify(m,u){ const s=`${m.name} ${m.id} ${m.placeholder} ${m.autocomplete} ${m.aria} ${u}`.toLowerCase(); if(/card.?number|cc-number|numero.*cart|número.*cart|cardnumber/.test(s))return'number'; if(/expiration|expiry|expir|cc-exp|validade/.test(s))return'expiration'; if(/security|cvv|cvc|cc-csc|segurança|securitycode/.test(s))return'cvv'; if(/cardholder|holder|titular|nome.*cart/.test(s))return'holder'; if(/document|identification|cpf/.test(s))return'document'; if(/e-?mail/.test(s))return'email'; return null; }
+          async function meta(el){ return el.evaluate(e=>({name:e.getAttribute('name')||'',id:e.id||'',placeholder:e.getAttribute('placeholder')||'',autocomplete:e.getAttribute('autocomplete')||'',aria:e.getAttribute('aria-label')||''})); }
+          async function fillBrick(page,name){
+            if(await page.getByText('Pagamento com cartão indisponível no momento',{exact:false}).isVisible().catch(()=>false)) throw new Error('PUBLIC_KEY_UNAVAILABLE');
+            const deadline=Date.now()+60000; let found=new Set();
+            while(Date.now()<deadline){ found=new Set(); for(const frame of page.frames()){ try{ const inputs=frame.locator('input'); for(let i=0;i<await inputs.count();i++){ const el=inputs.nth(i); if(!await el.isVisible().catch(()=>false))continue; const k=classify(await meta(el),frame.url()); if(!k||found.has(k))continue; if(k==='number')await el.fill(CARD); if(k==='expiration')await el.fill(EXP); if(k==='cvv')await el.fill(CVV); if(k==='holder')await el.fill(name); if(k==='document')await el.fill(CPF); if(k==='email')await el.fill(EMAIL); found.add(k); } }catch{} }
+              if(found.has('number')&&found.has('expiration')&&found.has('cvv')&&found.has('holder')){ for(const frame of page.frames()){ try{ const bs=frame.getByRole('button',{name:/pagar|pay|continuar|processar|confirmar/i}); for(let i=0;i<await bs.count();i++){ const b=bs.nth(i); if(await b.isVisible().catch(()=>false)&&await b.isEnabled().catch(()=>false)){ await b.click(); return; } } }catch{} } }
+              await sleep(500);
+            }
+            console.log('BRICK_FIELDS='+[...found].join(',')); throw new Error('BRICK_NOT_READY');
+          }
+          async function reachPayment(page,name){
+            await page.goto(STAGING,{waitUntil:'domcontentloaded',timeout:60000});
+            await page.getByText('Quanto tempo você precisa no estúdio?',{exact:false}).waitFor({timeout:30000});
+            await page.getByRole('button',{name:'Continuar'}).click();
+            await page.getByText('Data e horário',{exact:true}).waitFor({timeout:30000});
+            const days=page.locator('button[role="gridcell"]:not([disabled])'); await days.first().waitFor({state:'visible',timeout:30000}); await days.first().click();
+            const time=page.getByRole('button',{name:/^\d{2}:\d{2}$/}).first(); await time.waitFor({state:'visible',timeout:30000}); await time.click();
+            const reserve=page.getByRole('button',{name:'Reservar este horário'}); await reserve.waitFor({state:'visible'}); await reserve.click();
+            await page.getByText(/Número de pessoas|Quantas pessoas|Quantidade de pessoas/i).first().waitFor({timeout:30000});
+            const peopleSelect=page.locator('select').filter({has:page.locator('option')}).first(); if(await peopleSelect.isVisible().catch(()=>false)){ const o=await peopleSelect.locator('option').evaluateAll(ns=>ns.map(x=>x.value).filter(Boolean)); if(o[0]) await peopleSelect.selectOption(o[0]); }
+            await page.getByRole('button',{name:'Continuar'}).click();
+            await page.getByText(/Extras|Adicionais/i).first().waitFor({timeout:30000});
+            const cont=page.getByRole('button',{name:'Continuar'}); if(await cont.isVisible().catch(()=>false)) await cont.click();
+            await page.getByLabel('Nome completo').fill(`TESTE HTTPS ${name}`); await page.getByLabel('E-mail').fill(EMAIL); await page.getByLabel('WhatsApp').fill(PHONE); const tax=page.getByLabel('CPF/CNPJ'); if(await tax.count())await tax.fill(CPF);
+            const review=page.getByRole('button',{name:/Continuar para a revisão|Continuar/i}).last(); await review.click();
+            await page.getByText(/Revisão/i).first().waitFor({timeout:30000}); await fillReview(page);
+            const create=page.getByRole('button',{name:/Criar reserva|Continuar para pagamento|Confirmar e continuar/i}).last(); await create.waitFor({state:'visible'}); if(!await create.isEnabled())throw new Error('CREATE_DISABLED'); await create.click();
+            await page.getByText('Pagamento',{exact:true}).waitFor({timeout:30000}); await page.getByRole('button',{name:'Cartão'}).click(); await page.waitForTimeout(4000);
+          }
+          async function scenario(name){ const browser=await chromium.launch({headless:false}); const page=await browser.newPage({viewport:{width:1280,height:1000}}); try{ await reachPayment(page,name); await fillBrick(page,name); if(name==='APRO'){ await page.getByText(/reserva está confirmada|Reserva confirmada/i).first().waitFor({timeout:60000}); console.log('APRO_BROWSER_HTTPS=PASS'); } else { await page.getByText(/Mercado Pago recusou|Pagamento recusado/i).first().waitFor({timeout:60000}); console.log('OTHE_BROWSER_HTTPS=PASS'); } await page.screenshot({path:`/tmp/mp-browser/${name.toLowerCase()}-final.png`,fullPage:true}); }catch(e){ console.log('PAGE_TEXT='+((await page.locator('body').innerText().catch(()=>'' )).slice(0,4000))); await page.screenshot({path:`/tmp/mp-browser/${name.toLowerCase()}-failure.png`,fullPage:true}).catch(()=>{}); throw e; }finally{ await browser.close(); } }
+          await scenario('APRO'); await scenario('OTHE');
+          EOF
+          cd /tmp/mp-browser
+          xvfb-run -a node gate.mjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp-current-browser-validation
+          path: /tmp/mp-browser/*.png
+          if-no-files-found: ignore
