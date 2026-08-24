@@ -1,0 +1,44 @@
+name: Audit Anon RPC Empirical
+
+on:
+  push:
+    branches:
+      - audit-anon-rpc-empirical-20260824
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/rest/v1/rpc
+      ANON_KEY: sb_publishable_NqPTd8ErT6PUeqlwwgaDpQ_TNvu7hHh
+    steps:
+      - name: Probe RPCs from outside PostgREST
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$ANON_KEY"
+          probe() {
+            local rpc="$1"
+            local payload="$2"
+            local body
+            body="$(mktemp)"
+            local code
+            code="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+              --request POST "$BASE_URL/$rpc" \
+              --header "apikey: $ANON_KEY" \
+              --header 'Content-Type: application/json' \
+              --data "$payload")"
+            echo "=== $rpc ==="
+            echo "HTTP $code"
+            cat "$body"
+            echo
+            rm -f "$body"
+          }
+
+          probe get_appointment_financial_summary '{"p_appointment_id":"40f997ad-3270-47c1-9652-f1bd626133ab"}'
+          probe confirm_appointment_internal '{"p_appointment_id":"782943e2-b08b-4198-97c4-4e476957fa29","p_reason":"AUDIT_ANON_PROBE"}'
+          probe expire_due_checkout_holds '{}'
