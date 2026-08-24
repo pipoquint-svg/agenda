@@ -8,6 +8,7 @@ const corsHeaders = {
 }
 
 const LEGACY_DURATION_BLOCKS_REMOVAL_DATE = '2026-09-07'
+const LEGACY_DURATION_BLOCKS_CUTOFF = Date.parse('2026-09-07T03:00:00.000Z')
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -70,6 +71,7 @@ Deno.serve(async (req) => {
       rpcName = 'public_create_checkout_hold_tracked_minutes'
       args = { ...args, p_contracted_minutes: contractedMinutes }
     } else if (hasDurationBlocks) {
+      if (Date.now() >= LEGACY_DURATION_BLOCKS_CUTOFF) throw new Error('LEGACY_DURATION_CONTRACT_EXPIRED')
       rpcName = 'public_create_checkout_hold_tracked_duration'
       args = { ...args, p_duration_blocks: durationBlocks }
       console.warn('[LEGACY_CONTRACT] duration_blocks received', {
@@ -78,13 +80,14 @@ Deno.serve(async (req) => {
         booking_page_slug: pageSlug,
         service_id: serviceId,
       })
-      await client.from('booking_contract_legacy_usage').insert({
+      const { error: metricError } = await client.from('booking_contract_legacy_usage').insert({
         surface: 'BOOKING_HOLD',
         booking_page_slug: pageSlug,
         service_id: serviceId,
         duration_blocks: durationBlocks,
         user_agent: req.headers.get('user-agent'),
       })
+      if (metricError) console.error('[OPERATION_ALERT] LEGACY_DURATION_METRIC_WRITE_FAILED', { surface: 'BOOKING_HOLD' })
     }
 
     const { data, error } = await client.rpc(rpcName, args)
@@ -92,10 +95,11 @@ Deno.serve(async (req) => {
     return response({ hold: data }, 201)
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CHECKOUT_HOLD_CREATE_FAILED'
-    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|BOOKING_PAGE_REQUIRED|SERVICE_REQUIRED|SERVICE_EMPLOYEE_REQUIRED|REQUESTED_START_REQUIRED|INVALID_PEOPLE_COUNT|INVALID_DURATION_BLOCKS|INVALID_CONTRACTED_MINUTES|AMBIGUOUS_DURATION_CONTRACT|ATTRIBUTION_INVALID|BOOKING_PAGE_NOT_FOUND|SERVICE_NOT_AVAILABLE|SERVICE_EMPLOYEE_NOT_AVAILABLE|INVALID_BOOKING_SELECTION|SLOT_NOT_AVAILABLE|RESOURCE_NOT_AVAILABLE|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING)/)?.[1] ?? code.split(':')[0]
+    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|BOOKING_PAGE_REQUIRED|SERVICE_REQUIRED|SERVICE_EMPLOYEE_REQUIRED|REQUESTED_START_REQUIRED|INVALID_PEOPLE_COUNT|INVALID_DURATION_BLOCKS|INVALID_CONTRACTED_MINUTES|AMBIGUOUS_DURATION_CONTRACT|LEGACY_DURATION_CONTRACT_EXPIRED|ATTRIBUTION_INVALID|BOOKING_PAGE_NOT_FOUND|SERVICE_NOT_AVAILABLE|SERVICE_EMPLOYEE_NOT_AVAILABLE|INVALID_BOOKING_SELECTION|SLOT_NOT_AVAILABLE|RESOURCE_NOT_AVAILABLE|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING)/)?.[1] ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : publicCode === 'SLOT_NOT_AVAILABLE' || publicCode === 'RESOURCE_NOT_AVAILABLE' ? 409
+      : publicCode === 'LEGACY_DURATION_CONTRACT_EXPIRED' ? 410
       : 400
     return response({ error: { code: publicCode } }, status)
   }
