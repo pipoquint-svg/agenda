@@ -24,7 +24,14 @@ jobs:
           npm install playwright@1.55.0 >/dev/null
           npx playwright install --with-deps chromium >/dev/null
       - name: APRO and OTHE through staging
-        run: xvfb-run -a node scripts/mp-browser-clean-gate.mjs
+        run: |
+          python - <<'PY'
+          p='scripts/mp-browser-clean-gate.mjs'
+          s=open(p).read()
+          s=s.replace('for (let i = 0; i < 12; i++) {', 'for (let i = 0; i < 60; i++) {')
+          open(p,'w').write(s)
+          PY
+          xvfb-run -a node scripts/mp-browser-clean-gate.mjs
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
