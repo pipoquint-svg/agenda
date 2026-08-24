@@ -80,7 +80,10 @@ export function parseMercadoPagoSignature(value: string): { ts: string; v1: stri
 
 export function buildMercadoPagoWebhookManifest(dataId: string, requestId: string, timestamp: string): string {
   if (!dataId || !requestId || !timestamp) throw new Error('MERCADO_PAGO_SIGNATURE_INVALID')
-  return `id:${dataId};request-id:${requestId};ts:${timestamp};`
+  // Mercado Pago requires alphanumeric data.id query values (such as Orders ORD...) in lowercase
+  // when building the HMAC manifest. Numeric IDs are preserved verbatim.
+  const normalizedDataId = /[A-Za-z]/.test(dataId) ? dataId.toLowerCase() : dataId
+  return `id:${normalizedDataId};request-id:${requestId};ts:${timestamp};`
 }
 
 export async function verifyMercadoPagoWebhookSignature(input: {
