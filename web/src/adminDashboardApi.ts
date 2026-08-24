@@ -39,6 +39,11 @@ export type DashboardPendingItem = {
   reason?: string | null
   policy_action_id?: string | null
   resource_id?: string | null
+  amount_paid?: number | string | null
+  amount_due?: number | string | null
+  total_value?: number | string | null
+  collection_id?: string | null
+  collection_sequence?: number | null
 }
 
 export type DashboardOccupancy = {
