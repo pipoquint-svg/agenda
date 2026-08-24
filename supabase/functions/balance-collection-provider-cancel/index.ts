@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     const userAgent = typeof body.user_agent === 'string' ? body.user_agent.slice(0, 1000) : null
     const requestId = typeof body.request_id === 'string' ? body.request_id.slice(0, 200) : null
     if (!/^[0-9a-f-]{36}$/i.test(collectionId)) throw new Error('BALANCE_COLLECTION_ID_INVALID')
-    if (!['SETTLED','PARTIAL','EXPIRED'].includes(reason)) throw new Error('BALANCE_COLLECTION_CANCEL_REASON_INVALID')
+    if (!['SETTLED','NO_SHOW','EXPIRED'].includes(reason)) throw new Error('BALANCE_COLLECTION_CANCEL_REASON_INVALID')
 
     const client = adminClient()
     const { data: collection, error: collectionError } = await client
