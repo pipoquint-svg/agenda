@@ -42,6 +42,23 @@ Deno.test('Mercado Pago webhook manifest preserves Order data id and validates H
   assert(!invalid, 'changed request id must invalidate signature')
 })
 
+Deno.test('Mercado Pago webhook omits request-id component when provider omits the header', async () => {
+  const dataId = 'ORDTST01ABC'
+  const timestamp = '1704908011'
+  const secret = 'test-secret'
+  const canonicalManifest = buildMercadoPagoWebhookManifest(dataId.toLowerCase(), null, timestamp)
+  assert(canonicalManifest === 'id:ordtst01abc;ts:1704908011;', 'request-id must be omitted entirely')
+
+  const signature = await hmacHex(secret, canonicalManifest)
+  const valid = await verifyMercadoPagoWebhookSignature({
+    signature: `ts=${timestamp},v1=${signature}`,
+    requestId: null,
+    dataId,
+    secret,
+  })
+  assert(valid, 'signature without request-id must validate using the reduced manifest')
+})
+
 Deno.test('Mercado Pago Order statuses normalize conservatively', () => {
   assert(normalizeMercadoPagoPaymentStatus('processed') === 'APPROVED', 'processed')
   assert(normalizeMercadoPagoPaymentStatus('failed') === 'REJECTED', 'failed')
