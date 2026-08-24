@@ -117,6 +117,7 @@ jobs:
             admin-appointment-actions
             admin-reschedule-actions
             admin-pre-reservations
+            admin-read-models
             kommo-sync
             email-send
             integration-worker
@@ -174,6 +175,15 @@ jobs:
             exit 1
           fi
 
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request GET "$base/admin-read-models?view=finance")"
+          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+            echo "admin-read-models auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
       - name: Record evidence
         if: always()
         shell: bash
@@ -187,6 +197,7 @@ jobs:
             echo '- Cobranças reais permitidas: `false`'
             echo '- Migration history: validado contra versões de `main`'
             echo '- Google provider: não implantado por este workflow'
+            echo '- Admin read models: financeiro/pacotes/auditoria/equipe/integrações implantados com autenticação e permissão'
             echo '- Kommo adapter/worker: código implantado, sincronização permanece condicionada a settings enabled e gate #112'
             echo '- Email adapter/worker/trigger: código implantado; flags LIVE permanecem em Edge secrets e não são alteradas pelo deploy'
             echo '- Mercado Pago provider: não alterado por este workflow'
