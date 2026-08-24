@@ -22,6 +22,9 @@ type PaymentContext = {
   appointment_status: string
   financial_status: string
   service_name: string
+  commercial_description: string
+  provider_commercial_description: string
+  contracted_minutes: number
   hold_expires_at: string | null
   commercial_value: number | string
   contract_settled: number | string
@@ -74,6 +77,12 @@ function moneyString(value: number | string): string {
   const amount = Number(value)
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('PAYMENT_AMOUNT_INVALID')
   return (Math.round(amount * 100) / 100).toFixed(2)
+}
+
+function safeProviderDescription(value: string): string {
+  const description = typeof value === 'string' ? value.trim() : ''
+  if (!description || description.length > 150) throw new Error('PROVIDER_COMMERCIAL_DESCRIPTION_INVALID')
+  return description
 }
 
 function providerCode(value: unknown): string | null {
@@ -301,6 +310,8 @@ Deno.serve(async (req) => {
           appointment_status: context.appointment_status,
           financial_status: context.financial_status,
           service_name: context.service_name,
+          commercial_description: context.commercial_description,
+          contracted_minutes: context.contracted_minutes,
           hold_expires_at: context.hold_expires_at,
         },
         financial: {
@@ -372,6 +383,7 @@ Deno.serve(async (req) => {
     let paymentMethod: Record<string, unknown>
     const identification = payerIdentification(context.payer.tax_id)
     const amount = moneyString(intent.cash_amount)
+    const providerDescription = safeProviderDescription(context.provider_commercial_description)
 
     if (intent.idempotent_replay) {
       const existing = await loadTransaction(intent.transaction_id)
@@ -406,6 +418,7 @@ Deno.serve(async (req) => {
       processing_mode: 'automatic',
       capture_mode: 'automatic',
       external_reference: intent.transaction_id,
+      description: providerDescription,
       total_amount: amount,
       payer: {
         email: context.payer.email,
@@ -507,7 +520,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
     if (code.startsWith('MERCADO_PAGO_') && code.includes('MISMATCH')) console.error('Mercado Pago validation failed', code)
-    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
+    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PROVIDER_COMMERCIAL_DESCRIPTION_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
       ?? (code.startsWith('MERCADO_PAGO_') && (code.includes('MISMATCH') || code === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED') ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' : code.split(':')[0])
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'PAYMENT_HOLD_EXPIRED' ? 409
