@@ -1,0 +1,70 @@
+name: TEMP Mercado Pago Full Sandbox Orchestrator
+
+on:
+  push:
+    branches:
+      - test/mp-sandbox-full-20260824
+    paths:
+      - .github/workflows/tmp-mp-full-orchestrator.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Dispatch and wait for official Mercado Pago gates on main
+        shell: bash
+        run: |
+          set -u
+
+          dispatch_and_wait() {
+            local workflow="$1"
+            shift
+            local previous
+            previous="$(gh run list --repo "$GH_REPO" --workflow "$workflow" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            echo "Dispatching $workflow; previous run=$previous"
+            gh workflow run "$workflow" --repo "$GH_REPO" --ref main "$@"
+
+            local run_id=""
+            for _ in $(seq 1 30); do
+              sleep 2
+              run_id="$(gh run list --repo "$GH_REPO" --workflow "$workflow" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+              if [[ -n "$run_id" && "$run_id" != "0" && "$run_id" != "$previous" ]]; then
+                break
+              fi
+            done
+            if [[ -z "$run_id" || "$run_id" == "0" || "$run_id" == "$previous" ]]; then
+              echo "RUN_NOT_FOUND workflow=$workflow" >&2
+              return 2
+            fi
+
+            echo "RUN_ID[$workflow]=$run_id"
+            if gh run watch "$run_id" --repo "$GH_REPO" --exit-status; then
+              echo "RESULT[$workflow]=PASS"
+              return 0
+            else
+              echo "RESULT[$workflow]=FAIL run=$run_id" >&2
+              gh run view "$run_id" --repo "$GH_REPO" --json url,status,conclusion,jobs --jq '{url,status,conclusion,jobs:[.jobs[]|{name,conclusion}]}' || true
+              return 1
+            fi
+          }
+
+          failures=0
+
+          dispatch_and_wait mercado-pago-sandbox-deploy.yml -f ref=main -f confirmation=SANDBOX || failures=$((failures+1))
+          dispatch_and_wait mercado-pago-sandbox-probe.yml -f confirmation=SANDBOX || failures=$((failures+1))
+          dispatch_and_wait mercado-pago-sandbox-pix-gate.yml -f confirmation=SANDBOX || failures=$((failures+1))
+          dispatch_and_wait mercado-pago-sandbox-card-gate.yml -f confirmation=SANDBOX || failures=$((failures+1))
+          dispatch_and_wait mercado-pago-staging-browser-gate.yml || failures=$((failures+1))
+
+          echo "TOTAL_FAILURES=$failures"
+          if [[ "$failures" -ne 0 ]]; then
+            exit 1
+          fi
