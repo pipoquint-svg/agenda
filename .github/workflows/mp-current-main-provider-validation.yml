@@ -9,23 +9,33 @@ permissions:
   actions: write
 
 jobs:
-  dispatch-browser:
+  dispatch-provider-gates:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Dispatch and wait official Mercado Pago browser gate
+      - name: Dispatch and wait official Mercado Pago PIX and card gates
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          before=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mercado-pago-staging-browser-gate.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
-          gh workflow run mercado-pago-staging-browser-gate.yml --repo "$GITHUB_REPOSITORY" --ref main
-          run_id=""
-          for i in $(seq 1 30); do
-            candidate=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mercado-pago-staging-browser-gate.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
-            if [[ "$candidate" != "0" && "$candidate" != "$before" ]]; then run_id="$candidate"; break; fi
-            sleep 2
-          done
-          [[ -n "$run_id" ]] || { echo "Official browser run not found" >&2; exit 1; }
-          echo "OFFICIAL_BROWSER_RUN_ID=$run_id"
-          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+
+          dispatch_and_wait() {
+            local workflow="$1"
+            local label="$2"
+            local before candidate run_id
+            before=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main -f confirmation=SANDBOX
+            run_id=""
+            for i in $(seq 1 30); do
+              candidate=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+              if [[ "$candidate" != "0" && "$candidate" != "$before" ]]; then run_id="$candidate"; break; fi
+              sleep 2
+            done
+            [[ -n "$run_id" ]] || { echo "$label run not found" >&2; exit 1; }
+            echo "${label}_RUN_ID=$run_id"
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+          }
+
+          dispatch_and_wait mercado-pago-sandbox-pix-gate.yml PIX
+          dispatch_and_wait mercado-pago-sandbox-card-gate.yml CARD
