@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(9);
+select plan(11);
 
 select ok(
   to_regprocedure('public.service_calculate_payment_cash_amount(numeric,text,numeric)') is not null,
@@ -37,6 +37,19 @@ select is(
 select ok(
   to_regprocedure('public.service_get_public_payment_method_preview(text)') is not null,
   'service-role payment method preview exists'
+);
+
+select is(
+  (select provolatile::text from pg_proc where oid='public.service_get_public_payment_method_preview(text)'::regprocedure),
+  'v',
+  'payment preview is volatile because token resolution records usage and takes a row lock'
+);
+
+select throws_ok(
+  $$select public.service_get_public_payment_method_preview('00000000000000000000000000000000')$$,
+  'P0001',
+  'APPOINTMENT_TOKEN_INVALID',
+  'payment preview reaches token validation instead of failing as a read-only transaction'
 );
 
 select ok(
