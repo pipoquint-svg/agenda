@@ -1,0 +1,97 @@
+name: Mercado Pago Sandbox Auto Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/mercado-pago-payment/**'
+      - 'supabase/functions/mercado-pago-webhook/**'
+      - 'supabase/functions/_shared/mercado-pago.ts'
+      - 'supabase/functions/_shared/mercado-pago-runtime.ts'
+      - 'supabase/functions/_shared/supabase.ts'
+      - '.github/workflows/mercado-pago-sandbox-auto-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agenda-mercado-pago-sandbox-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 12
+    env:
+      APP_ENV: staging
+      MERCADO_PAGO_ENV: sandbox
+      ALLOW_REAL_CUSTOMER_DATA: 'false'
+      ALLOW_REAL_CHARGES: 'false'
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+    steps:
+      - name: Checkout authoritative main
+        uses: actions/checkout@v4
+
+      - name: Require sandbox isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APP_ENV" = staging
+          test "$MERCADO_PAGO_ENV" = sandbox
+          test "$ALLOW_REAL_CUSTOMER_DATA" = false
+          test "$ALLOW_REAL_CHARGES" = false
+          test -n "${SUPABASE_ACCESS_TOKEN:-}"
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Deploy Mercado Pago Edge Functions from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy mercado-pago-payment --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          supabase functions deploy mercado-pago-webhook --project-ref "$SUPABASE_PROJECT_REF" --use-api
+
+      - name: Smoke payment and webhook boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1"
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' --request POST --header 'content-type: application/json' --data '{}' "$base/mercado-pago-payment")"
+          if [[ "$status" != "401" ]] || ! grep -q 'APPOINTMENT_TOKEN_INVALID' "$body"; then
+            echo "mercado-pago-payment boundary smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' --request POST --header 'content-type: application/json' --data '{"type":"order","live_mode":false,"data":{"id":"ORDTSTSANDBOXSMOKE"}}' "$base/mercado-pago-webhook")"
+          if [[ "$status" != "401" ]] || ! grep -q 'MERCADO_PAGO_SIGNATURE_REQUIRED' "$body"; then
+            echo "mercado-pago-webhook boundary smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+      - name: Record evidence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Mercado Pago Sandbox Auto Deploy'
+            echo
+            echo "- SHA: \`${GITHUB_SHA}\`"
+            echo "- Project: \`${SUPABASE_PROJECT_REF}\`"
+            echo '- Environment: `sandbox`'
+            echo '- Real customer data: `false`'
+            echo '- Real charges: `false`'
+            echo '- Functions: `mercado-pago-payment`, `mercado-pago-webhook`'
+            echo '- Shared Mercado Pago changes trigger this deploy automatically.'
+          } >> "$GITHUB_STEP_SUMMARY"
