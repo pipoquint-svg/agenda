@@ -31,6 +31,9 @@ jobs:
           s=s.replace('for (let i = 0; i < 12; i++) {', 'for (let i = 0; i < 60; i++) {')
           s=s.replace('/pagar|pagamento|confirmar|reservar|finalizar|continuar/i.test(text)', '/criar reserva|pagar|pagamento|confirmar|reservar|finalizar|continuar/i.test(text)')
           s=s.replace("{ name: /pagar|pay|continuar|processar|confirmar/i }", "{ name: /^(pagar|pay|processar|confirmar)$/i }")
+          needle="    if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) {"
+          insert="""    for (const frame of page.frames()) {\n      try {\n        const selects = frame.locator('select');\n        for (let si = 0; si < await selects.count(); si++) {\n          const sel = selects.nth(si);\n          if (!await sel.isVisible().catch(() => false)) continue;\n          const opts = await sel.locator('option').evaluateAll((ns) => ns.map((x) => ({ v: x.value, d: x.disabled })).filter((x) => x.v && !x.d));\n          if (opts[0]) await sel.selectOption(opts[0].v).catch(() => {});\n        }\n      } catch {}\n    }\n    if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) {"""
+          s=s.replace(needle,insert)
           open(p,'w').write(s)
           PY
           xvfb-run -a node scripts/mp-browser-clean-gate.mjs
