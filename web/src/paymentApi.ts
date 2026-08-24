@@ -9,6 +9,11 @@ export type PublicPaymentContext = {
     service_name: string
     hold_expires_at: string | null
   }
+  payer: {
+    name: string
+    email: string
+    tax_id: string
+  }
   financial: {
     commercial_value: number | string
     contract_settled: number | string
