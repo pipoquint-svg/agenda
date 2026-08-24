@@ -34,41 +34,15 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('/tmp/mp-browser/gate.mjs')
-          s=p.read_text()
-          old="""  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-  await page.getByLabel('Quantidade de pessoas').waitFor();
-  await page.getByRole('button', {name:'Continuar'}).click();
-  await page.getByText('Extras', {exact:true}).waitFor();
-  await page.getByRole('button', {name:'Continuar'}).click();
-
-  const day = page.locator('button[role=\"gridcell\"]:not([disabled])').first();
-  await day.waitFor({state:'visible', timeout:45000});
-  await day.click();
-  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
-  await time.waitFor({state:'visible', timeout:20000});
-  await time.click();
-  await page.getByRole('button', {name:'Reservar este horário'}).click();
-"""
-          new="""  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-
-  const day = page.locator('button[role=\"gridcell\"]:not([disabled])').first();
-  await day.waitFor({state:'visible', timeout:45000});
-  await day.click();
-  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
-  await time.waitFor({state:'visible', timeout:20000});
-  await time.click();
-  await page.getByRole('button', {name:'Reservar este horário'}).click();
-
-  await page.getByLabel('Quantidade de pessoas').waitFor({timeout:30000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-  await page.getByText('Extras', {exact:true}).waitFor({timeout:30000});
-  await page.getByRole('button', {name:'Continuar'}).click();
-"""
-          if old not in s:
-              raise SystemExit('OFFICIAL_FLOW_BLOCK_NOT_FOUND')
-          p.write_text(s.replace(old,new,1))
+          lines=p.read_text().splitlines()
+          people=next(i for i,x in enumerate(lines) if "getByLabel('Quantidade de pessoas')" in x)
+          date=next(i for i,x in enumerate(lines) if "const day = page.locator" in x)
+          details=next(i for i,x in enumerate(lines) if "getByLabel('Nome completo')" in x)
+          if not (people < date < details):
+              raise SystemExit('UNEXPECTED_OFFICIAL_FLOW_ORDER')
+          people_block=lines[people:date]
+          date_block=lines[date:details]
+          p.write_text('\n'.join(lines[:people] + date_block + people_block + lines[details:]) + '\n')
           print('CURRENT_FLOW_PATCH=APPLIED')
           PY
 
