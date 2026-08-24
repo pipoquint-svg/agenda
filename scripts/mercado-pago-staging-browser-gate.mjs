@@ -236,7 +236,7 @@ async function scenario(name) {
     await reachPayment(page, name)
     await fillBrick(page, name)
     if (name === 'APRO') {
-      await page.getByText('Sua reserva está confirmada.', { exact: false }).waitFor({ timeout: 60000 })
+      await page.getByText('Reserva confirmada', { exact: false }).waitFor({ timeout: 60000 })
       console.log('APRO_BROWSER_HTTPS=PASS')
     } else {
       await page.getByText(/Mercado Pago recusou esta tentativa|Pagamento recusado/i).first().waitFor({ timeout: 60000 })
