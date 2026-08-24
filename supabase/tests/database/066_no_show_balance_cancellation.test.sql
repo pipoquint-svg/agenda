@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(5);
+select plan(6);
 select set_config('agenda.test_now','2026-08-24 15:00:00-03',true);
 
 insert into public.categories(id,name,slug)
@@ -39,6 +39,7 @@ select is((select status from public.appointment_balance_collections where appoi
 select is((select count(*)::integer from public.integration_jobs where job_type='RENTAL_BALANCE_CANCEL_NO_SHOW' and payload_json->>'appointment_id'='96700000-0000-0000-0000-000000000006'),0,'NO_SHOW does not queue provider cancellation');
 select throws_ok($$select public.service_mark_balance_collection_cancelled((select id from public.appointment_balance_collections where appointment_id='96700000-0000-0000-0000-000000000006'),'NO_SHOW',null,null,null,null)$$,'22023','BALANCE_COLLECTION_CANCEL_REASON_INVALID','NO_SHOW cannot be used as a cancellation reason for a balance collection');
 select set_config('agenda.test_now','2026-08-26 15:01:00-03',true);
+select is(public.expire_due_balance_collections(),1,'NO_SHOW balance collection expires after the 48h payment window');
 select is((select count(*)::integer from public.appointment_overdue_balances where appointment_id='96700000-0000-0000-0000-000000000006'),1,'NO_SHOW enters delinquency after its balance collection expires');
 
 select * from finish();
