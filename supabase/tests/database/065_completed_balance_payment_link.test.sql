@@ -39,15 +39,18 @@ insert into public.appointment_balance_collections(
  '96600000-0000-0000-0000-000000000007','96600000-0000-0000-0000-000000000006',1,'AUTO_START','PENDING',500,
  '2026-08-24 15:00:00-03','2026-08-26 15:00:00-03'
 );
-insert into public.appointment_access_tokens(
- appointment_id,token_hash,scope,expires_at,delivery_channel,destination_masked,balance_collection_id
-) values(
- '96600000-0000-0000-0000-000000000006',encode(digest('completed-balance-token','sha256'),'hex'),'PAY',
- '2026-08-26 15:00:00-03','INTERNAL','verified-email','96600000-0000-0000-0000-000000000007'
-);
+
+create temporary table test_completed_balance_token as
+select public.service_verify_balance_collection_email(
+  '96600000-0000-0000-0000-000000000007',
+  'completed@example.com'
+) as payload;
 
 select lives_ok(
-  $$select public.service_create_payment_intent_by_token('completed-balance-token','FULL','CARD','completedBalance001')$$,
+  $$select public.service_create_payment_intent_by_token(
+    (select payload->>'access_token' from test_completed_balance_token),
+    'FULL','CARD','completedBalance001'
+  )$$,
   'valid 48h balance link remains payable after appointment becomes COMPLETED'
 );
 select is(
