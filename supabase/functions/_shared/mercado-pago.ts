@@ -83,6 +83,22 @@ export function buildMercadoPagoWebhookManifest(dataId: string, requestId: strin
   return `id:${dataId};request-id:${requestId};ts:${timestamp};`
 }
 
+function normalizedMercadoPagoWebhookDataId(dataId: string): string {
+  return /[A-Za-z]/.test(dataId) ? dataId.toLowerCase() : dataId
+}
+
+async function verifyHmac(secret: string, signatureHex: string, manifest: string): Promise<boolean> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  )
+  return crypto.subtle.verify('HMAC', key, hexToArrayBuffer(signatureHex), encoder.encode(manifest))
+}
+
 export async function verifyMercadoPagoWebhookSignature(input: {
   signature: string
   requestId: string
@@ -91,16 +107,19 @@ export async function verifyMercadoPagoWebhookSignature(input: {
 }): Promise<boolean> {
   if (!input.secret) throw new Error('MERCADO_PAGO_WEBHOOK_SECRET_NOT_CONFIGURED')
   const parsed = parseMercadoPagoSignature(input.signature)
-  const manifest = buildMercadoPagoWebhookManifest(input.dataId, input.requestId, parsed.ts)
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(input.secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  )
-  return crypto.subtle.verify('HMAC', key, hexToArrayBuffer(parsed.v1), encoder.encode(manifest))
+
+  // Mercado Pago requires alphanumeric query data.id values (Orders ORD...) in lowercase
+  // when constructing the signed manifest. Verify the canonical provider form first.
+  const normalizedId = normalizedMercadoPagoWebhookDataId(input.dataId)
+  const canonicalManifest = buildMercadoPagoWebhookManifest(normalizedId, input.requestId, parsed.ts)
+  if (await verifyHmac(input.secret, parsed.v1, canonicalManifest)) return true
+
+  // Preserve compatibility with numeric IDs and any legacy exact-case test fixtures.
+  if (normalizedId !== input.dataId) {
+    const legacyManifest = buildMercadoPagoWebhookManifest(input.dataId, input.requestId, parsed.ts)
+    return verifyHmac(input.secret, parsed.v1, legacyManifest)
+  }
+  return false
 }
 
 function orderStatusForClient(status: string | null | undefined, statusDetail?: string | null): MercadoPagoPaymentSnapshot['status'] {
