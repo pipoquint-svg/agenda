@@ -38,8 +38,16 @@ export type ProviderPayment = {
   payment_type_id: string | null
   external_reference: string | null
   date_approved: string | null
-  point_of_interaction?: { transaction_data?: { qr_code?: string | null; qr_code_base64?: string | null; ticket_url?: string | null } | null } | null
-  three_ds_info?: { external_resource_url?: string | null } | null
+  point_of_interaction?: {
+    transaction_data?: {
+      qr_code?: string | null
+      qr_code_base64?: string | null
+      ticket_url?: string | null
+    } | null
+  } | null
+  three_ds_info?: {
+    external_resource_url?: string | null
+  } | null
 }
 
 export type PaymentResponse = {
@@ -78,9 +86,15 @@ function appointmentIdFromSession(): string | null {
   }
 }
 
-function intendedCashAmount(context: PublicPaymentContext | undefined, kind: 'MINIMUM' | 'FULL', method: 'PIX' | 'CARD'): number {
+function intendedCashAmount(
+  context: PublicPaymentContext | undefined,
+  kind: 'MINIMUM' | 'FULL',
+  method: 'PIX' | 'CARD',
+): number {
   if (!context) return 0
-  const contractAmount = kind === 'FULL' ? numeric(context.financial.contract_balance) : numeric(context.financial.minimum_due_contract_amount)
+  const contractAmount = kind === 'FULL'
+    ? numeric(context.financial.contract_balance)
+    : numeric(context.financial.minimum_due_contract_amount)
   if (method !== 'PIX') return contractAmount
   return Math.max(contractAmount * (1 - numeric(context.financial.pix_discount_percent) / 100), 0)
 }
@@ -90,21 +104,42 @@ function trackProviderState(accessToken: string, response: PaymentResponse, fall
   const appointmentId = appointmentIdFromSession()
   const method = response.transaction?.method ?? fallbackMethod ?? 'PIX'
   const providerStatus = response.provider?.status?.toLowerCase() ?? ''
+
   if (providerStatus === 'rejected' || response.state?.transaction_status === 'REJECTED') {
-    trackFunnelStep('payment_rejected', { payment_method: method, status_detail: response.provider?.status_detail ?? undefined, provider: 'MERCADO_PAGO' })
+    trackFunnelStep('payment_rejected', {
+      payment_method: method,
+      status_detail: response.provider?.status_detail ?? undefined,
+      provider: 'MERCADO_PAGO',
+    })
     return
   }
+
   if ((response.state?.appointment_status === 'CONFIRMED' || providerStatus === 'approved') && context && appointmentId) {
-    trackAppointmentConfirmed({ appointmentId, publicCode: context.appointment.public_code, serviceName: context.appointment.service_name, commercialValue: numeric(context.financial.commercial_value), paymentMethod: method, cashCollected: numeric(response.transaction?.cash_amount ?? response.provider?.transaction_amount) })
+    trackAppointmentConfirmed({
+      appointmentId,
+      publicCode: context.appointment.public_code,
+      serviceName: context.appointment.service_name,
+      commercialValue: numeric(context.financial.commercial_value),
+      paymentMethod: method,
+      cashCollected: numeric(response.transaction?.cash_amount ?? response.provider?.transaction_amount),
+    })
     return
   }
-  if (providerStatus === 'pending') trackFunnelStep('payment_pending', { payment_method: method, provider: 'MERCADO_PAGO' })
+
+  if (providerStatus === 'pending') {
+    trackFunnelStep('payment_pending', { payment_method: method, provider: 'MERCADO_PAGO' })
+  }
 }
 
 async function callPaymentEndpoint(accessToken: string, init: RequestInit): Promise<Response> {
   return fetch(`${functionsBaseUrl}/mercado-pago-payment`, {
     ...init,
-    headers: { apikey: publicApiKey, authorization: `Bearer ${publicApiKey}`, 'x-appointment-token': accessToken, ...(init.headers ?? {}) },
+    headers: {
+      apikey: publicApiKey,
+      authorization: `Bearer ${publicApiKey}`,
+      'x-appointment-token': accessToken,
+      ...(init.headers ?? {}),
+    },
   })
 }
 
@@ -120,26 +155,70 @@ export async function getPaymentContext(accessToken: string): Promise<PublicPaym
   return result
 }
 
-export async function createPixPayment(accessToken: string, kind: 'MINIMUM' | 'FULL', requestKey: string): Promise<PaymentResponse> {
+export async function createPixPayment(
+  accessToken: string,
+  kind: 'MINIMUM' | 'FULL',
+  requestKey: string,
+): Promise<PaymentResponse> {
   const context = paymentContextCache.get(accessToken)
   const appointmentId = appointmentIdFromSession()
-  if (appointmentId) trackPaymentInfo({ appointmentId, method: 'PIX', value: intendedCashAmount(context, kind, 'PIX'), paymentKind: kind, attemptId: requestKey })
-  const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ payment_kind: kind, method: 'PIX', request_key: requestKey }) }))
+  if (appointmentId) {
+    trackPaymentInfo({
+      appointmentId,
+      method: 'PIX',
+      value: intendedCashAmount(context, kind, 'PIX'),
+      paymentKind: kind,
+      attemptId: requestKey,
+    })
+  }
+
+  const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ payment_kind: kind, method: 'PIX', request_key: requestKey }),
+  }))
   trackProviderState(accessToken, result, 'PIX')
   return result
 }
 
-export async function createCardPayment(accessToken: string, kind: 'MINIMUM' | 'FULL', requestKey: string, card: { token: string; payment_method_id: string; installments: number; issuer_id?: string | number | null }): Promise<PaymentResponse> {
+export async function createCardPayment(
+  accessToken: string,
+  kind: 'MINIMUM' | 'FULL',
+  requestKey: string,
+  card: {
+    token: string
+    payment_method_id: string
+    installments: number
+    issuer_id?: string | number | null
+  },
+): Promise<PaymentResponse> {
   const context = paymentContextCache.get(accessToken)
   const appointmentId = appointmentIdFromSession()
-  if (appointmentId) trackPaymentInfo({ appointmentId, method: 'CARD', value: intendedCashAmount(context, kind, 'CARD'), paymentKind: kind, attemptId: requestKey })
-  const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ payment_kind: kind, method: 'CARD', request_key: requestKey, card }) }))
+  if (appointmentId) {
+    trackPaymentInfo({
+      appointmentId,
+      method: 'CARD',
+      value: intendedCashAmount(context, kind, 'CARD'),
+      paymentKind: kind,
+      attemptId: requestKey,
+    })
+  }
+
+  const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ payment_kind: kind, method: 'CARD', request_key: requestKey, card }),
+  }))
   trackProviderState(accessToken, result, 'CARD')
   return result
 }
 
 export async function syncProviderPayment(accessToken: string, providerOrderId: string): Promise<PaymentResponse> {
-  const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'SYNC', provider_payment_id: providerOrderId }) }))
+  const result = await decode<PaymentResponse>(await callPaymentEndpoint(accessToken, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'SYNC', provider_payment_id: providerOrderId }),
+  }))
   trackProviderState(accessToken, result)
   return result
 }
