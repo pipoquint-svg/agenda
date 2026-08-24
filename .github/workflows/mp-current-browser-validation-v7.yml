@@ -1,0 +1,45 @@
+name: MP Current Browser Validation V7
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/mp-current-browser-validation-v7.yml
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Playwright
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mp-browser && cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Current staging APRO and OTHE
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '/cat >\/tmp\/mp-browser\/gate.mjs <<'"'"'EOF'"'"'/{flag=1;next} flag && /^          EOF$/{exit} flag{sub(/^          /,"");print}' .github/workflows/mp-current-browser-validation-v6.yml > /tmp/mp-browser/gate.mjs
+          python - <<'PY'
+          p='/tmp/mp-browser/gate.mjs'
+          s=open(p).read()
+          s=s.replace("[/Criar reserva/i,/Continuar para pagamento/i,/Confirmar e continuar/i,/Continuar/i]","[/pagar/i,/pagamento/i,/confirmar/i,/reservar/i,/finalizar/i,/continuar/i]")
+          s=s.replace("if(!submitted)throw new Error('NO_SUBMIT');","if(!submitted){const all=page.getByRole('button');const labels=[];for(let i=0;i<await all.count();i++){const b=all.nth(i);if(await b.isVisible().catch(()=>false))labels.push((await b.innerText().catch(()=>'' )).trim())}console.log('VISIBLE_BUTTONS='+JSON.stringify(labels));throw new Error('NO_SUBMIT');}")
+          open(p,'w').write(s)
+          PY
+          cd /tmp/mp-browser && xvfb-run -a node gate.mjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp-current-browser-validation-v7
+          path: /tmp/mp-browser/*.png
+          if-no-files-found: ignore
