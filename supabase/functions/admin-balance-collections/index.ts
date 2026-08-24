@@ -125,12 +125,31 @@ Deno.serve(async (req) => {
       }
 
       if (activeCollectionId && settled) {
-        const cancellation = await cancelCollectionProvider({
-          collectionId: activeCollectionId,
-          adminId: admin.adminId,
-          reason: 'SETTLED',
-          evidence: requestEvidence,
-        })
+        let cancellation: Awaited<ReturnType<typeof cancelCollectionProvider>>
+        try {
+          cancellation = await cancelCollectionProvider({
+            collectionId: activeCollectionId,
+            adminId: admin.adminId,
+            reason: 'SETTLED',
+            evidence: requestEvidence,
+          })
+        } catch (cause) {
+          const failureCode = cause instanceof Error ? cause.message.split(':')[0] : 'BALANCE_PROVIDER_CANCEL_INTERNAL_CALL_FAILED'
+          const { error: divergenceError } = await client.from('balance_collection_divergences').insert({
+            appointment_id: appointmentId,
+            balance_collection_id: activeCollectionId,
+            divergence_type: 'PROVIDER_CANCEL_FAILED',
+            provider: 'MERCADO_PAGO',
+            details_json: { reason: 'SETTLED', code: failureCode, layer: 'INTERNAL_CALL' },
+          })
+          return json({
+            error: { code: divergenceError ? 'BALANCE_PROVIDER_CANCEL_DIVERGENCE_RECORD_FAILED' : 'BALANCE_PROVIDER_CANCEL_DIVERGENCE' },
+            payment_recorded: true,
+            provider_cleanup_pending: true,
+            data: result,
+          }, divergenceError ? 500 : 409)
+        }
+
         if (!cancellation.ok) {
           return json({
             error: { code: 'BALANCE_PROVIDER_CANCEL_DIVERGENCE' },
