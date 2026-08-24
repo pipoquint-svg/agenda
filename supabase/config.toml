@@ -73,6 +73,11 @@ verify_jwt = false
 [functions.mercado-pago-payment]
 verify_jwt = false
 
+# Read-only payment-method preview. It validates the opaque appointment token itself,
+# is rate-limited, and returns backend-calculated cash amounts only.
+[functions.payment-preview]
+verify_jwt = false
+
 # Mercado Pago authenticates webhook requests with x-signature/x-request-id.
 [functions.mercado-pago-webhook]
 verify_jwt = false

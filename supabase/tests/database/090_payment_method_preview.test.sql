@@ -1,0 +1,59 @@
+begin;
+
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions;
+
+select plan(9);
+
+select ok(
+  to_regprocedure('public.service_calculate_payment_cash_amount(numeric,text,numeric)') is not null,
+  'authoritative payment cash calculator exists'
+);
+
+select is(
+  (public.service_calculate_payment_cash_amount(180, 'PIX', 5)->>'cash_amount')::numeric,
+  171.00::numeric,
+  'PIX 5 percent preview for full R$180 is R$171'
+);
+
+select is(
+  (public.service_calculate_payment_cash_amount(180, 'PIX', 5)->>'payment_discount_amount')::numeric,
+  9.00::numeric,
+  'PIX discount amount is R$9 for R$180'
+);
+
+select is(
+  (public.service_calculate_payment_cash_amount(90, 'PIX', 5)->>'cash_amount')::numeric,
+  85.50::numeric,
+  'PIX 5 percent preview for minimum R$90 is R$85.50'
+);
+
+select is(
+  (public.service_calculate_payment_cash_amount(180, 'CARD', 5)->>'cash_amount')::numeric,
+  180.00::numeric,
+  'card preview never receives PIX discount'
+);
+
+select ok(
+  to_regprocedure('public.service_get_public_payment_method_preview(text)') is not null,
+  'service-role payment method preview exists'
+);
+
+select ok(
+  not has_function_privilege('authenticated', 'public.service_get_public_payment_method_preview(text)', 'EXECUTE'),
+  'authenticated browser role cannot call preview RPC directly'
+);
+
+select ok(
+  has_function_privilege('service_role', 'public.service_get_public_payment_method_preview(text)', 'EXECUTE'),
+  'service role can call preview RPC behind Edge boundary'
+);
+
+select ok(
+  pg_get_functiondef('public.create_payment_intent(uuid,numeric,text,text)'::regprocedure)
+    like '%service_calculate_payment_cash_amount%',
+  'payment intent uses the same authoritative cash calculator as preview'
+);
+
+select * from finish();
+rollback;
