@@ -20,6 +20,7 @@ export type PublicPaymentContext = {
     full_available: boolean
     pix_discount_percent: number | string
   }
+  // Public capability flags only. They never expose provider credentials or environment details.
   payment_methods: {
     pix_available: boolean
     card_backend_available: boolean
