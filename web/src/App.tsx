@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
+import { AdminBalancesPage } from './AdminBalancesPage'
 import { AdminDashboard } from './AdminDashboard'
 import { AgendaAdmin } from './AgendaAdmin'
+import { BalanceCollectionPage } from './BalanceCollectionPage'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
@@ -52,6 +54,7 @@ function applicationPath(): string {
 export function App() {
   const path = applicationPath()
 
+  if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
@@ -60,6 +63,7 @@ export function App() {
   if (path === '/agendar/sabrina') return <PublicBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep') return <PublicBookingRoute slug="blacksheep" />
   if (path === '/reserva/gerenciar' || path === '/gerenciar-reserva') return <ManageReservation />
+  if (path === '/reserva/saldo' || path === '/pagar-saldo') return <BalanceCollectionPage />
 
   const params = new URLSearchParams(window.location.search)
   return (

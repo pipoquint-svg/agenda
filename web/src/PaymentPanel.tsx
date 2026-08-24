@@ -24,10 +24,13 @@ function paymentError(error: unknown): string {
   const raw = error instanceof Error ? error.message : 'PAYMENT_FAILED'
   const map: Array<[string, string]> = [
     ['PAYMENT_HOLD_EXPIRED', 'O prazo para pagamento terminou. O horário foi liberado.'],
+    ['BALANCE_COLLECTION_INVALID_OR_EXPIRED', 'O link de pagamento do saldo expirou. Solicite uma nova cobrança à equipe.'],
+    ['BALANCE_COLLECTION_FULL_PAYMENT_REQUIRED', 'Esta cobrança aceita apenas o pagamento integral do saldo em aberto.'],
+    ['BALANCE_COLLECTION_NO_SHOW_DENIED', 'Esta cobrança não está mais disponível. Entre em contato com a equipe.'],
     ['CONFIRMATION_PAYMENT_ALREADY_SATISFIED', 'A entrada mínima já foi atingida. Atualize a página para ver o saldo.'],
     ['MERCADO_PAGO_PAYMENT_REJECTED', 'O Mercado Pago recusou esta tentativa. Revise o meio de pagamento e tente novamente.'],
-    ['MERCADO_PAGO_PAYMENT_VALIDATION_FAILED', 'O pagamento não pôde ser validado com segurança. Nenhuma reserva foi confirmada.'],
-    ['MERCADO_PAGO_TEMPORARY_FAILURE', 'O Mercado Pago está temporariamente indisponível. Tente novamente sem refazer a reserva.'],
+    ['MERCADO_PAGO_PAYMENT_VALIDATION_FAILED', 'O pagamento não pôde ser validado com segurança.'],
+    ['MERCADO_PAGO_TEMPORARY_FAILURE', 'O Mercado Pago está temporariamente indisponível. Tente novamente.'],
     ['APPOINTMENT_TOKEN_INVALID', 'O link de pagamento não é válido.'],
     ['APPOINTMENT_TOKEN_EXPIRED', 'O link de pagamento expirou.'],
     ['RATE_LIMITED', 'Muitas tentativas em sequência. Aguarde alguns minutos.'],
@@ -57,19 +60,21 @@ function ThreeDSChallenge({ externalResourceUrl }: { externalResourceUrl: string
     <div className="three-ds-box" aria-live="polite">
       <div>
         <strong>Confirme o pagamento com seu banco</strong>
-        <p>Conclua a autenticação abaixo. A reserva só será confirmada após o Mercado Pago validar o resultado.</p>
+        <p>Conclua a autenticação abaixo. O pagamento só será concluído após o Mercado Pago validar o resultado.</p>
       </div>
       <iframe src={challengeUrl} title="Autenticação 3DS do cartão" className="three-ds-frame" />
     </div>
   )
 }
 
-export function PaymentPanel({ accessToken, onConfirmed }: {
+export function PaymentPanel({ accessToken, onConfirmed, mode = 'BOOKING' }: {
   accessToken: string
   onConfirmed?: () => void
+  mode?: 'BOOKING' | 'BALANCE'
 }) {
+  const balanceMode = mode === 'BALANCE'
   const [context, setContext] = useState<PublicPaymentContext | null>(null)
-  const [kind, setKind] = useState<'MINIMUM' | 'FULL'>('MINIMUM')
+  const [kind, setKind] = useState<'MINIMUM' | 'FULL'>(balanceMode ? 'FULL' : 'MINIMUM')
   const [method, setMethod] = useState<'PIX' | 'CARD'>('PIX')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,12 +93,14 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
   async function reloadContext() {
     const next = await getPaymentContext(accessToken)
     setContext(next)
-    if (!next.financial.minimum_available) setKind('FULL')
+    if (balanceMode || !next.financial.minimum_available) setKind('FULL')
 
     const cardAvailable = cardClientConfigured && next.payment_methods.card_backend_available
     if (!next.payment_methods.pix_available && cardAvailable) setMethod('CARD')
 
-    if (next.appointment.appointment_status === 'CONFIRMED' || numeric(next.financial.contract_balance) <= 0) {
+    const settled = numeric(next.financial.contract_balance) <= 0
+    const bookingConfirmed = !balanceMode && next.appointment.appointment_status === 'CONFIRMED'
+    if (settled || bookingConfirmed) {
       setConfirmed(true)
       onConfirmed?.()
     }
@@ -102,7 +109,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
   async function syncCurrentPayment(providerOrderId: string) {
     const synced = await syncProviderPayment(accessToken, providerOrderId)
     setPayment((current) => current ? ({ ...current, ...synced }) : synced)
-    if (synced.state?.appointment_status === 'CONFIRMED' || synced.provider?.status === 'approved') {
+    const providerApproved = synced.provider?.status === 'approved'
+    const bookingConfirmed = !balanceMode && synced.state?.appointment_status === 'CONFIRMED'
+    if (providerApproved || bookingConfirmed) {
       setConfirmed(true)
       await reloadContext()
       onConfirmed?.()
@@ -112,7 +121,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
 
   useEffect(() => {
     reloadContext().catch((cause) => setError(paymentError(cause)))
-  }, [accessToken])
+  }, [accessToken, balanceMode])
 
   const providerId = payment?.provider?.id || null
   const providerPending = payment?.provider?.status === 'pending'
@@ -134,7 +143,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [accessToken, providerId, providerPending, confirmed])
+  }, [accessToken, providerId, providerPending, confirmed, balanceMode])
 
   useEffect(() => {
     if (!providerId || !challenge?.external_resource_url || confirmed) return
@@ -144,7 +153,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [accessToken, providerId, challenge?.external_resource_url, confirmed])
+  }, [accessToken, providerId, challenge?.external_resource_url, confirmed, balanceMode])
 
   const contractAmount = useMemo(() => {
     if (!context) return 0
@@ -164,7 +173,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     try {
       const next = await createPixPayment(accessToken, kind, randomRequestKey())
       setPayment(next)
-      if (next.state?.appointment_status === 'CONFIRMED' || next.provider?.status === 'approved') {
+      const providerApproved = next.provider?.status === 'approved'
+      const bookingConfirmed = !balanceMode && next.state?.appointment_status === 'CONFIRMED'
+      if (providerApproved || bookingConfirmed) {
         setConfirmed(true)
         await reloadContext()
         onConfirmed?.()
@@ -188,7 +199,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
         issuer_id: row.issuer_id == null ? null : String(row.issuer_id),
       })
       setPayment(next)
-      if (next.state?.appointment_status === 'CONFIRMED' || next.provider?.status === 'approved') {
+      const providerApproved = next.provider?.status === 'approved'
+      const bookingConfirmed = !balanceMode && next.state?.appointment_status === 'CONFIRMED'
+      if (providerApproved || bookingConfirmed) {
         setConfirmed(true)
         await reloadContext()
         onConfirmed?.()
@@ -205,8 +218,8 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     return (
       <section className="payment-panel payment-confirmed" aria-live="polite">
         <small>Pagamento confirmado</small>
-        <h3>Sua reserva está confirmada.</h3>
-        <p>Você pode guardar o código da reserva e fechar esta página.</p>
+        <h3>{balanceMode ? 'Saldo quitado.' : 'Sua reserva está confirmada.'}</h3>
+        <p>{balanceMode ? 'O pagamento foi confirmado e não há saldo pendente nesta cobrança.' : 'Você pode guardar o código da reserva e fechar esta página.'}</p>
       </section>
     )
   }
@@ -224,8 +237,8 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     <section className="payment-panel">
       <div className="payment-heading">
         <small>Pagamento seguro</small>
-        <h3>Confirme sua reserva</h3>
-        <p>O valor é calculado pela Agenda. A confirmação só acontece após validação pelo Mercado Pago.</p>
+        <h3>{balanceMode ? 'Pague o saldo da locação' : 'Confirme sua reserva'}</h3>
+        <p>{balanceMode ? 'O valor corresponde ao saldo em aberto apurado para esta cobrança.' : 'O valor é calculado pela Agenda. A confirmação só acontece após validação pelo Mercado Pago.'}</p>
       </div>
 
       {error ? <div className="form-alert error" role="alert">{error}</div> : null}
@@ -233,12 +246,12 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
       {noPaymentMethod ? (
         <div className="form-alert error" role="alert">
           <strong>O pagamento está temporariamente indisponível.</strong>
-          <p>Seu horário continua vinculado a esta reserva até o prazo informado. Entre em contato para concluir o pagamento.</p>
+          <p>{balanceMode ? 'Entre em contato com a equipe para concluir o pagamento do saldo.' : 'Seu horário continua vinculado a esta reserva até o prazo informado. Entre em contato para concluir o pagamento.'}</p>
         </div>
       ) : null}
 
       <div className="payment-kind-grid">
-        {context.financial.minimum_available ? (
+        {!balanceMode && context.financial.minimum_available ? (
           <label className={`payment-choice ${kind === 'MINIMUM' ? 'selected' : ''}`}>
             <input type="radio" name="payment-kind" checked={kind === 'MINIMUM'} onChange={() => { setKind('MINIMUM'); setPayment(null) }} />
             <span>
@@ -248,9 +261,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
           </label>
         ) : null}
         <label className={`payment-choice ${kind === 'FULL' ? 'selected' : ''}`}>
-          <input type="radio" name="payment-kind" checked={kind === 'FULL'} onChange={() => { setKind('FULL'); setPayment(null) }} />
+          <input type="radio" name="payment-kind" checked={kind === 'FULL'} disabled={balanceMode} onChange={() => { setKind('FULL'); setPayment(null) }} />
           <span>
-            <strong>Pagar 100% do saldo</strong>
+            <strong>{balanceMode ? 'Pagar saldo integral' : 'Pagar 100% do saldo'}</strong>
             <small>{money.format(numeric(context.financial.contract_balance))}</small>
           </span>
         </label>
