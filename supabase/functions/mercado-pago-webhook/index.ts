@@ -159,7 +159,10 @@ Deno.serve(async (req) => {
   const type = typeof body.type === 'string' ? body.type : ''
   const liveMode = typeof body.live_mode === 'boolean' ? body.live_mode : null
 
-  if (!dataId || !signature || !requestId) {
+  // data.id and x-signature are required. Mercado Pago documents that signature
+  // manifest components absent from a notification must be omitted, so an absent
+  // x-request-id is valid input and must not be represented as request-id:;.
+  if (!dataId || !signature) {
     console.error('[OPERATION_ALERT] MERCADO_PAGO_WEBHOOK_SIGNATURE_COMPONENT_MISSING', {
       has_data_id: Boolean(dataId),
       has_signature: Boolean(signature),
@@ -173,7 +176,7 @@ Deno.serve(async (req) => {
   try {
     const valid = await verifyMercadoPagoWebhookSignature({
       signature,
-      requestId,
+      requestId: requestId || null,
       dataId,
       secret: requiredEnv('MERCADO_PAGO_WEBHOOK_SECRET'),
     })
@@ -181,6 +184,7 @@ Deno.serve(async (req) => {
       console.error('[OPERATION_ALERT] MERCADO_PAGO_WEBHOOK_SIGNATURE_INVALID', {
         data_id: dataId,
         data_id_alphanumeric: /[A-Za-z]/.test(dataId),
+        has_request_id: Boolean(requestId),
         request_id_prefix: safeRequestId(requestId),
         signature_ts: signatureTimestamp(signature),
         event_type: type || null,
@@ -276,7 +280,7 @@ Deno.serve(async (req) => {
     }
 
     const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
-    const notificationId = body.id == null ? requestId : String(body.id)
+    const notificationId = body.id == null ? (requestId || dataId) : String(body.id)
     const action = typeof body.action === 'string' ? body.action : 'order.updated'
     const eventKey = `webhook-order:${notificationId}:${action}:${dataId}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`
 
