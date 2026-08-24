@@ -1,0 +1,113 @@
+name: TEMP Mercado Pago Browser Current Flow
+
+on:
+  push:
+    branches:
+      - test/mp-sandbox-full-20260824
+    paths:
+      - .github/workflows/tmp-mp-browser-current-flow.yml
+
+permissions:
+  contents: write
+
+jobs:
+  browser-current-flow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+    steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+        with:
+          ref: test/mp-sandbox-full-20260824
+          fetch-depth: 0
+
+      - name: Build current-flow gate from official main harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git show origin/main:.github/workflows/mercado-pago-staging-browser-gate.yml > /tmp/official-browser.yml
+          mkdir -p /tmp/mp-browser
+          awk '/cat > \/tmp\/mp-browser\/gate.mjs <<'"'"'EOF'"'"'/{flag=1;next} flag && /^[[:space:]]*EOF$/{exit} flag {sub(/^          /,""); print}' /tmp/official-browser.yml > /tmp/mp-browser/gate.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/mp-browser/gate.mjs')
+          s=p.read_text()
+          old="""  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+  await page.getByLabel('Quantidade de pessoas').waitFor();
+  await page.getByRole('button', {name:'Continuar'}).click();
+  await page.getByText('Extras', {exact:true}).waitFor();
+  await page.getByRole('button', {name:'Continuar'}).click();
+
+  const day = page.locator('button[role=\"gridcell\"]:not([disabled])').first();
+  await day.waitFor({state:'visible', timeout:45000});
+  await day.click();
+  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
+  await time.waitFor({state:'visible', timeout:20000});
+  await time.click();
+  await page.getByRole('button', {name:'Reservar este horário'}).click();
+"""
+          new="""  await page.getByText('Quanto tempo você precisa no estúdio?', {exact:false}).waitFor({timeout:30000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+
+  const day = page.locator('button[role=\"gridcell\"]:not([disabled])').first();
+  await day.waitFor({state:'visible', timeout:45000});
+  await day.click();
+  const time = page.getByRole('button', {name:/^\\d{2}:\\d{2}$/}).first();
+  await time.waitFor({state:'visible', timeout:20000});
+  await time.click();
+  await page.getByRole('button', {name:'Reservar este horário'}).click();
+
+  await page.getByLabel('Quantidade de pessoas').waitFor({timeout:30000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+  await page.getByText('Extras', {exact:true}).waitFor({timeout:30000});
+  await page.getByRole('button', {name:'Continuar'}).click();
+"""
+          if old not in s:
+              raise SystemExit('OFFICIAL_FLOW_BLOCK_NOT_FOUND')
+          p.write_text(s.replace(old,new,1))
+          print('CURRENT_FLOW_PATCH=APPLIED')
+          PY
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Run APRO and OTHE through current staging flow
+        id: browser
+        shell: bash
+        run: |
+          set +e
+          cd /tmp/mp-browser
+          xvfb-run -a node gate.mjs 2>&1 | tee /tmp/mp-browser-current.log
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/mp-browser-current.rc
+          exit "$rc"
+
+      - name: Persist browser evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc="$(cat /tmp/mp-browser-current.rc 2>/dev/null || echo 99)"
+          {
+            echo "generated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "official_harness_source=origin/main"
+            echo "flow_patch=duration_then_datetime_then_people_then_extras"
+            echo "exit_code=$rc"
+            echo "---log-tail---"
+            tail -n 80 /tmp/mp-browser-current.log 2>/dev/null || true
+          } > mp-browser-current-flow-result.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add mp-browser-current-flow-result.txt
+          git commit -m 'test: registrar browser MP na jornada atual' || exit 0
+          git push origin HEAD:test/mp-sandbox-full-20260824
