@@ -1,17 +1,15 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(18);
+select plan(19);
 select set_config('agenda.test_now','2026-08-24 15:00:00-03',true);
 
 insert into auth.users(id,email,created_at,updated_at)
 values('96500000-0000-0000-0000-000000000001','finance-test@example.com',now(),now());
 insert into public.admin_users(id,auth_user_id,display_name,role)
 values('96500000-0000-0000-0000-000000000002','96500000-0000-0000-0000-000000000001','Finance Test','FINANCE');
-insert into public.categories(id,name,slug)
-values('96500000-0000-0000-0000-000000000003','Balance Test','balance-test');
-insert into public.employees(id,name)
-values('96500000-0000-0000-0000-000000000004','Balance Employee');
+insert into public.categories(id,name,slug) values('96500000-0000-0000-0000-000000000003','Balance Test','balance-test');
+insert into public.employees(id,name) values('96500000-0000-0000-0000-000000000004','Balance Employee');
 insert into public.services(
  id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,maximum_booking_horizon_days,
  duration_mode,booking_block_minutes,minimum_booking_blocks,maximum_booking_blocks,price_per_block,confirmation_percentage,max_reschedules,operation_scope
@@ -20,7 +18,7 @@ insert into public.services(
  'BLOCKS',30,2,8,250,50,2,'BLACKSHEEP'
 );
 insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
-values('96500000-0000-0000-0000-000000000005',48,0,20,20,20);
+values('96500000-0000-0000-0000-000000000005',12,0,20,20,20);
 insert into public.service_employees(id,service_id,employee_id)
 values('96500000-0000-0000-0000-000000000006','96500000-0000-0000-0000-000000000005','96500000-0000-0000-0000-000000000004');
 insert into public.customers(id,name,email,phone)
@@ -51,7 +49,7 @@ select is((select count(*)::integer from public.appointment_overdue_balances whe
 select is((public.service_admin_reissue_balance_collection('96500000-0000-0000-0000-000000000008','96500000-0000-0000-0000-000000000002')->>'sequence')::integer,2,'terminal collection can be reissued');
 select is((select status from public.appointment_balance_collections where appointment_id='96500000-0000-0000-0000-000000000008' and sequence=2),'PENDING','reissue creates a fresh pending collection');
 
-select is((public.service_record_manual_contract_payment('96500000-0000-0000-0000-000000000008','96500000-0000-0000-0000-000000000002',500,'CASH','127.0.0.1','pgTAP','request-1')->>'settled')::boolean,true,'cash payment can settle remaining contract balance');
+select is((public.service_record_manual_contract_payment('96500000-0000-0000-0000-000000000008','96500000-0000-0000-0000-000000000002',500,'CASH','127.0.0.1','pgTAP','96500000-0000-4000-8000-000000000020')->>'settled')::boolean,true,'cash payment can settle remaining contract balance');
 select is((select payment_discount_amount from public.payment_transactions where appointment_id='96500000-0000-0000-0000-000000000008' and provider='MANUAL' order by created_at desc limit 1),0::numeric,'manual payment never receives PIX discount');
 
 insert into public.appointments(
@@ -59,19 +57,21 @@ insert into public.appointments(
  start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,pre_service_minutes,post_service_minutes,people_count,
  commercial_value,billing_mode_snapshot,confirmation_percentage_snapshot
 ) values(
- '96500000-0000-0000-0000-000000000009','BAL-NS','96500000-0000-0000-0000-000000000005','96500000-0000-0000-0000-000000000006','Locação BlackSheep','96500000-0000-0000-0000-000000000007','NO_SHOW','PENDING',
+ '96500000-0000-0000-0000-000000000009','BAL-NS','96500000-0000-0000-0000-000000000005','96500000-0000-0000-0000-000000000006','Locação BlackSheep','96500000-0000-0000-0000-000000000007','NO_SHOW','PARTIALLY_PAID',
  '2026-08-26 15:00:00-03','2026-08-26 17:30:00-03','2026-08-26 15:00:00-03','2026-08-26 17:00:00-03',150,120,0,30,1,1000,'CHECKOUT',50
 );
-select is(public.enqueue_due_rental_balance_collections(),0,'NO_SHOW does not create automatic balance collection');
-select is((select count(*)::integer from public.appointment_overdue_balances where appointment_id='96500000-0000-0000-0000-000000000009'),0,'NO_SHOW never enters overdue filter');
+insert into public.payment_transactions(appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,payment_purpose)
+values('96500000-0000-0000-0000-000000000009','CHARGE','CARD','MERCADO_PAGO','APPROVED',500,500,'CONTRACT');
+select is(public.enqueue_due_rental_balance_collections(),1,'NO_SHOW creates automatic balance collection because rental is considered performed');
+select is((select status from public.appointment_balance_collections where appointment_id='96500000-0000-0000-0000-000000000009'),'PENDING','NO_SHOW balance collection remains payable');
 
 insert into public.appointments(
  id,public_code,service_id,service_employee_id,service_name_snapshot,primary_customer_id,status,financial_status,
  start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,pre_service_minutes,post_service_minutes,people_count,
- commercial_value,billing_mode_snapshot,confirmation_percentage_snapshot
+ commercial_value,billing_mode_snapshot,confirmation_percentage_snapshot,invoice_due_basis,invoice_due_days_snapshot
 ) values(
  '96500000-0000-0000-0000-000000000010','BAL-INV','96500000-0000-0000-0000-000000000005','96500000-0000-0000-0000-000000000006','Locação BlackSheep','96500000-0000-0000-0000-000000000007','CONFIRMED','NOT_STARTED',
- '2026-08-26 15:00:00-03','2026-08-26 17:30:00-03','2026-08-26 15:00:00-03','2026-08-26 17:00:00-03',150,120,0,30,1,1000,'INVOICE',50
+ '2026-08-26 15:00:00-03','2026-08-26 17:30:00-03','2026-08-26 15:00:00-03','2026-08-26 17:00:00-03',150,120,0,30,1,1000,'INVOICE',50,'SERVICE_START',30
 );
 select is(public.enqueue_due_rental_balance_collections(),0,'INVOICE reservation does not create automatic balance collection');
 select is((select count(*)::integer from public.appointment_overdue_balances where appointment_id='96500000-0000-0000-0000-000000000010'),0,'INVOICE reservation is excluded from overdue filter');
