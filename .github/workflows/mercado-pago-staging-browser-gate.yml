@@ -1,6 +1,7 @@
 name: Mercado Pago Staging Browser Gate
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
