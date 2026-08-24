@@ -32,6 +32,7 @@ function evidence(req: Request) {
 async function cancelCollectionProvider(input: {
   collectionId: string
   adminId: string
+  reason: 'SETTLED' | 'PARTIAL'
   evidence: ReturnType<typeof evidence>
 }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
   const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
@@ -42,7 +43,7 @@ async function cancelCollectionProvider(input: {
     headers: { 'content-type': 'application/json', 'x-internal-secret': secret },
     body: JSON.stringify({
       collection_id: input.collectionId,
-      reason: 'SETTLED',
+      reason: input.reason,
       admin_id: input.adminId,
       ip: input.evidence.ip,
       user_agent: input.evidence.userAgent,
@@ -112,11 +113,14 @@ Deno.serve(async (req) => {
       })
       if (error) throw new Error(error.message)
       const result = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+      const activeCollectionId = typeof result.active_collection_id === 'string' ? result.active_collection_id : null
 
-      if (result.settled === true && typeof result.active_collection_id === 'string') {
+      if (activeCollectionId) {
+        const settled = result.settled === true
         const cancellation = await cancelCollectionProvider({
-          collectionId: result.active_collection_id,
+          collectionId: activeCollectionId,
           adminId: admin.adminId,
+          reason: settled ? 'SETTLED' : 'PARTIAL',
           evidence: requestEvidence,
         })
         if (!cancellation.ok) {
@@ -126,6 +130,23 @@ Deno.serve(async (req) => {
             provider_cleanup_pending: true,
             data: result,
           }, 409)
+        }
+
+        if (!settled) {
+          const { data: reissued, error: reissueError } = await client.rpc('service_admin_reissue_balance_collection', {
+            p_appointment_id: appointmentId,
+            p_admin_id: admin.adminId,
+          })
+          if (reissueError) {
+            return json({
+              error: { code: reissueError.message.split(':')[0] },
+              payment_recorded: true,
+              prior_collection_cancelled: true,
+              balance_after: result.balance_after,
+              reissue_failed: true,
+            }, 409)
+          }
+          return json({ data: result, prior_collection_cancelled: true, collection_reissued: true, reissued }, 201)
         }
       }
 
@@ -139,6 +160,8 @@ Deno.serve(async (req) => {
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
       : code === 'BALANCE_COLLECTION_STILL_ACTIVE' ? 409
       : code === 'BALANCE_COLLECTION_REISSUE_NOT_ALLOWED' ? 409
+      : code === 'BALANCE_COLLECTION_REISSUE_LIMIT_REACHED' ? 409
+      : code === 'BALANCE_PROVIDER_CLEANUP_PENDING' ? 409
       : code === 'BALANCE_COLLECTION_NOT_DUE' ? 409
       : code === 'APPOINTMENT_ALREADY_SETTLED' ? 409
       : 400
