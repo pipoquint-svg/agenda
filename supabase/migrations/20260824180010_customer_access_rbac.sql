@@ -2,7 +2,7 @@ alter table public.admin_user_permissions drop constraint if exists admin_user_p
 alter table public.admin_user_permissions add constraint admin_user_permissions_permission_check check (permission in (
   'DASHBOARD_VIEW','AGENDA_VIEW','AGENDA_MANAGE','CUSTOMERS_VIEW','CUSTOMERS_MANAGE','CUSTOMER_ACCESS_DETAIL_VIEW',
   'FINANCE_VIEW','FINANCE_MANAGE','PACKAGES_VIEW','PACKAGES_MANAGE','SERVICES_VIEW','SERVICES_MANAGE',
-  'INTEGRATIONS_VIEW','INTEGRATIONS_MANAGE','AUDIT_VIEW','TEAM_MANAGE'
+  'INTEGRATIONS_VIEW','INTEGRATIONS_MANAGE','LEADS_VIEW','LEADS_MANAGE','AUDIT_VIEW','TEAM_MANAGE'
 ));
 
 create or replace function public.service_admin_role_default_permission(p_role text,p_permission text)
@@ -22,7 +22,7 @@ returns jsonb language sql stable security definer set search_path=public as $$
   'permissions',(select jsonb_object_agg(p.permission,public.service_admin_has_permission(a.id,p.permission)) from (values
    ('DASHBOARD_VIEW'),('AGENDA_VIEW'),('AGENDA_MANAGE'),('CUSTOMERS_VIEW'),('CUSTOMERS_MANAGE'),('CUSTOMER_ACCESS_DETAIL_VIEW'),
    ('FINANCE_VIEW'),('FINANCE_MANAGE'),('PACKAGES_VIEW'),('PACKAGES_MANAGE'),('SERVICES_VIEW'),('SERVICES_MANAGE'),
-   ('INTEGRATIONS_VIEW'),('INTEGRATIONS_MANAGE'),('AUDIT_VIEW'),('TEAM_MANAGE')
+   ('INTEGRATIONS_VIEW'),('INTEGRATIONS_MANAGE'),('LEADS_VIEW'),('LEADS_MANAGE'),('AUDIT_VIEW'),('TEAM_MANAGE')
   ) p(permission))
  ) from public.admin_users a where a.id=p_admin_id and a.is_active=true;
 $$;
@@ -33,7 +33,7 @@ declare v_before jsonb; v_after jsonb;
 begin
  if not public.service_admin_has_permission(p_actor_admin_id,'TEAM_MANAGE') then raise exception using errcode='P0001',message='ADMIN_PERMISSION_DENIED'; end if;
  if not exists(select 1 from public.admin_users where id=p_target_admin_id) then raise exception using errcode='P0001',message='ADMIN_USER_NOT_FOUND'; end if;
- if p_permission not in ('DASHBOARD_VIEW','AGENDA_VIEW','AGENDA_MANAGE','CUSTOMERS_VIEW','CUSTOMERS_MANAGE','CUSTOMER_ACCESS_DETAIL_VIEW','FINANCE_VIEW','FINANCE_MANAGE','PACKAGES_VIEW','PACKAGES_MANAGE','SERVICES_VIEW','SERVICES_MANAGE','INTEGRATIONS_VIEW','INTEGRATIONS_MANAGE','AUDIT_VIEW','TEAM_MANAGE') then raise exception using errcode='P0001',message='ADMIN_PERMISSION_INVALID'; end if;
+ if p_permission not in ('DASHBOARD_VIEW','AGENDA_VIEW','AGENDA_MANAGE','CUSTOMERS_VIEW','CUSTOMERS_MANAGE','CUSTOMER_ACCESS_DETAIL_VIEW','FINANCE_VIEW','FINANCE_MANAGE','PACKAGES_VIEW','PACKAGES_MANAGE','SERVICES_VIEW','SERVICES_MANAGE','INTEGRATIONS_VIEW','INTEGRATIONS_MANAGE','LEADS_VIEW','LEADS_MANAGE','AUDIT_VIEW','TEAM_MANAGE') then raise exception using errcode='P0001',message='ADMIN_PERMISSION_INVALID'; end if;
  select public.service_admin_get_access_profile(p_target_admin_id) into v_before;
  insert into public.admin_user_permissions(admin_user_id,permission,is_granted,updated_by_admin_id,updated_at) values(p_target_admin_id,p_permission,p_is_granted,p_actor_admin_id,now()) on conflict(admin_user_id,permission) do update set is_granted=excluded.is_granted,updated_by_admin_id=excluded.updated_by_admin_id,updated_at=now();
  select public.service_admin_get_access_profile(p_target_admin_id) into v_after;
