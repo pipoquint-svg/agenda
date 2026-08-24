@@ -44,9 +44,7 @@ Deno.serve(async (req) => {
     const workerId = `balance:${crypto.randomUUID()}`
     const emailEnabled = envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED')
 
-    // Balance delivery through Kommo remains deliberately fail-closed. The durable
-    // RENTAL_BALANCE_DUE_KOMMO jobs are retained in the outbox, but this worker must not
-    // claim them until a dedicated notifier exists and its provider gate is explicitly enabled.
+    // Kommo delivery remains fail-closed until its provider gate is explicitly enabled.
     const kommoDeliveryEnabled = false
 
     const { data: created, error: enqueueError } = await client.rpc('enqueue_due_rental_balance_collections')
@@ -54,7 +52,8 @@ Deno.serve(async (req) => {
 
     await client.rpc('release_stale_integration_jobs',{p_stale_after_seconds:300})
 
-    const jobTypes = ['RENTAL_BALANCE_CANCEL_NO_SHOW','RENTAL_BALANCE_CANCEL_EXPIRED']
+    // NO_SHOW is a performed rental. It is deliberately absent from cancellation jobs.
+    const jobTypes = ['RENTAL_BALANCE_CANCEL_EXPIRED']
     if (emailEnabled) jobTypes.push('RENTAL_BALANCE_DUE_EMAIL')
 
     const { data: jobs, error: claimError } = await client.rpc('claim_integration_jobs', {
@@ -67,8 +66,6 @@ Deno.serve(async (req) => {
       try {
         if (job.job_type==='RENTAL_BALANCE_DUE_EMAIL') {
           await invokeFunction('balance-collection-notify-email',secret,{collection_id:job.entity_id})
-        } else if (job.job_type==='RENTAL_BALANCE_CANCEL_NO_SHOW') {
-          await invokeFunction('balance-collection-provider-cancel',secret,{collection_id:job.entity_id,reason:'NO_SHOW'})
         } else if (job.job_type==='RENTAL_BALANCE_CANCEL_EXPIRED') {
           await invokeFunction('balance-collection-provider-cancel',secret,{collection_id:job.entity_id,reason:'EXPIRED'})
         } else {
