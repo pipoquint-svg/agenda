@@ -78,9 +78,14 @@ export function parseMercadoPagoSignature(value: string): { ts: string; v1: stri
   return { ts: parts.ts, v1: parts.v1 }
 }
 
-export function buildMercadoPagoWebhookManifest(dataId: string, requestId: string, timestamp: string): string {
-  if (!dataId || !requestId || !timestamp) throw new Error('MERCADO_PAGO_SIGNATURE_INVALID')
-  return `id:${dataId};request-id:${requestId};ts:${timestamp};`
+export function buildMercadoPagoWebhookManifest(
+  dataId: string,
+  requestId: string | null | undefined,
+  timestamp: string,
+): string {
+  if (!dataId || !timestamp) throw new Error('MERCADO_PAGO_SIGNATURE_INVALID')
+  const requestComponent = requestId ? `request-id:${requestId};` : ''
+  return `id:${dataId};${requestComponent}ts:${timestamp};`
 }
 
 function normalizedMercadoPagoWebhookDataId(dataId: string): string {
@@ -101,7 +106,7 @@ async function verifyHmac(secret: string, signatureHex: string, manifest: string
 
 export async function verifyMercadoPagoWebhookSignature(input: {
   signature: string
-  requestId: string
+  requestId?: string | null
   dataId: string
   secret: string
 }): Promise<boolean> {
@@ -109,7 +114,8 @@ export async function verifyMercadoPagoWebhookSignature(input: {
   const parsed = parseMercadoPagoSignature(input.signature)
 
   // Mercado Pago requires alphanumeric query data.id values (Orders ORD...) in lowercase
-  // when constructing the signed manifest. Verify the canonical provider form first.
+  // when constructing the signed manifest. Components absent from the notification are
+  // omitted rather than represented with an empty value.
   const normalizedId = normalizedMercadoPagoWebhookDataId(input.dataId)
   const canonicalManifest = buildMercadoPagoWebhookManifest(normalizedId, input.requestId, parsed.ts)
   if (await verifyHmac(input.secret, parsed.v1, canonicalManifest)) return true
