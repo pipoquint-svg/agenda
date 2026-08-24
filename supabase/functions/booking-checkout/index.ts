@@ -41,6 +41,18 @@ Deno.serve(async (req) => {
         rpcName = 'public_get_checkout_context'
         args = { p_checkout_hold_token: token(body?.checkout_hold_token, 'CHECKOUT_HOLD_TOKEN_REQUIRED') }
         break
+      case 'UPDATE_SELECTION': {
+        const peopleCount = Number.isInteger(body?.people_count) ? body.people_count as number : NaN
+        if (!Number.isInteger(peopleCount)) throw new Error('INVALID_PEOPLE_COUNT')
+        const extras = Array.isArray(body?.extra_selections) ? body.extra_selections : []
+        rpcName = 'public_update_checkout_hold_selection'
+        args = {
+          p_checkout_hold_token: token(body?.checkout_hold_token, 'CHECKOUT_HOLD_TOKEN_REQUIRED'),
+          p_extra_selections: extras,
+          p_people_count: peopleCount,
+        }
+        break
+      }
       case 'BIND_CUSTOMER':
         rpcName = 'public_bind_checkout_customer'
         args = {
@@ -76,10 +88,10 @@ Deno.serve(async (req) => {
     return response({ data })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CHECKOUT_ACTION_FAILED'
-    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|CHECKOUT_ACTION_INVALID|CHECKOUT_HOLD_TOKEN_REQUIRED|CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_HOLD_NOT_FOUND|CHECKOUT_CUSTOMER_REQUIRED|CHECKOUT_CUSTOMER_MISSING|CUSTOMER_NAME_INVALID|CUSTOMER_EMAIL_INVALID|CUSTOMER_PHONE_INVALID|CUSTOMER_TAX_ID_INVALID|CUSTOMER_IDENTITY_AMBIGUOUS|CUSTOMER_IDENTITY_CONFLICT|HOUR_PACKAGE_NOT_FOUND|HOUR_PACKAGE_NOT_USABLE|HOUR_PACKAGE_INSUFFICIENT_BALANCE)/)?.[1] ?? code.split(':')[0]
+    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|CHECKOUT_ACTION_INVALID|CHECKOUT_HOLD_TOKEN_REQUIRED|CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_HOLD_NOT_FOUND|CHECKOUT_CUSTOMER_REQUIRED|CHECKOUT_CUSTOMER_MISSING|CUSTOMER_NAME_INVALID|CUSTOMER_EMAIL_INVALID|CUSTOMER_PHONE_INVALID|CUSTOMER_TAX_ID_INVALID|CUSTOMER_IDENTITY_AMBIGUOUS|CUSTOMER_IDENTITY_CONFLICT|INVALID_PEOPLE_COUNT|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING|HOLD_SELECTION_UPDATE_NOT_ALLOWED|HOLD_SELECTION_LOCKED|HOLD_SELECTION_REQUIRES_NEW_SLOT|RESOURCE_NOT_AVAILABLE|SERVICE_HAS_NO_REQUIRED_RESOURCES|HOUR_PACKAGE_NOT_FOUND|HOUR_PACKAGE_NOT_USABLE|HOUR_PACKAGE_INSUFFICIENT_BALANCE)/)?.[1] ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
-      : publicCode === 'CHECKOUT_HOLD_NOT_ACTIVE' ? 409
+      : publicCode === 'CHECKOUT_HOLD_NOT_ACTIVE' || publicCode === 'RESOURCE_NOT_AVAILABLE' || publicCode === 'HOLD_SELECTION_REQUIRES_NEW_SLOT' ? 409
       : 400
     return response({ error: { code: publicCode } }, status)
   }
