@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     const userAgent = typeof body.user_agent === 'string' ? body.user_agent.slice(0, 1000) : null
     const requestId = typeof body.request_id === 'string' ? body.request_id.slice(0, 200) : null
     if (!/^[0-9a-f-]{36}$/i.test(collectionId)) throw new Error('BALANCE_COLLECTION_ID_INVALID')
-    if (reason !== 'SETTLED' && reason !== 'NO_SHOW') throw new Error('BALANCE_COLLECTION_CANCEL_REASON_INVALID')
+    if (!['SETTLED','NO_SHOW','EXPIRED'].includes(reason)) throw new Error('BALANCE_COLLECTION_CANCEL_REASON_INVALID')
 
     const client = adminClient()
     const { data: collection, error: collectionError } = await client
@@ -66,7 +66,12 @@ Deno.serve(async (req) => {
       .eq('id', collectionId)
       .maybeSingle()
     if (collectionError || !collection) throw new Error('BALANCE_COLLECTION_NOT_FOUND')
-    if (collection.status !== 'PENDING') return jsonResponse({ cancelled: true, idempotent: true, status: collection.status })
+    if (reason !== 'EXPIRED' && collection.status !== 'PENDING') {
+      return jsonResponse({ cancelled: true, idempotent: true, status: collection.status })
+    }
+    if (reason === 'EXPIRED' && collection.status !== 'EXPIRED') {
+      return jsonResponse({ cancelled: true, idempotent: true, status: collection.status })
+    }
 
     const { data: transactions, error: txError } = await client
       .from('payment_transactions')
@@ -78,11 +83,13 @@ Deno.serve(async (req) => {
 
     const live = (transactions ?? []).filter((tx) => tx.provider_payment_id && tx.status === 'PENDING')
     const failures: Array<Record<string, unknown>> = []
+    const cancelledTransactionIds: string[] = []
     for (const tx of live) {
       const orderId = String(tx.provider_payment_id)
       try {
         const result = await cancelOrder(orderId, await stableKey(`balance-cancel:${collectionId}:${tx.id}:${reason}`))
         if (!result.ok) failures.push({ transaction_id: tx.id, provider_reference: orderId, http_status: result.status, code: result.code })
+        else cancelledTransactionIds.push(String(tx.id))
       } catch (error) {
         failures.push({ transaction_id: tx.id, provider_reference: orderId, code: error instanceof Error ? error.message.split(':')[0] : 'PROVIDER_CANCEL_FAILED' })
       }
@@ -103,6 +110,25 @@ Deno.serve(async (req) => {
       return jsonResponse({ cancelled: false, provider_cleanup_pending: true, failures: failures.length }, 409)
     }
 
+    if (cancelledTransactionIds.length) {
+      const { error: updateError } = await client
+        .from('payment_transactions')
+        .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
+        .in('id', cancelledTransactionIds)
+      if (updateError) throw new Error('BALANCE_PROVIDER_CANCEL_STATE_UPDATE_FAILED')
+    }
+
+    if (reason === 'EXPIRED') {
+      await client.from('audit_logs').insert({
+        entity_type: 'APPOINTMENT',
+        entity_id: collection.appointment_id,
+        action: 'BALANCE_PROVIDER_ORDERS_CANCELLED_AFTER_EXPIRY',
+        after_json: { collection_id: collectionId, provider_orders_cancelled: cancelledTransactionIds.length },
+        origin: 'SYSTEM',
+      })
+      return jsonResponse({ cancelled: true, provider_orders_cancelled: cancelledTransactionIds.length, state: 'EXPIRED' })
+    }
+
     const { data: marked, error: markError } = await client.rpc('service_mark_balance_collection_cancelled', {
       p_collection_id: collectionId,
       p_reason: reason,
@@ -112,7 +138,7 @@ Deno.serve(async (req) => {
       p_request_id: requestId,
     })
     if (markError) throw new Error(markError.message)
-    return jsonResponse({ cancelled: true, provider_orders_cancelled: live.length, state: marked })
+    return jsonResponse({ cancelled: true, provider_orders_cancelled: cancelledTransactionIds.length, state: marked })
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'BALANCE_PROVIDER_CANCEL_FAILED'
     return errorResponse(error, code === 'INTERNAL_AUTH_REQUIRED' ? 401 : 500)
