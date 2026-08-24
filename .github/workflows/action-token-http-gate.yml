@@ -1,0 +1,250 @@
+name: Action Token HTTPS Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/action-token-http-gate.yml'
+      - 'supabase/functions/appointment-action-access/**'
+      - 'supabase/functions/_shared/action-token-security.ts'
+      - 'supabase/migrations/**appointment*token*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-token-https-gate
+  cancel-in-progress: false
+
+jobs:
+  remote-http:
+    name: HTTPS anti-enumeração de link
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 10
+    env:
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      SANDBOX_DATABASE_URL: ${{ secrets.SANDBOX_DATABASE_URL }}
+      FIXTURE_APPOINTMENT_ID: 9caf29a2-0968-408f-aa3a-2b9a20c9fca3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y postgresql-client jq >/dev/null
+          test -n "${SANDBOX_DATABASE_URL:-}"
+
+      - name: Validate synthetic fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$(psql "$SANDBOX_DATABASE_URL" -Atqc "
+            select public_code || '|' || status || '|' || coalesce(c.email,'')
+            from public.appointments a
+            join public.customers c on c.id=a.primary_customer_id
+            where a.id='${FIXTURE_APPOINTMENT_ID}'::uuid
+              and a.start_at > now()
+              and a.deleted_at is null
+              and (upper(c.name) like '%TEST%' or upper(c.name) like '%SYNTH%' or upper(c.name) like '%STAGING%')
+              and c.email like '%.invalid';
+          ")"
+          if [[ -z "$fixture" ]]; then
+            echo 'Synthetic future fixture is unavailable; refusing to use any non-test appointment.' >&2
+            exit 1
+          fi
+          echo 'Synthetic appointment fixture validated.'
+
+      - name: Create ephemeral token fixtures
+        id: fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="HTTP_GATE:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}"
+
+          issue_token() {
+            local scope="$1"
+            psql "$SANDBOX_DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "
+              select public.service_issue_appointment_action_token(
+                '${FIXTURE_APPOINTMENT_ID}'::uuid,
+                '${scope}',
+                'INTERNAL',
+                '***@example.invalid',
+                '${tag}'
+              )->>'access_token';
+            "
+          }
+
+          valid_token="$(issue_token CANCEL)"
+          consumed_token="$(issue_token CANCEL)"
+          consumed_id="$(psql "$SANDBOX_DATABASE_URL" -Atqc "
+            select id from public.appointment_access_tokens
+            where token_hash=encode(digest('${consumed_token}','sha256'),'hex');
+          ")"
+          psql "$SANDBOX_DATABASE_URL" -v ON_ERROR_STOP=1 -qtc "
+            select public.service_consume_appointment_action_token(
+              '${consumed_id}'::uuid,
+              'HTTP_GATE_FIXTURE_CONSUMED',
+              null,
+              'GitHub Actions synthetic gate',
+              '${tag}:consume',
+              jsonb_build_object('fixture',true)
+            );
+          " >/dev/null
+
+          wrong_scope_token="$(issue_token RESCHEDULE)"
+          nonexistent_token="$(openssl rand -hex 32)"
+          expired_token="$(openssl rand -hex 32)"
+          expired_hash="$(printf '%s' "$expired_token" | sha256sum | awk '{print $1}')"
+          psql "$SANDBOX_DATABASE_URL" -v ON_ERROR_STOP=1 -qtc "
+            insert into public.appointment_access_tokens(
+              appointment_id,token_hash,scope,expires_at,delivery_channel,destination_masked,issued_request_id
+            ) values (
+              '${FIXTURE_APPOINTMENT_ID}'::uuid,
+              '${expired_hash}',
+              'CANCEL',
+              now()-interval '1 minute',
+              'INTERNAL',
+              '***@example.invalid',
+              '${tag}:expired-fixture'
+            );
+          " >/dev/null
+
+          # Mask every clear token from workflow logs before exposing it as an output.
+          for token in "$valid_token" "$consumed_token" "$wrong_scope_token" "$nonexistent_token" "$expired_token"; do
+            echo "::add-mask::$token"
+          done
+          {
+            echo "valid_token=$valid_token"
+            echo "consumed_token=$consumed_token"
+            echo "wrong_scope_token=$wrong_scope_token"
+            echo "nonexistent_token=$nonexistent_token"
+            echo "expired_token=$expired_token"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prove valid HTTPS resolution
+        shell: bash
+        env:
+          TOKEN: ${{ steps.fixtures.outputs.valid_token }}
+        run: |
+          set -euo pipefail
+          base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/appointment-action-access"
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          read -r status total < <(curl --silent --show-error \
+            --dump-header "$headers" \
+            --output "$body" \
+            --write-out '%{http_code} %{time_total}' \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-appointment-token: ${TOKEN}" \
+            --header "x-request-id: http-gate-valid-${GITHUB_RUN_ID}" \
+            --data '{"operation":"RESOLVE","scope":"CANCEL"}' \
+            "$base")
+
+          test "$status" = 200
+          jq -e '.data.valid == true and .data.scope == "CANCEL"' "$body" >/dev/null
+          jq -e '.data.warning == "link pessoal, válido por tempo limitado, não encaminhe"' "$body" >/dev/null
+          grep -qi '^cache-control:.*no-store' "$headers"
+          if grep -Eqi 'test@testuser|agenda-kommo-test|access_token|token_hash' "$body"; then
+            echo 'Public summary leaked data that must not be exposed.' >&2
+            exit 1
+          fi
+          echo "Valid RESOLVE: HTTP ${status}; minimum-delay contract exercised."
+
+      - name: Prove indistinguishable invalid-link envelopes and timing
+        shell: bash
+        env:
+          CONSUMED_TOKEN: ${{ steps.fixtures.outputs.consumed_token }}
+          WRONG_SCOPE_TOKEN: ${{ steps.fixtures.outputs.wrong_scope_token }}
+          NONEXISTENT_TOKEN: ${{ steps.fixtures.outputs.nonexistent_token }}
+          EXPIRED_TOKEN: ${{ steps.fixtures.outputs.expired_token }}
+        run: |
+          set -euo pipefail
+          base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/appointment-action-access"
+          dir="$(mktemp -d)"
+
+          probe() {
+            local name="$1" token="$2"
+            local body="$dir/${name}.json" headers="$dir/${name}.headers"
+            read -r status total < <(curl --silent --show-error \
+              --dump-header "$headers" \
+              --output "$body" \
+              --write-out '%{http_code} %{time_total}' \
+              --request POST \
+              --header 'content-type: application/json' \
+              --header "x-appointment-token: ${token}" \
+              --header "x-request-id: http-gate-${name}-${GITHUB_RUN_ID}" \
+              --data '{"operation":"RESOLVE","scope":"CANCEL"}' \
+              "$base")
+            test "$status" = 400
+            jq -e '.error.code == "LINK_INVALID_OR_EXPIRED" and (keys|sort) == ["error"]' "$body" >/dev/null
+            grep -qi '^cache-control:.*no-store' "$headers"
+            printf '%s\n' "$total" > "$dir/${name}.time"
+            jq -S -c . "$body" > "$dir/${name}.normalized"
+          }
+
+          probe nonexistent "$NONEXISTENT_TOKEN"
+          probe consumed "$CONSUMED_TOKEN"
+          probe wrong_scope "$WRONG_SCOPE_TOKEN"
+          probe expired "$EXPIRED_TOKEN"
+
+          cmp "$dir/nonexistent.normalized" "$dir/consumed.normalized"
+          cmp "$dir/nonexistent.normalized" "$dir/wrong_scope.normalized"
+          cmp "$dir/nonexistent.normalized" "$dir/expired.normalized"
+
+          python3 - "$dir" <<'PY'
+          import pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          times = {p.stem: float(p.read_text().strip()) * 1000 for p in root.glob('*.time')}
+          if len(times) != 4:
+              raise SystemExit('TIMING_SAMPLE_MISSING')
+          # Edge contract enforces 120ms minimum; allow 20ms scheduling/network tolerance.
+          if min(times.values()) < 100:
+              raise SystemExit(f'ANTI_ENUM_MIN_DELAY_FAILED:{times}')
+          # Remote network variance is expected; >750ms spread is large enough to be observable/review-worthy.
+          spread = max(times.values()) - min(times.values())
+          if spread > 750:
+              raise SystemExit(f'ANTI_ENUM_TIMING_SPREAD_FAILED:{spread:.1f}ms:{times}')
+          print(f'Invalid variants: identical 400 envelope; timing spread={spread:.1f}ms')
+          PY
+
+      - name: Cleanup token fixtures
+        if: always()
+        shell: bash
+        env:
+          TAG: ${{ steps.fixtures.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SANDBOX_DATABASE_URL:-}" || -z "${FIXTURE_APPOINTMENT_ID:-}" ]]; then exit 0; fi
+          # Revoke remaining active synthetic tokens; retain hashed token/event evidence for audit.
+          psql "$SANDBOX_DATABASE_URL" -v ON_ERROR_STOP=1 -qtc "
+            select public.service_revoke_appointment_action_tokens(
+              '${FIXTURE_APPOINTMENT_ID}'::uuid,
+              'HTTP_GATE_CLEANUP',
+              nullif('${TAG:-HTTP_GATE_CLEANUP}','')
+            );
+          " >/dev/null || true
+
+      - name: Evidence summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Action Token HTTPS Gate'
+            echo
+            echo '- Provider externo: nenhum'
+            echo '- Dados: fixture sintética `.invalid`'
+            echo '- Token claro em logs: não (masked)'
+            echo '- Valid resolve: esperado HTTP 200 + warning pessoal'
+            echo '- Invalid variants: nonexistent / consumed / wrong-scope / expired'
+            echo '- Anti-enumeration: mesmo HTTP 400 + mesmo envelope `LINK_INVALID_OR_EXPIRED`'
+            echo '- Timing: mínimo 120ms do contrato, tolerância remota de 750ms para spread'
+            echo '- Google: não exercitado'
+          } >> "$GITHUB_STEP_SUMMARY"
