@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 
 const STAGING = process.env.STAGING_URL;
+const CHROME_PATH = process.env.CHROME_PATH || undefined;
 const CARD = '5480832801033311';
 const EXP = '11/30';
 const CVV = '123';
@@ -84,13 +85,6 @@ async function fillBrick(page, scenario) {
           if (kind === 'email') await el.fill(EMAIL);
           found.add(kind);
         }
-        const selects = frame.locator('select');
-        for (let i = 0; i < await selects.count(); i++) {
-          const sel = selects.nth(i);
-          if (!await sel.isVisible().catch(() => false)) continue;
-          const options = await sel.locator('option').evaluateAll((nodes) => nodes.map((o) => ({ value: o.value, disabled: o.disabled })).filter((o) => o.value && !o.disabled));
-          if (options[0]) await sel.selectOption(options[0].value).catch(() => {});
-        }
       } catch {}
     }
     if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) {
@@ -147,7 +141,7 @@ async function reachPayment(page, scenario) {
 }
 
 async function scenario(name) {
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: false, executablePath: CHROME_PATH });
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
   const page = await context.newPage();
   page.on('console', (msg) => { if (msg.type() === 'error') console.log(`BROWSER_CONSOLE_ERROR[${name}]=${msg.text()}`); });
