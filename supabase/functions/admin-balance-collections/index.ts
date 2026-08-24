@@ -24,15 +24,18 @@ function uuid(value: unknown): string {
 function evidence(req: Request) {
   const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
   const userAgent = (req.headers.get('user-agent') ?? '').trim()
-  const requestId = (req.headers.get('x-request-id') ?? crypto.randomUUID()).trim()
-  if (!ip || !userAgent || !requestId) throw new Error('AUTHORSHIP_ADMIN_EVIDENCE_REQUIRED')
-  return { ip: ip.slice(0, 64), userAgent: userAgent.slice(0, 1000), requestId: requestId.slice(0, 200) }
+  const supplied = (req.headers.get('x-request-id') ?? '').trim()
+  const requestId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(supplied)
+    ? supplied
+    : crypto.randomUUID()
+  if (!ip || !userAgent) throw new Error('AUTHORSHIP_ADMIN_EVIDENCE_REQUIRED')
+  return { ip: ip.slice(0, 64), userAgent: userAgent.slice(0, 1000), requestId }
 }
 
 async function cancelCollectionProvider(input: {
   collectionId: string
   adminId: string
-  reason: 'SETTLED'
+  reason: 'SETTLED' | 'PARTIAL'
   evidence: ReturnType<typeof evidence>
 }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
   const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
@@ -52,6 +55,21 @@ async function cancelCollectionProvider(input: {
   })
   const body = await response.json().catch(() => ({})) as Record<string, unknown>
   return { ok: response.ok, status: response.status, body }
+}
+
+async function persistInternalCancelDivergence(client: ReturnType<typeof adminClient>, input: {
+  appointmentId: string
+  collectionId: string
+  reason: string
+  code: string
+}) {
+  return client.from('balance_collection_divergences').insert({
+    appointment_id: input.appointmentId,
+    balance_collection_id: input.collectionId,
+    divergence_type: 'PROVIDER_CANCEL_FAILED',
+    provider: 'MERCADO_PAGO',
+    details_json: { reason: input.reason, code: input.code, layer: 'INTERNAL_CALL' },
+  })
 }
 
 Deno.serve(async (req) => {
@@ -116,31 +134,23 @@ Deno.serve(async (req) => {
       const activeCollectionId = typeof result.active_collection_id === 'string' ? result.active_collection_id : null
       const settled = result.settled === true
 
-      if (activeCollectionId && !settled) {
-        return json({
-          data: result,
-          partial_collection_policy_pending: true,
-          existing_collection_preserved: true,
-        }, 201)
-      }
-
-      if (activeCollectionId && settled) {
+      if (activeCollectionId) {
+        const reason: 'SETTLED' | 'PARTIAL' = settled ? 'SETTLED' : 'PARTIAL'
         let cancellation: Awaited<ReturnType<typeof cancelCollectionProvider>>
         try {
           cancellation = await cancelCollectionProvider({
             collectionId: activeCollectionId,
             adminId: admin.adminId,
-            reason: 'SETTLED',
+            reason,
             evidence: requestEvidence,
           })
         } catch (cause) {
           const failureCode = cause instanceof Error ? cause.message.split(':')[0] : 'BALANCE_PROVIDER_CANCEL_INTERNAL_CALL_FAILED'
-          const { error: divergenceError } = await client.from('balance_collection_divergences').insert({
-            appointment_id: appointmentId,
-            balance_collection_id: activeCollectionId,
-            divergence_type: 'PROVIDER_CANCEL_FAILED',
-            provider: 'MERCADO_PAGO',
-            details_json: { reason: 'SETTLED', code: failureCode, layer: 'INTERNAL_CALL' },
+          const { error: divergenceError } = await persistInternalCancelDivergence(client, {
+            appointmentId,
+            collectionId: activeCollectionId,
+            reason,
+            code: failureCode,
           })
           return json({
             error: { code: divergenceError ? 'BALANCE_PROVIDER_CANCEL_DIVERGENCE_RECORD_FAILED' : 'BALANCE_PROVIDER_CANCEL_DIVERGENCE' },
@@ -158,9 +168,32 @@ Deno.serve(async (req) => {
             data: result,
           }, 409)
         }
+
+        if (!settled) {
+          const { data: reissued, error: reissueError } = await client.rpc('service_admin_reissue_balance_collection', {
+            p_appointment_id: appointmentId,
+            p_admin_id: admin.adminId,
+          })
+          if (reissueError) {
+            return json({
+              error: { code: reissueError.message.split(':')[0] },
+              payment_recorded: true,
+              prior_collection_cancelled: true,
+              reissue_failed: true,
+              balance_after: result.balance_after,
+            }, 409)
+          }
+          return json({
+            data: result,
+            payment_recorded: true,
+            prior_collection_cancelled: true,
+            collection_reissued: true,
+            reissued,
+          }, 201)
+        }
       }
 
-      return json({ data: result })
+      return json({ data: result, payment_recorded: true })
     }
 
     throw new Error('ADMIN_BALANCE_ACTION_INVALID')
@@ -170,6 +203,7 @@ Deno.serve(async (req) => {
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
       : code === 'BALANCE_COLLECTION_STILL_ACTIVE' ? 409
       : code === 'BALANCE_COLLECTION_REISSUE_NOT_ALLOWED' ? 409
+      : code === 'BALANCE_COLLECTION_REISSUE_LIMIT_REACHED' ? 409
       : code === 'BALANCE_PROVIDER_CLEANUP_PENDING' ? 409
       : code === 'BALANCE_COLLECTION_NOT_DUE' ? 409
       : code === 'APPOINTMENT_ALREADY_SETTLED' ? 409
