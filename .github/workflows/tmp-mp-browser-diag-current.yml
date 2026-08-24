@@ -1,0 +1,67 @@
+name: TMP Mercado Pago Browser Diagnostic Current
+on:
+  push:
+    branches: [test/mp-browser-diag-current]
+    paths: [.github/workflows/tmp-mp-browser-diag-current.yml]
+permissions:
+  contents: write
+env:
+  STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          set -euo pipefail
+          mkdir -p evidence /tmp/mp-browser
+          echo STARTED > evidence/browser-install.marker
+          cd /tmp/mp-browser
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          echo PASS > "$GITHUB_WORKSPACE/evidence/browser-install.marker"
+      - name: Extract official harness JS
+        run: |
+          set -euo pipefail
+          echo STARTED > evidence/browser-extract.marker
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path('.github/workflows/mercado-pago-staging-browser-gate.yml').read_text()
+          start="          cat > /tmp/mp-browser/gate.mjs <<'EOF'\n"
+          i=src.index(start)+len(start)
+          j=src.index("\n          EOF\n", i)
+          body=src[i:j]
+          body='\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())+'\n'
+          Path('/tmp/mp-browser/gate.mjs').write_text(body)
+          PY
+          wc -c /tmp/mp-browser/gate.mjs > evidence/browser-extract-size.txt
+          grep -Fq "await scenario('APRO')" /tmp/mp-browser/gate.mjs
+          grep -Fq "await scenario('OTHE')" /tmp/mp-browser/gate.mjs
+          echo PASS > evidence/browser-extract.marker
+      - name: Run staging browser scenarios
+        run: |
+          echo STARTED > evidence/browser-execute.marker
+          set +e
+          cd /tmp/mp-browser
+          xvfb-run -a node gate.mjs > "$GITHUB_WORKSPACE/evidence/mp-browser-run.log" 2>&1
+          code=$?
+          cd "$GITHUB_WORKSPACE"
+          if [[ $code -eq 0 ]]; then echo PASS > evidence/browser-execute.marker; else echo "FAIL:$code" > evidence/browser-execute.marker; fi
+          cat evidence/mp-browser-run.log
+          exit $code
+      - name: Persist evidence
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p evidence
+          printf '{"gate":"browser_https_current","status":"%s","sha":"%s","staging":"%s","real_charges":false,"real_customer_data":false}\n' "$JOB_STATUS" "$GITHUB_SHA" "$STAGING_URL" > evidence/mp-browser-current.json
+          cp /tmp/mp-browser/*.png evidence/ 2>/dev/null || true
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add evidence
+          git commit -m 'test: persistir diagnóstico browser atual' || true
+          git push
