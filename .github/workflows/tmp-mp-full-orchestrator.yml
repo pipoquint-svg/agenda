@@ -8,7 +8,7 @@ on:
       - .github/workflows/tmp-mp-full-orchestrator.yml
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
@@ -19,10 +19,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+        with:
+          ref: test/mp-sandbox-full-20260824
+
       - name: Dispatch and wait for official Mercado Pago gates on main
         shell: bash
         run: |
           set -u
+          : > /tmp/mp-results.txt
 
           dispatch_and_wait() {
             local workflow="$1"
@@ -41,30 +47,44 @@ jobs:
               fi
             done
             if [[ -z "$run_id" || "$run_id" == "0" || "$run_id" == "$previous" ]]; then
-              echo "RUN_NOT_FOUND workflow=$workflow" >&2
+              echo "RUN_NOT_FOUND workflow=$workflow" | tee -a /tmp/mp-results.txt >&2
               return 2
             fi
 
-            echo "RUN_ID[$workflow]=$run_id"
+            echo "RUN_ID[$workflow]=$run_id" | tee -a /tmp/mp-results.txt
             if gh run watch "$run_id" --repo "$GH_REPO" --exit-status; then
-              echo "RESULT[$workflow]=PASS"
+              echo "RESULT[$workflow]=PASS" | tee -a /tmp/mp-results.txt
               return 0
             else
-              echo "RESULT[$workflow]=FAIL run=$run_id" >&2
-              gh run view "$run_id" --repo "$GH_REPO" --json url,status,conclusion,jobs --jq '{url,status,conclusion,jobs:[.jobs[]|{name,conclusion}]}' || true
+              echo "RESULT[$workflow]=FAIL run=$run_id" | tee -a /tmp/mp-results.txt >&2
+              gh run view "$run_id" --repo "$GH_REPO" --json url,status,conclusion,jobs --jq '{url,status,conclusion,jobs:[.jobs[]|{name,conclusion}]}' | tee -a /tmp/mp-results.txt || true
               return 1
             fi
           }
 
           failures=0
-
           dispatch_and_wait mercado-pago-sandbox-deploy.yml -f ref=main -f confirmation=SANDBOX || failures=$((failures+1))
           dispatch_and_wait mercado-pago-sandbox-probe.yml -f confirmation=SANDBOX || failures=$((failures+1))
           dispatch_and_wait mercado-pago-sandbox-pix-gate.yml -f confirmation=SANDBOX || failures=$((failures+1))
           dispatch_and_wait mercado-pago-sandbox-card-gate.yml -f confirmation=SANDBOX || failures=$((failures+1))
           dispatch_and_wait mercado-pago-staging-browser-gate.yml || failures=$((failures+1))
 
-          echo "TOTAL_FAILURES=$failures"
-          if [[ "$failures" -ne 0 ]]; then
-            exit 1
-          fi
+          echo "TOTAL_FAILURES=$failures" | tee -a /tmp/mp-results.txt
+          [[ "$failures" -eq 0 ]]
+
+      - name: Persist non-sensitive orchestration evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "generated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "source_main=${{ github.sha }}"
+            echo "orchestrator_job_status=${{ job.status }}"
+            cat /tmp/mp-results.txt 2>/dev/null || echo "NO_RESULT_FILE"
+          } > mp-sandbox-orchestrator-result.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add mp-sandbox-orchestrator-result.txt
+          git commit -m 'test: registrar resultado dos gates Mercado Pago' || exit 0
+          git push origin HEAD:test/mp-sandbox-full-20260824
