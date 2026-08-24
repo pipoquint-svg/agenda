@@ -1,0 +1,32 @@
+name: TMP Browser Install Probe
+on:
+  push:
+    branches: [test/mp-browser-direct-current]
+    paths: [.github/workflows/tmp-mp-browser-install-probe.yml]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe npm Playwright
+        run: |
+          mkdir -p evidence /tmp/mp-probe
+          node --version > evidence/node-version.txt 2>&1 || true
+          npm --version > evidence/npm-version.txt 2>&1 || true
+          cd /tmp/mp-probe
+          npm init -y > "$GITHUB_WORKSPACE/evidence/npm-init.log" 2>&1
+          set +e
+          npm install playwright@1.55.0 > "$GITHUB_WORKSPACE/evidence/npm-install-playwright.log" 2>&1
+          code=$?
+          echo "$code" > "$GITHUB_WORKSPACE/evidence/npm-install-playwright.exit"
+          exit 0
+      - name: Persist
+        if: always()
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add evidence
+          git commit -m 'test: registrar probe npm playwright' || true
+          git push
