@@ -45,6 +45,17 @@ verify_jwt = false
 [functions.integration-worker]
 verify_jwt = false
 
+# Internal rental-balance worker and its provider/email adapters authenticate with
+# x-internal-secret. They are called server-to-server and do not carry a Supabase JWT.
+[functions.balance-collection-worker]
+verify_jwt = false
+
+[functions.balance-collection-notify-email]
+verify_jwt = false
+
+[functions.balance-collection-provider-cancel]
+verify_jwt = false
+
 # Public HTTP boundary for the scheduled worker. Supabase JWT verification is disabled
 # because this endpoint verifies a GitHub Actions OIDC token itself and pins the exact
 # repository id, owner id, main ref and workflow_ref before calling integration-worker.
