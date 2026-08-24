@@ -145,11 +145,17 @@ begin
   if new.status not in ('AWAITING_PAYMENT','CONFIRMED') then return new; end if;
   if exists (select 1 from public.appointment_change_policy_snapshots s where s.appointment_id=new.id) then return new; end if;
 
-  select cp.*, coalesce(s.max_reschedules, 3)
-  into v_policy, v_max_reschedules
+  select cp.*
+  into v_policy
   from public.service_change_policies cp
-  join public.services s on s.id=cp.service_id
   where cp.service_id=new.service_id;
+
+  if not found then return new; end if;
+
+  select coalesce(s.max_reschedules, 3)
+  into v_max_reschedules
+  from public.services s
+  where s.id=new.service_id;
 
   if not found then return new; end if;
 
