@@ -28,13 +28,15 @@ function digits(value: string): string {
 function readableError(error: unknown): string {
   const raw = error instanceof Error ? error.message : 'CHECKOUT_FAILED'
   const known: Array<[string, string]> = [
-    ['CHECKOUT_HOLD_NOT_ACTIVE', 'O tempo de proteção terminou. Escolha o horário novamente.'],
+    ['CHECKOUT_HOLD_NOT_ACTIVE', 'O tempo para concluir a reserva terminou. Escolha o horário novamente.'],
     ['CUSTOMER_NAME_INVALID', 'Informe seu nome completo.'],
     ['CUSTOMER_EMAIL_INVALID', 'Informe um e-mail válido.'],
     ['CUSTOMER_PHONE_INVALID', 'Informe um WhatsApp válido.'],
     ['CUSTOMER_TAX_ID_INVALID', 'Informe um CPF ou CNPJ válido.'],
     ['CUSTOMER_IDENTITY_AMBIGUOUS', 'Encontramos mais de um cadastro com estes dados. Fale com a equipe para continuar.'],
     ['CUSTOMER_IDENTITY_CONFLICT', 'Os dados informados não correspondem ao cadastro já vinculado.'],
+    ['ONLINE_BOOKING_NOT_AVAILABLE', 'Não foi possível concluir esta reserva online. Entre em contato conosco para agendar.'],
+    ['FREE_VISIT_ACTIVE_LIMIT_REACHED', 'Você já possui uma visita agendada. Entre em contato conosco se precisar alterar o horário.'],
     ['REQUIRED_SERVICE_FIELDS_MISSING', 'Preencha todos os campos obrigatórios do serviço.'],
     ['INVALID_SERVICE_ANSWER_VALUE', 'Revise as informações específicas do serviço.'],
     ['TERMS_NOT_ACCEPTED', 'Aceite todos os termos para continuar.'],
@@ -159,13 +161,7 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
     setBinding(true)
     setError(null)
     try {
-      await bindCheckoutCustomer({
-        token: hold.checkout_hold_token,
-        name,
-        email,
-        phone,
-        taxId,
-      })
+      await bindCheckoutCustomer({ token: hold.checkout_hold_token, name, email, phone, taxId })
       setCustomerBound(true)
       const available = await listCheckoutPackages(hold.checkout_hold_token)
       setPackages(available)
@@ -198,7 +194,6 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
       const payloadAnswers: ServiceAnswer[] = context.fields
         .filter((field) => answers[field.id] !== undefined && answers[field.id] !== null && answers[field.id] !== '')
         .map((field) => ({ service_field_id: field.id, value: answers[field.id] ?? null }))
-
       const appointment = await submitBookingCheckout({
         token: hold.checkout_hold_token,
         termVersionIds: context.terms.filter((term) => acceptedTerms[term.id]).map((term) => term.id),
@@ -206,12 +201,7 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
       })
       setResult(appointment)
       sessionStorage.removeItem('bs_checkout_hold')
-      sessionStorage.setItem('bs_appointment_manage', JSON.stringify({
-        appointmentId: appointment.appointment_id,
-        publicCode: appointment.public_code,
-        accessToken: appointment.access_token,
-        status: appointment.status,
-      }))
+      sessionStorage.setItem('bs_appointment_manage', JSON.stringify({ appointmentId: appointment.appointment_id, publicCode: appointment.public_code, accessToken: appointment.access_token, status: appointment.status }))
     } catch (cause) {
       setError(readableError(cause))
     } finally {
@@ -225,101 +215,31 @@ export function BookingCheckout({ hold }: { hold: CheckoutHold }) {
   if (result) {
     return (
       <section className="checkout-panel checkout-result" aria-live="polite">
-        <small>{result.status === 'CONFIRMED' ? 'Reserva confirmada' : 'Reserva criada'}</small>
+        <small>{result.status === 'CONFIRMED' ? 'Reserva confirmada' : 'Falta só o pagamento'}</small>
         <h2>{context.service.name}</h2>
         <p>Código da reserva: <strong>{result.public_code}</strong></p>
-        {result.status === 'CONFIRMED' ? (
-          <p>Seu pacote cobriu a reserva e não há pagamento pendente.</p>
-        ) : (
-          <p>Falta concluir o pagamento de <strong>{money.format(numeric(result.cash_due))}</strong>. A próxima etapa será o pagamento.</p>
-        )}
+        {result.status === 'CONFIRMED' ? <p>Seu pacote cobriu a reserva e não há pagamento pendente.</p> : <p>Para confirmar sua reserva, falta pagar <strong>{money.format(numeric(result.cash_due))}</strong>.</p>}
       </section>
     )
   }
 
   return (
     <section className="checkout-panel">
-      <div className="checkout-heading">
-        <small>Horário protegido</small>
-        <h2>Complete sua reserva</h2>
-        <p>Esses dados ficam vinculados a este horário enquanto o contador estiver ativo.</p>
-      </div>
-
+      <div className="checkout-heading"><small>Seu horário está reservado</small><h2>Complete sua reserva</h2><p>Conclua sua reserva antes do tempo indicado para manter este horário.</p></div>
       {error ? <div className="form-alert error" role="alert">{error}</div> : null}
-
-      <div className="checkout-section">
-        <h3>Seus dados</h3>
-        <div className="checkout-grid">
-          <label>Nome completo *<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
-          <label>E-mail *<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
-          <label>WhatsApp *<input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" autoComplete="tel" /></label>
-          <label>CPF/CNPJ{context.require_tax_id ? ' *' : ''}<input value={taxId} onChange={(event) => setTaxId(event.target.value)} inputMode="numeric" /></label>
-        </div>
-        {!customerBound ? (
-          <button className="primary" type="button" disabled={binding || digits(phone).length < 10} onClick={saveCustomer}>{binding ? 'Salvando…' : 'Continuar'}</button>
-        ) : <div className="form-alert success">Dados vinculados ao horário protegido.</div>}
-      </div>
-
-      {customerBound && packages.length > 0 ? (
-        <div className="checkout-section">
-          <h3>Pacote de horas</h3>
-          <p>Se quiser, use um pacote elegível nesta reserva. O pacote precisa cobrir todo o tempo aplicável.</p>
-          <div className="package-list">
-            <label className={`package-option ${packageId === '' ? 'selected' : ''}`}>
-              <input type="radio" name="hour-package" checked={packageId === ''} disabled={packageBusy} onChange={() => choosePackage('')} />
-              <span><strong>Não usar pacote</strong><small>Seguir com pagamento normal.</small></span>
-            </label>
-            {packages.map((item) => (
-              <label className={`package-option ${packageId === item.hour_package_id ? 'selected' : ''} ${!item.usable ? 'disabled' : ''}`} key={item.hour_package_id}>
-                <input type="radio" name="hour-package" checked={packageId === item.hour_package_id} disabled={packageBusy || !item.usable} onChange={() => choosePackage(item.hour_package_id)} />
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>Saldo: {Math.floor(item.available_seconds / 3600)}h {Math.floor((item.available_seconds % 3600) / 60)}min · consumo: {Math.floor(item.charged_seconds / 60)} min</small>
-                  {item.is_special_period ? <small>Inclui acréscimo de tempo do período especial.</small> : null}
-                  {numeric(item.cash_due) > 0 ? <small>Extras/ajustes em dinheiro: {money.format(numeric(item.cash_due))}</small> : null}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {customerBound && context.fields.length > 0 ? (
-        <div className="checkout-section">
-          <h3>Informações do serviço</h3>
-          <div className="checkout-grid">
-            {context.fields.map((field) => (
-              <FieldInput key={field.id} field={field} value={answers[field.id]} onChange={(value) => setAnswers((current) => ({ ...current, [field.id]: value }))} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {customerBound && context.terms.length > 0 ? (
-        <div className="checkout-section">
-          <h3>Termos</h3>
-          <div className="terms-list">
-            {context.terms.map((term) => (
-              <div className="term-card" key={term.id}>
-                <details><summary>{term.name} · versão {term.version}</summary><div className="term-content">{term.content}</div></details>
-                <label className="checkout-checkbox">
-                  <input type="checkbox" checked={acceptedTerms[term.id] ?? false} onChange={(event) => setAcceptedTerms((current) => ({ ...current, [term.id]: event.target.checked }))} />
-                  <span>Li e aceito este termo.</span>
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {customerBound ? (
-        <div className="checkout-submit-row">
-          <div><small>Valor atual da reserva</small><strong>{money.format(numeric(context.summary.commercial_value))}</strong></div>
-          <button className="primary" type="button" disabled={submitting || packageBusy || !requiredAnswersReady || !termsReady} onClick={submit}>
-            {submitting ? 'Criando reserva…' : packageId ? 'Confirmar e continuar' : 'Continuar para pagamento'}
-          </button>
-        </div>
-      ) : null}
+      <div className="checkout-section"><h3>Seus dados</h3><div className="checkout-grid">
+        <label>Nome completo *<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
+        <label>E-mail *<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
+        <label>WhatsApp *<input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" autoComplete="tel" /></label>
+        <label>CPF/CNPJ{context.require_tax_id ? ' *' : ''}<input value={taxId} onChange={(event) => setTaxId(event.target.value)} inputMode="numeric" /></label>
+      </div>{!customerBound ? <button className="primary" type="button" disabled={binding || digits(phone).length < 10} onClick={saveCustomer}>{binding ? 'Salvando…' : 'Continuar'}</button> : <div className="form-alert success">Dados salvos. Você pode continuar.</div>}</div>
+      {customerBound && packages.length > 0 ? <div className="checkout-section"><h3>Pacote de horas</h3><p>Se quiser, use um pacote elegível nesta reserva.</p><div className="package-list">
+        <label className={`package-option ${packageId === '' ? 'selected' : ''}`}><input type="radio" name="hour-package" checked={packageId === ''} disabled={packageBusy} onChange={() => choosePackage('')} /><span><strong>Não usar pacote</strong><small>Seguir com pagamento normal.</small></span></label>
+        {packages.map((item) => <label className={`package-option ${packageId === item.hour_package_id ? 'selected' : ''} ${!item.usable ? 'disabled' : ''}`} key={item.hour_package_id}><input type="radio" name="hour-package" checked={packageId === item.hour_package_id} disabled={packageBusy || !item.usable} onChange={() => choosePackage(item.hour_package_id)} /><span><strong>{item.name}</strong><small>Saldo disponível: {Math.floor(item.available_seconds / 3600)}h {Math.floor((item.available_seconds % 3600) / 60)}min · Esta reserva utiliza: {Math.floor(item.charged_seconds / 60)} min</small>{numeric(item.cash_due) > 0 ? <small>Adicionais a pagar: {money.format(numeric(item.cash_due))}</small> : null}</span></label>)}
+      </div></div> : null}
+      {customerBound && context.fields.length > 0 ? <div className="checkout-section"><h3>Informações para sua reserva</h3><div className="checkout-grid">{context.fields.map((field) => <FieldInput key={field.id} field={field} value={answers[field.id]} onChange={(value) => setAnswers((current) => ({ ...current, [field.id]: value }))} />)}</div></div> : null}
+      {customerBound && context.terms.length > 0 ? <div className="checkout-section"><h3>Termos</h3><div className="terms-list">{context.terms.map((term) => <div className="term-card" key={term.id}><details><summary>{term.name}</summary><div className="term-content">{term.content}</div></details><label className="checkout-checkbox"><input type="checkbox" checked={acceptedTerms[term.id] ?? false} onChange={(event) => setAcceptedTerms((current) => ({ ...current, [term.id]: event.target.checked }))} /><span>Li e aceito este termo.</span></label></div>)}</div></div> : null}
+      {customerBound ? <div className="checkout-submit-row"><div><small>Valor total</small><strong>{money.format(numeric(context.summary.commercial_value))}</strong></div><button className="primary" type="button" disabled={submitting || packageBusy || !requiredAnswersReady || !termsReady} onClick={submit}>{submitting ? 'Confirmando sua reserva…' : packageId ? 'Confirmar e continuar' : 'Continuar para pagamento'}</button></div> : null}
     </section>
   )
 }
