@@ -1,0 +1,56 @@
+name: TMP Mercado Pago PIX Current
+on:
+  push:
+    branches: [test/mp-pix-current]
+    paths: [.github/workflows/tmp-mp-pix-current.yml]
+permissions:
+  contents: write
+jobs:
+  pix:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 10
+    env:
+      ALLOW_REAL_CHARGES: "false"
+      ALLOW_REAL_CUSTOMER_DATA: "false"
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard sandbox
+        run: |
+          set -euo pipefail
+          [[ "$ALLOW_REAL_CHARGES" == false && "$ALLOW_REAL_CUSTOMER_DATA" == false ]]
+          [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]]
+      - name: Criar e validar PIX
+        run: |
+          set -euo pipefail
+          ref="current-pix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat > /tmp/pix.json <<JSON
+          {"type":"online","external_reference":"$ref","processing_mode":"automatic","total_amount":"50.00","payer":{"email":"test_user_br@testuser.com","first_name":"APRO"},"transactions":{"payments":[{"amount":"50.00","payment_method":{"id":"pix","type":"bank_transfer"}}]}}
+          JSON
+          http=$(curl -sS -o /tmp/create.json -w '%{http_code}' -X POST 'https://api.mercadopago.com/v1/orders' -H 'accept: application/json' -H 'content-type: application/json' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H "X-Idempotency-Key: $ref" --data @/tmp/pix.json)
+          [[ "$http" -ge 200 && "$http" -lt 300 ]]
+          [[ "$(jq -r '.status' /tmp/create.json)" == action_required ]]
+          [[ "$(jq -r '.status_detail' /tmp/create.json)" == waiting_transfer ]]
+          jq -e '.transactions.payments | length == 1' /tmp/create.json >/dev/null
+          jq -e '.transactions.payments[0].payment_method.id == "pix" and .transactions.payments[0].payment_method.type == "bank_transfer"' /tmp/create.json >/dev/null
+          jq -e '.transactions.payments[0].payment_method.qr_code or .transactions.payments[0].payment_method.ticket_url' /tmp/create.json >/dev/null
+          id=$(jq -r '.id' /tmp/create.json); [[ -n "$id" ]]
+          get_http=$(curl -sS -o /tmp/get.json -w '%{http_code}' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" "https://api.mercadopago.com/v1/orders/$id")
+          [[ "$get_http" == 200 ]]
+          [[ "$(jq -r '.id' /tmp/get.json)" == "$id" ]]
+          replay_http=$(curl -sS -o /tmp/replay.json -w '%{http_code}' -X POST 'https://api.mercadopago.com/v1/orders' -H 'content-type: application/json' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H "X-Idempotency-Key: $ref" --data @/tmp/pix.json)
+          [[ "$replay_http" -ge 200 && "$replay_http" -lt 300 ]]
+          [[ "$(jq -r '.id' /tmp/replay.json)" == "$id" ]]
+      - name: Persist evidence
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p evidence
+          printf '{"gate":"pix_provider_current","status":"%s","sha":"%s","real_charges":false,"real_customer_data":false}\n' "$JOB_STATUS" "$GITHUB_SHA" > evidence/mp-pix-current.json
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add evidence/mp-pix-current.json
+          git commit -m 'test: registrar resultado PIX sandbox atual' || true
+          git push
