@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { AdminDashboard } from './AdminDashboard'
 import { AgendaAdmin } from './AgendaAdmin'
+import { BalanceCollectionPage } from './BalanceCollectionPage'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
@@ -60,6 +61,7 @@ export function App() {
   if (path === '/agendar/sabrina') return <PublicBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep') return <PublicBookingRoute slug="blacksheep" />
   if (path === '/reserva/gerenciar' || path === '/gerenciar-reserva') return <ManageReservation />
+  if (path === '/reserva/saldo' || path === '/pagar-saldo') return <BalanceCollectionPage />
 
   const params = new URLSearchParams(window.location.search)
   return (
