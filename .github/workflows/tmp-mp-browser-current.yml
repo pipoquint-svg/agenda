@@ -16,30 +16,37 @@ jobs:
       - name: Instalar Playwright
         run: |
           set -euo pipefail
-          mkdir -p /tmp/mp-browser
+          mkdir -p evidence /tmp/mp-browser
+          echo STARTED > evidence/browser-install.marker
           cd /tmp/mp-browser
           npm init -y >/dev/null
           npm install playwright@1.55.0 >/dev/null
           npx playwright install --with-deps chromium >/dev/null
+          echo PASS > "$GITHUB_WORKSPACE/evidence/browser-install.marker"
       - name: Extrair JavaScript oficial do browser gate
         run: |
           set -euo pipefail
+          echo STARTED > evidence/browser-extract.marker
           awk '
-            /cat > \/tmp\/mp-browser\/gate\.mjs <<'\''EOF'\''/ {capture=1; next}
+            /cat > \/tmp\/mp-browser\/gate\.mjs/ {capture=1; next}
             capture && /^          EOF$/ {capture=0; exit}
             capture {sub(/^          /, ""); print}
           ' .github/workflows/mercado-pago-staging-browser-gate.yml > /tmp/mp-browser/gate.mjs
+          wc -c /tmp/mp-browser/gate.mjs > evidence/browser-extract-size.txt
           test -s /tmp/mp-browser/gate.mjs
           grep -Fq "await scenario('APRO')" /tmp/mp-browser/gate.mjs
           grep -Fq "await scenario('OTHE')" /tmp/mp-browser/gate.mjs
+          echo PASS > evidence/browser-extract.marker
       - name: Executar APRO e OTHE no staging HTTPS
         run: |
-          mkdir -p evidence
+          echo STARTED > evidence/browser-execute.marker
           set +e
           cd /tmp/mp-browser
           xvfb-run -a node gate.mjs > "$GITHUB_WORKSPACE/evidence/mp-browser-run.log" 2>&1
           code=$?
-          cat "$GITHUB_WORKSPACE/evidence/mp-browser-run.log"
+          cd "$GITHUB_WORKSPACE"
+          if [[ $code -eq 0 ]]; then echo PASS > evidence/browser-execute.marker; else echo "FAIL:$code" > evidence/browser-execute.marker; fi
+          cat evidence/mp-browser-run.log
           exit $code
       - name: Persist evidence
         if: always()
