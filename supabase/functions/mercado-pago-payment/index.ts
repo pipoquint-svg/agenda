@@ -106,14 +106,23 @@ function providerErrorSnapshot(status: number, raw: unknown): Record<string, unk
   }
 }
 
+function providerRuntime(options: { creatingCharge?: boolean } = {}) {
+  return mercadoPagoRuntime({
+    environment: Deno.env.get('MERCADO_PAGO_ENV'),
+    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
+    allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
+    creatingCharge: options.creatingCharge === true,
+  })
+}
+
+function providerPayerEmail(contextEmail: string): string {
+  const runtime = providerRuntime()
+  return runtime.environment === 'sandbox' ? 'test@testuser.com' : contextEmail
+}
+
 function providerPaymentsConfigured(): boolean {
   try {
-    mercadoPagoRuntime({
-      environment: Deno.env.get('MERCADO_PAGO_ENV'),
-      accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
-      allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
-      creatingCharge: true,
-    })
+    providerRuntime({ creatingCharge: true })
     return true
   } catch (cause) {
     const code = cause instanceof Error ? cause.message.split(':')[0] : 'UNKNOWN'
@@ -146,12 +155,7 @@ async function mercadoPagoRequest(
   init: RequestInit,
   options: { creatingCharge?: boolean } = {},
 ): Promise<ProviderResult> {
-  const runtime = mercadoPagoRuntime({
-    environment: Deno.env.get('MERCADO_PAGO_ENV'),
-    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
-    allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
-    creatingCharge: options.creatingCharge === true,
-  })
+  const runtime = providerRuntime(options)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
@@ -314,6 +318,11 @@ Deno.serve(async (req) => {
           contracted_minutes: context.contracted_minutes,
           hold_expires_at: context.hold_expires_at,
         },
+        payer: {
+          name: context.payer.name,
+          email: context.payer.email,
+          tax_id: context.payer.tax_id,
+        },
         financial: {
           commercial_value: context.commercial_value,
           contract_settled: context.contract_settled,
@@ -421,7 +430,9 @@ Deno.serve(async (req) => {
       description: providerDescription,
       total_amount: amount,
       payer: {
-        email: context.payer.email,
+        // Orders API test-card purchases require Mercado Pago's canonical test email.
+        // This adapter never mutates the reservation/customer data and is sandbox-only.
+        email: providerPayerEmail(context.payer.email),
         identification,
       },
       transactions: { payments: [] },
@@ -468,19 +479,34 @@ Deno.serve(async (req) => {
         || causeCode === 'REAL_CHARGES_DISABLED'
         || causeCode.startsWith('MISSING_ENV:')
       ) throw cause
-      console.error('Mercado Pago create Order unavailable', { code: causeCode.split(':')[0] })
+      console.error('[OPERATION_ALERT] MERCADO_PAGO_CREATE_ORDER_TRANSPORT_FAILED', {
+        code: causeCode.split(':')[0],
+        transaction_id: intent.transaction_id,
+        method,
+        payment_kind: paymentKind,
+      })
       return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
     }
 
     if (isIdempotencyConflict(provider)) {
       const existing = await loadTransaction(intent.transaction_id)
       if (!existing?.provider_payment_id) {
+        console.error('[OPERATION_ALERT] MERCADO_PAGO_IDEMPOTENCY_CONFLICT_UNRESOLVED', {
+          transaction_id: intent.transaction_id,
+          method,
+        })
         return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
       }
       provider = await mercadoPagoGetOrder(existing.provider_payment_id)
     }
 
     if (provider.status >= 500) {
+      console.error('[OPERATION_ALERT] MERCADO_PAGO_CREATE_ORDER_PROVIDER_5XX', {
+        transaction_id: intent.transaction_id,
+        method,
+        payment_kind: paymentKind,
+        provider: providerErrorSnapshot(provider.status, provider.data),
+      })
       return response({ error: { code: 'MERCADO_PAGO_TEMPORARY_FAILURE' }, transaction_id: intent.transaction_id }, 503)
     }
 
