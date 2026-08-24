@@ -14,6 +14,7 @@ create table if not exists public.booking_contract_legacy_usage (
 
 revoke all on table public.booking_contract_legacy_usage from public, anon, authenticated;
 grant insert, select on table public.booking_contract_legacy_usage to service_role;
+grant usage, select on sequence public.booking_contract_legacy_usage_id_seq to service_role;
 
 create or replace function public.resolve_service_duration_blocks_from_minutes(
   p_service_id uuid,
@@ -78,9 +79,9 @@ begin
   perform public.assert_public_booking_duration(
     p_booking_page_slug,p_service_id,p_service_employee_id,v_blocks,p_extra_selections,p_people_count
   );
-  return public.calculate_booking_quote_for_duration(
+  return (public.calculate_booking_quote_for_duration(
     p_service_id,p_service_employee_id,v_blocks,p_extra_selections,p_people_count,null,null
-  ) - 'duration_blocks' || jsonb_build_object('contracted_minutes',p_contracted_minutes);
+  ) - 'duration_blocks') || jsonb_build_object('contracted_minutes',p_contracted_minutes);
 end;
 $$;
 
