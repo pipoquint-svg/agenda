@@ -1,0 +1,63 @@
+name: TMP Mercado Pago Card Current
+on:
+  push:
+    branches: [test/mp-card-current]
+    paths: [.github/workflows/tmp-mp-card-current.yml]
+permissions:
+  contents: write
+jobs:
+  card:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 12
+    env:
+      APP_ENV: staging
+      MERCADO_PAGO_ENV: sandbox
+      ALLOW_REAL_CHARGES: "false"
+      ALLOW_REAL_CUSTOMER_DATA: "false"
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard sandbox
+        run: |
+          set -euo pipefail
+          [[ "$APP_ENV" == staging && "$MERCADO_PAGO_ENV" == sandbox ]]
+          [[ "$ALLOW_REAL_CHARGES" == false && "$ALLOW_REAL_CUSTOMER_DATA" == false ]]
+          [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]]
+      - name: APRO e OTHE provider
+        run: |
+          set -euo pipefail
+          test_card() {
+            scenario="$1" expected="$2"
+            token_body=$(mktemp); token_response=$(mktemp); order_body=$(mktemp); order_response=$(mktemp)
+            jq -n --arg name "$scenario" '{card_number:"5480832801033311",expiration_month:11,expiration_year:2030,security_code:"123",cardholder:{name:$name,identification:{type:"CPF",number:"12345678909"}}}' > "$token_body"
+            token_http=$(curl -sS -o "$token_response" -w '%{http_code}' -X POST 'https://api.mercadopago.com/v1/card_tokens' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary "@$token_body")
+            [[ "$token_http" == 200 || "$token_http" == 201 ]]
+            token=$(jq -r '.id // empty' "$token_response"); [[ -n "$token" ]]
+            ref="current-card-${scenario}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            jq -n --arg external "$ref" --arg token "$token" '{type:"online",processing_mode:"automatic",capture_mode:"automatic",external_reference:$external,total_amount:"50.00",payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$token,installments:1}}]}}' > "$order_body"
+            http=$(curl -sS -o "$order_response" -w '%{http_code}' -X POST 'https://api.mercadopago.com/v1/orders' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $ref" --data-binary "@$order_body")
+            if [[ "$expected" == approved ]]; then
+              [[ "$http" == 200 || "$http" == 201 ]]
+              [[ "$(jq -r '.status // empty' "$order_response")" == processed ]]
+              [[ "$(jq -r '.status_detail // empty' "$order_response")" == accredited ]]
+            else
+              [[ "$http" == 402 ]]
+              jq -e '.errors[]? | select(.code == "failed")' "$order_response" >/dev/null
+            fi
+            rm -f "$token_body" "$token_response" "$order_body" "$order_response"
+          }
+          test_card APRO approved
+          test_card OTHE rejected
+      - name: Persist evidence
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p evidence
+          printf '{"gate":"card_provider_current","status":"%s","sha":"%s","real_charges":false,"real_customer_data":false}\n' "$JOB_STATUS" "$GITHUB_SHA" > evidence/mp-card-current.json
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add evidence/mp-card-current.json
+          git commit -m 'test: registrar resultado cartão sandbox atual' || true
+          git push
