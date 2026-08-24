@@ -10,7 +10,8 @@ import {
 } from './paymentApi'
 
 const publicKey = import.meta.env.VITE_MERCADO_PAGO_PUBLIC_KEY?.trim() ?? ''
-if (publicKey) initMercadoPago(publicKey, { locale: 'pt-BR' })
+const cardClientConfigured = publicKey.length > 0
+if (cardClientConfigured) initMercadoPago(publicKey, { locale: 'pt-BR' })
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -75,10 +76,23 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
   const [payment, setPayment] = useState<PaymentResponse | null>(null)
   const [confirmed, setConfirmed] = useState(false)
 
+  useEffect(() => {
+    if (!cardClientConfigured) {
+      console.error('[OPERATION_ALERT] CARD_PAYMENT_CONFIGURATION_MISSING', {
+        component: 'PaymentPanel',
+        layer: 'client',
+      })
+    }
+  }, [])
+
   async function reloadContext() {
     const next = await getPaymentContext(accessToken)
     setContext(next)
     if (!next.financial.minimum_available) setKind('FULL')
+
+    const cardAvailable = cardClientConfigured && next.payment_methods.card_backend_available
+    if (!next.payment_methods.pix_available && cardAvailable) setMethod('CARD')
+
     if (next.appointment.appointment_status === 'CONFIRMED' || numeric(next.financial.contract_balance) <= 0) {
       setConfirmed(true)
       onConfirmed?.()
@@ -111,8 +125,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     let cancelled = false
     const timer = window.setInterval(async () => {
       try {
-        if (cancelled) return
-        await syncCurrentPayment(providerId)
+        if (!cancelled) await syncCurrentPayment(providerId)
       } catch {
         // Webhook remains authoritative; transient poll failures must not interrupt PIX/3DS instructions.
       }
@@ -127,9 +140,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     if (!providerId || !challenge?.external_resource_url || confirmed) return
     const onMessage = (event: MessageEvent) => {
       const data = event.data && typeof event.data === 'object' ? event.data as Record<string, unknown> : null
-      if (data?.status !== 'COMPLETE') return
-      // The iframe event is only a signal; provider Order state is always re-fetched server-side.
-      syncCurrentPayment(providerId).catch(() => undefined)
+      if (data?.status === 'COMPLETE') syncCurrentPayment(providerId).catch(() => undefined)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
@@ -204,6 +215,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
     return <section className="payment-panel">{error ? <div className="form-alert error">{error}</div> : <p>Preparando pagamento…</p>}</section>
   }
 
+  const pixAvailable = context.payment_methods.pix_available
+  const cardAvailable = cardClientConfigured && context.payment_methods.card_backend_available
+  const noPaymentMethod = !pixAvailable && !cardAvailable
   const qr = payment?.provider?.point_of_interaction?.transaction_data
 
   return (
@@ -215,6 +229,13 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
       </div>
 
       {error ? <div className="form-alert error" role="alert">{error}</div> : null}
+
+      {noPaymentMethod ? (
+        <div className="form-alert error" role="alert">
+          <strong>O pagamento está temporariamente indisponível.</strong>
+          <p>Seu horário continua vinculado a esta reserva até o prazo informado. Entre em contato para concluir o pagamento.</p>
+        </div>
+      ) : null}
 
       <div className="payment-kind-grid">
         {context.financial.minimum_available ? (
@@ -235,12 +256,16 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
         </label>
       </div>
 
-      <div className="payment-method-tabs" role="tablist" aria-label="Forma de pagamento">
-        <button type="button" className={method === 'PIX' ? 'active' : ''} onClick={() => { setMethod('PIX'); setPayment(null) }}>PIX</button>
-        <button type="button" className={method === 'CARD' ? 'active' : ''} onClick={() => { setMethod('CARD'); setPayment(null) }}>Cartão</button>
-      </div>
+      {!noPaymentMethod ? (
+        <div className="payment-method-tabs" role="tablist" aria-label="Forma de pagamento">
+          <button type="button" className={method === 'PIX' ? 'active' : ''} disabled={!pixAvailable} aria-disabled={!pixAvailable} onClick={() => { if (pixAvailable) { setMethod('PIX'); setPayment(null) } }}>PIX</button>
+          <button type="button" className={method === 'CARD' ? 'active' : ''} disabled={!cardAvailable} aria-disabled={!cardAvailable} onClick={() => { if (cardAvailable) { setMethod('CARD'); setPayment(null) } }}>Cartão</button>
+        </div>
+      ) : null}
 
-      {method === 'PIX' ? (
+      {!cardAvailable && pixAvailable ? <div className="form-alert error" role="status">O pagamento por cartão está temporariamente indisponível. Você pode continuar pelo PIX.</div> : null}
+
+      {method === 'PIX' && pixAvailable ? (
         <div className="payment-method-body">
           <div className="payment-amount">
             <span>Valor no PIX</span>
@@ -263,7 +288,9 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
             </div>
           )}
         </div>
-      ) : (
+      ) : null}
+
+      {method === 'CARD' && cardAvailable ? (
         <div className="payment-method-body">
           <div className="payment-amount">
             <span>Valor no cartão</span>
@@ -272,8 +299,6 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
           </div>
           {challenge?.external_resource_url ? (
             <ThreeDSChallenge externalResourceUrl={challenge.external_resource_url} />
-          ) : !publicKey ? (
-            <div className="form-alert error">Cartão será habilitado assim que a Public Key do Mercado Pago for configurada no ambiente.</div>
           ) : (
             <div className={busy ? 'card-brick busy' : 'card-brick'}>
               <CardPayment
@@ -286,7 +311,7 @@ export function PaymentPanel({ accessToken, onConfirmed }: {
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       {payment?.provider?.status === 'rejected' ? <div className="form-alert error">Pagamento recusado. Você pode tentar novamente com outra forma.</div> : null}
     </section>

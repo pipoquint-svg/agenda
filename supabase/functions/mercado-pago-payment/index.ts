@@ -97,6 +97,25 @@ function providerErrorSnapshot(status: number, raw: unknown): Record<string, unk
   }
 }
 
+function providerPaymentsConfigured(): boolean {
+  try {
+    mercadoPagoRuntime({
+      environment: Deno.env.get('MERCADO_PAGO_ENV'),
+      accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
+      allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
+      creatingCharge: true,
+    })
+    return true
+  } catch (cause) {
+    const code = cause instanceof Error ? cause.message.split(':')[0] : 'UNKNOWN'
+    console.error('[OPERATION_ALERT] PAYMENT_PROVIDER_CONFIGURATION_UNAVAILABLE', {
+      provider: 'MERCADO_PAGO',
+      code,
+    })
+    return false
+  }
+}
+
 function isIdempotencyConflict(provider: ProviderResult): boolean {
   if (provider.status !== 409) return false
   const errors = Array.isArray(provider.data.errors) ? provider.data.errors : []
@@ -275,6 +294,7 @@ Deno.serve(async (req) => {
         .single()
       if (settingsError) throw new Error('PAYMENT_SETTINGS_LOAD_FAILED')
 
+      const providerReady = providerPaymentsConfigured()
       return response({
         appointment: {
           public_code: context.public_code,
@@ -293,6 +313,10 @@ Deno.serve(async (req) => {
           minimum_available: context.minimum_available,
           full_available: context.full_available,
           pix_discount_percent: settings.pix_discount_percent,
+        },
+        payment_methods: {
+          pix_available: providerReady,
+          card_backend_available: providerReady,
         },
       })
     }
