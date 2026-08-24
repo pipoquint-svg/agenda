@@ -16,7 +16,7 @@ insert into public.services(
  'BLOCKS',30,2,8,250,50,2,'BLACKSHEEP'
 );
 insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
-values('96600000-0000-0000-0000-000000000003',48,0,20,20,20);
+values('96600000-0000-0000-0000-000000000003',12,0,20,20,20);
 insert into public.service_employees(id,service_id,employee_id)
 values('96600000-0000-0000-0000-000000000004','96600000-0000-0000-0000-000000000003','96600000-0000-0000-0000-000000000002');
 insert into public.customers(id,name,email,phone)
@@ -27,7 +27,7 @@ insert into public.appointments(
  start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,pre_service_minutes,post_service_minutes,people_count,
  commercial_value,billing_mode_snapshot,confirmation_percentage_snapshot
 ) values(
- '96600000-0000-0000-0000-000000000006','BAL-COMP','96600000-0000-0000-0000-000000000003','96600000-0000-0000-0000-000000000004','Locação BlackSheep','96600000-0000-0000-0000-000000000005','COMPLETED','PENDING',
+ '96600000-0000-0000-0000-000000000006','BAL-COMP','96600000-0000-0000-0000-000000000003','96600000-0000-0000-0000-000000000004','Locação BlackSheep','96600000-0000-0000-0000-000000000005','COMPLETED','PARTIALLY_PAID',
  '2026-08-24 15:00:00-03','2026-08-24 17:30:00-03','2026-08-24 15:00:00-03','2026-08-24 17:00:00-03',150,120,0,30,1,1000,'CHECKOUT',50
 );
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,payment_purpose)
