@@ -7,6 +7,8 @@ const corsHeaders = {
   'access-control-allow-methods': 'POST, OPTIONS',
 }
 
+const LEGACY_DURATION_BLOCKS_REMOVAL_DATE = '2026-09-07'
+
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -40,49 +42,57 @@ Deno.serve(async (req) => {
     const peopleCount = Number.isInteger(body?.people_count) ? body.people_count as number : NaN
     if (!Number.isInteger(peopleCount)) throw new Error('INVALID_PEOPLE_COUNT')
 
-    const attribution = body?.attribution_json === undefined || body?.attribution_json === null
-      ? {}
-      : body.attribution_json
+    const attribution = body?.attribution_json === undefined || body?.attribution_json === null ? {} : body.attribution_json
     if (typeof attribution !== 'object' || Array.isArray(attribution)) throw new Error('ATTRIBUTION_INVALID')
 
+    const hasContractedMinutes = Object.prototype.hasOwnProperty.call(body ?? {}, 'contracted_minutes')
     const hasDurationBlocks = Object.prototype.hasOwnProperty.call(body ?? {}, 'duration_blocks')
+    if (hasContractedMinutes && hasDurationBlocks) throw new Error('AMBIGUOUS_DURATION_CONTRACT')
+
+    const contractedMinutes = body?.contracted_minutes
     const durationBlocks = body?.duration_blocks
 
-    const rpcName = hasDurationBlocks
-      ? 'public_create_checkout_hold_tracked_duration'
-      : 'public_create_checkout_hold_tracked'
+    if (hasContractedMinutes && !Number.isInteger(contractedMinutes)) throw new Error('INVALID_CONTRACTED_MINUTES')
+    if (hasDurationBlocks && durationBlocks !== null && !Number.isInteger(durationBlocks)) throw new Error('INVALID_DURATION_BLOCKS')
 
-    if (hasDurationBlocks && durationBlocks !== null && !Number.isInteger(durationBlocks)) {
-      throw new Error('INVALID_DURATION_BLOCKS')
+    let rpcName = 'public_create_checkout_hold_tracked'
+    let args: Record<string, unknown> = {
+      p_booking_page_slug: pageSlug,
+      p_service_id: serviceId,
+      p_service_employee_id: employeeId,
+      p_extra_selections: extras,
+      p_people_count: peopleCount,
+      p_requested_start_at: requestedStartAt,
+      p_attribution_json: attribution,
     }
 
-    const args = hasDurationBlocks
-      ? {
-          p_booking_page_slug: pageSlug,
-          p_service_id: serviceId,
-          p_service_employee_id: employeeId,
-          p_duration_blocks: durationBlocks,
-          p_extra_selections: extras,
-          p_people_count: peopleCount,
-          p_requested_start_at: requestedStartAt,
-          p_attribution_json: attribution,
-        }
-      : {
-          p_booking_page_slug: pageSlug,
-          p_service_id: serviceId,
-          p_service_employee_id: employeeId,
-          p_extra_selections: extras,
-          p_people_count: peopleCount,
-          p_requested_start_at: requestedStartAt,
-          p_attribution_json: attribution,
-        }
+    if (hasContractedMinutes) {
+      rpcName = 'public_create_checkout_hold_tracked_minutes'
+      args = { ...args, p_contracted_minutes: contractedMinutes }
+    } else if (hasDurationBlocks) {
+      rpcName = 'public_create_checkout_hold_tracked_duration'
+      args = { ...args, p_duration_blocks: durationBlocks }
+      console.warn('[LEGACY_CONTRACT] duration_blocks received', {
+        surface: 'BOOKING_HOLD',
+        removal_date: LEGACY_DURATION_BLOCKS_REMOVAL_DATE,
+        booking_page_slug: pageSlug,
+        service_id: serviceId,
+      })
+      await client.from('booking_contract_legacy_usage').insert({
+        surface: 'BOOKING_HOLD',
+        booking_page_slug: pageSlug,
+        service_id: serviceId,
+        duration_blocks: durationBlocks,
+        user_agent: req.headers.get('user-agent'),
+      })
+    }
 
     const { data, error } = await client.rpc(rpcName, args)
     if (error) throw new Error(error.message)
     return response({ hold: data }, 201)
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CHECKOUT_HOLD_CREATE_FAILED'
-    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|BOOKING_PAGE_REQUIRED|SERVICE_REQUIRED|SERVICE_EMPLOYEE_REQUIRED|REQUESTED_START_REQUIRED|INVALID_PEOPLE_COUNT|INVALID_DURATION_BLOCKS|ATTRIBUTION_INVALID|BOOKING_PAGE_NOT_FOUND|SERVICE_NOT_AVAILABLE|SERVICE_EMPLOYEE_NOT_AVAILABLE|INVALID_BOOKING_SELECTION|SLOT_NOT_AVAILABLE|RESOURCE_NOT_AVAILABLE|INVALID_DURATION_BLOCKS|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING)/)?.[1] ?? code.split(':')[0]
+    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|BOOKING_PAGE_REQUIRED|SERVICE_REQUIRED|SERVICE_EMPLOYEE_REQUIRED|REQUESTED_START_REQUIRED|INVALID_PEOPLE_COUNT|INVALID_DURATION_BLOCKS|INVALID_CONTRACTED_MINUTES|AMBIGUOUS_DURATION_CONTRACT|ATTRIBUTION_INVALID|BOOKING_PAGE_NOT_FOUND|SERVICE_NOT_AVAILABLE|SERVICE_EMPLOYEE_NOT_AVAILABLE|INVALID_BOOKING_SELECTION|SLOT_NOT_AVAILABLE|RESOURCE_NOT_AVAILABLE|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING)/)?.[1] ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : publicCode === 'SLOT_NOT_AVAILABLE' || publicCode === 'RESOURCE_NOT_AVAILABLE' ? 409
