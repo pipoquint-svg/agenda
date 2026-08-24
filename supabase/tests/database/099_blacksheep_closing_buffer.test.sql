@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(2);
+select plan(3);
 
 insert into public.resources (id, name, resource_type)
 values ('29900000-0000-0000-0000-000000000001', 'CLOSING BUFFER TEST STUDIO', 'PHYSICAL');
@@ -76,10 +76,28 @@ select ok(
     )
     where core_start_at = '2035-01-15 21:00:00-03'::timestamptz
       and core_end_at = '2035-01-15 22:00:00-03'::timestamptz
-      and slot_end_at = '2035-01-15 22:30:00-03'::timestamptz
-      and post_service_minutes = 30
+      and slot_end_at = '2035-01-15 22:00:00-03'::timestamptz
+      and post_service_minutes = 0
   ),
-  'service may end exactly at 22:00 while hidden post-buffer occupies resource until 22:30'
+  'client-facing slot may end exactly at 22:00 without exposing the hidden buffer'
+);
+
+select ok(
+  exists (
+    select 1
+    from public.calculate_booking_resource_ranges(
+      '29900000-0000-0000-0000-000000000030',
+      '[]'::jsonb,
+      '2035-01-15 21:00:00-03'::timestamptz
+    )
+    where resource_id = '29900000-0000-0000-0000-000000000001'
+      and occupied_range = tstzrange(
+        '2035-01-15 21:00:00-03'::timestamptz,
+        '2035-01-15 22:30:00-03'::timestamptz,
+        '[)'
+      )
+  ),
+  'resource occupation keeps the 30-minute post-buffer hidden through 22:30'
 );
 
 select ok(
