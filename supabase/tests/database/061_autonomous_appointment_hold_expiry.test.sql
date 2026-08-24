@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 set local agenda.test_now = '2029-12-31 12:00:00-03';
 
-select plan(8);
+select plan(9);
 
 insert into public.categories(id, name, slug)
 values ('96100000-0000-0000-0000-000000000001', 'Autonomous Expiry', 'autonomous-expiry-test');
@@ -34,6 +34,14 @@ insert into public.services(
   'BLOCKS', 30, 2, 12, 90.00
 );
 
+insert into public.service_change_policies(
+  service_id, notice_hours,
+  reschedule_first_early_percent, reschedule_first_late_percent,
+  reschedule_repeat_percent, cancellation_late_percent
+) values (
+  '96100000-0000-0000-0000-000000000005', 48, 0, 20, 20, 20
+);
+
 insert into public.service_employees(id, service_id, employee_id)
 values (
   '96100000-0000-0000-0000-000000000006',
@@ -43,6 +51,11 @@ values (
 
 insert into public.service_resources(service_id, resource_id, is_required)
 values ('96100000-0000-0000-0000-000000000005', '96100000-0000-0000-0000-000000000002', true);
+
+insert into public.booking_page_services(booking_page_id, service_id, sort_order)
+select id, '96100000-0000-0000-0000-000000000005', 999
+from public.booking_pages
+where slug = 'sabrina';
 
 -- Tuesday, 2030-01-01. The resource stays open through the service's final buffer.
 insert into public.availability_rules(service_employee_id, weekday, start_local_time, end_local_time)
@@ -106,42 +119,61 @@ select ok(
 select is(
   (select status::text from public.appointments where id = '96100000-0000-0000-0000-000000000008'),
   'AWAITING_PAYMENT',
-  'synthetic abandonment remains untouched until periodic maintenance runs'
+  'synthetic abandonment remains untouched until a write path needs the capacity'
 );
 
-select is(
-  public.expire_due_appointment_holds(),
-  1,
-  'periodic maintenance expires one abandoned appointment without any payment event'
+select lives_ok(
+  $$select public.public_create_checkout_hold_duration(
+    'sabrina',
+    '96100000-0000-0000-0000-000000000005',
+    '96100000-0000-0000-0000-000000000006',
+    4, '[]'::jsonb, 1,
+    '2030-01-01 08:00:00-03'::timestamptz
+  )$$,
+  'public hold creation can claim a slot made visible by expired appointment capacity'
 );
 
 select is(
   (select status::text from public.appointments where id = '96100000-0000-0000-0000-000000000008'),
   'EXPIRED',
-  'abandoned appointment becomes EXPIRED'
+  'public hold creation expires the abandoned appointment before allocating capacity'
 );
 
 select is(
   (select status::text from public.resource_allocations where appointment_id = '96100000-0000-0000-0000-000000000008'),
   'EXPIRED',
-  'abandoned appointment allocation becomes EXPIRED'
+  'public hold creation expires the abandoned appointment allocation'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.resource_allocations ra
+    join public.checkout_holds h on h.id = ra.checkout_hold_id
+    where h.service_id = '96100000-0000-0000-0000-000000000005'
+      and h.status = 'ACTIVE'
+      and ra.status = 'HELD'
+      and ra.resource_id = '96100000-0000-0000-0000-000000000002'
+  ),
+  1,
+  'the replacement checkout hold protects the released resource'
 );
 
 select ok(
-  exists (
+  not exists (
     select 1 from public.list_available_slots_for_duration(
       '96100000-0000-0000-0000-000000000005',
       '96100000-0000-0000-0000-000000000006',
       4, '[]'::jsonb, 1, '2030-01-01'::date, null
     ) s where s.core_start_at = '2030-01-01 08:00:00-03'::timestamptz
   ),
-  'slot remains available after authoritative expiry cleanup'
+  'replacement hold hides the slot again after claiming it'
 );
 
 select is(
   public.expire_due_appointment_holds(),
   0,
-  'periodic expiry is idempotent after the abandoned hold is released'
+  'appointment expiry remains idempotent after the public write path cleaned capacity'
 );
 
 select * from finish();
