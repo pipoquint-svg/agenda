@@ -20,14 +20,31 @@ function money(value: number): string {
 }
 
 function dateTime(value: string | null | undefined): string {
-  if (!value) return '—'
+  if (!value) return 'Não informado'
   const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return '—'
+  if (Number.isNaN(parsed.getTime())) return 'Não informado'
   return new Intl.DateTimeFormat('pt-BR', {
     dateStyle: 'short',
     timeStyle: 'short',
     timeZone: 'America/Sao_Paulo',
   }).format(parsed)
+}
+
+function durationLabel(minutes: number): string {
+  const safe = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(safe / 60)
+  const rest = safe % 60
+  if (hours === 0) return `${rest} min`
+  if (rest === 0) return `${hours}h`
+  return `${hours}h${String(rest).padStart(2, '0')}`
+}
+
+function contractedSlotDuration(slot: RescheduleSlot): number {
+  const start = new Date(slot.core_start_at).getTime()
+  const end = new Date(slot.core_end_at).getTime()
+  return Number.isFinite(start) && Number.isFinite(end) && end > start
+    ? Math.round((end - start) / 60000)
+    : slot.duration_minutes
 }
 
 function localToday(): string {
@@ -61,13 +78,13 @@ function actionParams(): { token: string; scope: ActionScope | null } {
 function errorMessage(error: unknown): string {
   const code = error instanceof AppointmentActionError ? error.code : 'ACTION_ACCESS_TEMPORARY_FAILURE'
   switch (code) {
-    case 'LINK_INVALID_OR_EXPIRED': return 'Este link não é mais válido. Entre em contato com a BlackSheep para receber ajuda.'
-    case 'ACTION_ACCESS_RATE_LIMITED': return 'Foram feitas muitas tentativas. Tente novamente mais tarde ou fale com a BlackSheep.'
+    case 'LINK_INVALID_OR_EXPIRED': return 'Este link é inválido ou expirou. Responda à mensagem em que recebeu este link para solicitar um novo acesso.'
+    case 'ACTION_ACCESS_RATE_LIMITED': return 'Foram feitas muitas tentativas. Tente novamente mais tarde.'
     case 'ACTION_VERIFICATION_REQUIRED': return 'Confirme o e-mail cadastrado para continuar.'
     case 'ACTION_PAYMENT_REQUIRED': return 'Existe uma diferença de valor que precisa ser paga antes de concluir a remarcação.'
     case 'RESCHEDULE_HOLD_EXPIRED': return 'O horário selecionado expirou. Escolha novamente um horário disponível.'
-    case 'CLIENT_RESCHEDULE_LIMIT_REACHED': return 'Esta reserva atingiu o limite de remarcações pelo link. Fale com a BlackSheep.'
-    case 'RESCHEDULE_REQUIRES_ASSISTANCE': return 'Esta reserva precisa de atendimento da BlackSheep para ser remarcada.'
+    case 'CLIENT_RESCHEDULE_LIMIT_REACHED': return 'Esta reserva atingiu o limite de remarcações pelo link. Responda à mensagem em que recebeu este link para falar com a equipe.'
+    case 'RESCHEDULE_REQUIRES_ASSISTANCE': return 'Não foi possível calcular automaticamente as condições desta alteração. Responda à mensagem em que recebeu este link para que a equipe faça a remarcação com você.'
     default: return 'Não foi possível concluir agora. Tente novamente em instantes.'
   }
 }
@@ -76,7 +93,7 @@ function LinkNotice({ access }: { access: ActionResolve }) {
   return (
     <div className="manage-link-notice" role="note">
       <span>{access.warning}</span>
-      <small>Válido até {dateTime(access.expires_at)} · acesso em {dateTime(access.accessed_at)}</small>
+      <small>Válido até {dateTime(access.expires_at)}. Acesso em {dateTime(access.accessed_at)}.</small>
     </div>
   )
 }
@@ -119,7 +136,7 @@ function CancelFlow({ token, access }: { token: string; access: ActionResolve })
       <section className="manage-state-card success" aria-live="polite">
         <span className="manage-state-icon">✓</span>
         <h2>Cancelamento registrado</h2>
-        <p>A reserva foi atualizada. Os valores seguem exatamente a política apresentada antes da confirmação.</p>
+        <p>A reserva foi atualizada conforme as condições apresentadas antes da confirmação.</p>
       </section>
     )
   }
@@ -132,14 +149,14 @@ function CancelFlow({ token, access }: { token: string; access: ActionResolve })
           <span className="manage-step">1</span>
           <div>
             <h2>Confira antes de cancelar</h2>
-            <p>O cálculo abaixo vem diretamente da regra financeira da sua reserva.</p>
+            <p>Estes são os valores calculados conforme as condições contratadas para sua reserva.</p>
           </div>
         </div>
 
         {!preview && !error && <div className="manage-skeleton">Calculando as condições do cancelamento…</div>}
         {preview && (
           <div className="manage-financial-grid">
-            <div><span>Valor da reserva</span><strong>{money(preview.financial.contract_value)}</strong></div>
+            <div><span>Valor pago</span><strong>{money(preview.financial.paid_amount)}</strong></div>
             <div><span>Valor retido</span><strong>{money(preview.financial.penalty_amount)}</strong></div>
             <div className="highlight"><span>Valor a devolver</span><strong>{money(preview.financial.refund_amount)}</strong></div>
           </div>
@@ -151,7 +168,7 @@ function CancelFlow({ token, access }: { token: string; access: ActionResolve })
           <span className="manage-step">2</span>
           <div>
             <h2>Confirme o cancelamento</h2>
-            <p>Para proteger uma ação financeira, confirme o e-mail cadastrado na reserva.</p>
+            <p>Para proteger esta alteração financeira, confirme o e-mail cadastrado na reserva.</p>
           </div>
         </div>
 
@@ -238,7 +255,7 @@ function RescheduleFlow({ token, access }: { token: string; access: ActionResolv
       <section className="manage-state-card success" aria-live="polite">
         <span className="manage-state-icon">✓</span>
         <h2>Remarcação concluída</h2>
-        <p>O novo horário foi confirmado e passou a ser o horário oficial da reserva.</p>
+        <p>Seu novo horário está confirmado.</p>
       </section>
     )
   }
@@ -251,13 +268,13 @@ function RescheduleFlow({ token, access }: { token: string; access: ActionResolv
           <span className="manage-step">1</span>
           <div>
             <h2>Escolha uma nova data</h2>
-            <p>Mostramos somente horários que o backend confirma como disponíveis.</p>
+            <p>Mostramos somente horários disponíveis para sua reserva.</p>
           </div>
         </div>
         <div className="manage-date-row">
           <input aria-label="Nova data" type="date" min={localToday()} value={date} onChange={(event) => setDate(event.target.value)} />
           <button className="secondary" type="button" onClick={searchSlots} disabled={busy || !date}>
-            {busy ? 'Consultando…' : 'Ver horários'}
+            {busy ? 'Buscando horários…' : 'Ver horários'}
           </button>
         </div>
         {slots.length > 0 && (
@@ -265,12 +282,12 @@ function RescheduleFlow({ token, access }: { token: string; access: ActionResolv
             {slots.map((slot) => (
               <button key={slot.slot_start_at} type="button" onClick={() => chooseSlot(slot)} disabled={busy}>
                 <strong>{new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }).format(new Date(slot.core_start_at))}</strong>
-                <span>{slot.duration_minutes} min</span>
+                <span>{durationLabel(contractedSlotDuration(slot))}</span>
               </button>
             ))}
           </div>
         )}
-        {date && !busy && slots.length === 0 && !proposal && !error && <p className="manage-empty">Nenhum horário foi carregado para esta data.</p>}
+        {date && !busy && slots.length === 0 && !proposal && !error && <p className="manage-empty">Nenhum horário disponível para esta data.</p>}
       </section>
 
       {proposal && (
@@ -279,19 +296,19 @@ function RescheduleFlow({ token, access }: { token: string; access: ActionResolv
             <span className="manage-step">2</span>
             <div>
               <h2>Revise a nova reserva</h2>
-              <p>O horário fica protegido temporariamente enquanto você conclui esta etapa.</p>
+              <p>Este novo horário fica reservado para você enquanto conclui esta etapa.</p>
             </div>
           </div>
 
           <div className="manage-proposal-date">
             <span>Novo horário</span>
             <strong>{dateTime(proposal.new_slot.core_start_at ?? proposal.new_slot.slot_start_at)}</strong>
-            {proposal.new_slot.expires_at && <small>Seleção protegida até {dateTime(proposal.new_slot.expires_at)}</small>}
+            {proposal.new_slot.expires_at && <small>Este novo horário fica reservado até {dateTime(proposal.new_slot.expires_at)}</small>}
           </div>
 
           <div className="manage-financial-grid">
-            <div><span>Valor da reserva</span><strong>{money(proposal.financial.new_contract_value)}</strong></div>
-            <div><span>Valor retido</span><strong>{money(proposal.financial.penalty_amount)}</strong></div>
+            <div><span>Valor total</span><strong>{money(proposal.financial.new_contract_value)}</strong></div>
+            <div><span>Taxa de remarcação</span><strong>{money(proposal.financial.penalty_amount)}</strong></div>
             <div className={proposal.financial.difference_due > 0 ? 'highlight' : ''}>
               <span>Diferença a pagar</span><strong>{money(proposal.financial.difference_due)}</strong>
             </div>
@@ -306,7 +323,7 @@ function RescheduleFlow({ token, access }: { token: string; access: ActionResolv
 
           {proposal.requires_payment && (
             <div className="form-alert error" role="status">
-              Esta remarcação tem uma diferença de {money(proposal.financial.difference_due)}. O pagamento precisa ser concluído antes da confirmação do novo horário.
+              Para confirmar o novo horário, conclua o pagamento da diferença de {money(proposal.financial.difference_due)}.
             </div>
           )}
 
@@ -316,7 +333,7 @@ function RescheduleFlow({ token, access }: { token: string; access: ActionResolv
           </label>
           {error && <div className="form-alert error" role="alert">{error}</div>}
           <button className="primary" type="submit" disabled={busy || !confirmed || proposal.requires_payment || (proposal.requires_email_verification && !email.trim())}>
-            {proposal.requires_payment ? 'Pagamento necessário' : busy ? 'Confirmando…' : 'Confirmar novo horário'}
+            {proposal.requires_payment ? 'Pagar diferença para confirmar' : busy ? 'Confirmando…' : 'Confirmar novo horário'}
           </button>
         </form>
       )}
@@ -341,7 +358,7 @@ export function ManageReservation() {
 
   useEffect(() => {
     if (!token || !scope) {
-      setError('Este link não é mais válido. Entre em contato com a BlackSheep para receber ajuda.')
+      setError('Este link é inválido ou expirou. Responda à mensagem em que recebeu este link para solicitar um novo acesso.')
       return
     }
     let alive = true
@@ -361,7 +378,7 @@ export function ManageReservation() {
         <div className="manage-intro">
           <span className="manage-eyebrow">Gerenciar minha reserva</span>
           <h1>{scope === 'CANCEL' ? 'Cancelar reserva' : scope === 'RESCHEDULE' ? 'Remarcar reserva' : 'Gerenciar reserva'}</h1>
-          <p>As condições, valores e horários desta página são consultados diretamente no sistema da sua reserva.</p>
+          <p>Os horários, valores e condições desta página correspondem à sua reserva.</p>
         </div>
 
         {!access && !error && <div className="manage-loading">Validando seu link…</div>}

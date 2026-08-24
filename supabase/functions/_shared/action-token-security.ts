@@ -49,7 +49,14 @@ export function mapActionAccessError(raw: string): ActionAccessErrorMapping {
   if (raw.includes('CLIENT_RESCHEDULE_LIMIT_REACHED')) {
     return { code: 'CLIENT_RESCHEDULE_LIMIT_REACHED', status: 409 }
   }
-  if (raw.includes('RESCHEDULE_PACKAGE_RECONCILIATION_REQUIRED')) {
+  if (
+    raw.includes('RESCHEDULE_PACKAGE_RECONCILIATION_REQUIRED')
+    || raw.includes('APPOINTMENT_CHANGE_POLICY_SNAPSHOT_MISSING')
+    || raw.includes('APPOINTMENT_CHANGE_POLICY_SNAPSHOT_INVALID')
+  ) {
+    console.error('[OPERATION_ALERT] APPOINTMENT_CHANGE_REQUIRES_ASSISTANCE', {
+      reason: raw.includes('APPOINTMENT_CHANGE_POLICY') ? 'HISTORICAL_POLICY_SNAPSHOT_UNAVAILABLE' : 'PACKAGE_RECONCILIATION_REQUIRED',
+    })
     return { code: 'RESCHEDULE_REQUIRES_ASSISTANCE', status: 409 }
   }
   if (raw.includes('RESCHEDULE_DATE_INVALID') || raw.includes('RESCHEDULE_TIME_INVALID')) {

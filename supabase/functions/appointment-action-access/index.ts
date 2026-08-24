@@ -193,6 +193,7 @@ Deno.serve(async (req) => {
           requires_email_verification: true,
           financial: {
             contract_value: numeric(financial.contract_value),
+            paid_amount: numeric(financial.customer_funds_before),
             penalty_amount: numeric(financial.penalty_retained),
             refund_amount: refundAmount,
             settlement_default: refundAmount > 0 ? 'REFUND' : null,
