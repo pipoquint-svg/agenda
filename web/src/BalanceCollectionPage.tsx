@@ -41,7 +41,7 @@ export function BalanceCollectionPage() {
   }
 
   if (accessToken) {
-    return <main className="checkout-shell"><section className="checkout-card"><PaymentPanel accessToken={accessToken} /></section></main>
+    return <main className="checkout-shell"><section className="checkout-card"><PaymentPanel accessToken={accessToken} mode="BALANCE" /></section></main>
   }
 
   return (
