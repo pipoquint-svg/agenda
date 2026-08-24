@@ -1,0 +1,79 @@
+name: MP Current Main Provider Validation
+
+on:
+  push:
+    branches:
+      - audit/mp-current-main-validation-20260824
+
+permissions:
+  contents: read
+
+jobs:
+  provider:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 12
+    env:
+      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      ALLOW_REAL_CHARGES: "false"
+      ALLOW_REAL_CUSTOMER_DATA: "false"
+    steps:
+      - name: Safety gates
+        run: |
+          set -euo pipefail
+          [[ "$ALLOW_REAL_CHARGES" == "false" ]]
+          [[ "$ALLOW_REAL_CUSTOMER_DATA" == "false" ]]
+          [[ -n "${MERCADO_PAGO_ACCESS_TOKEN:-}" ]]
+
+      - name: PIX Orders API creation, GET and idempotency
+        run: |
+          set -euo pipefail
+          ext="audit-pix-${GITHUB_RUN_ID}"
+          key="audit-pix-key-${GITHUB_RUN_ID}"
+          cat >/tmp/pix.json <<JSON
+          {"type":"online","external_reference":"$ext","processing_mode":"automatic","total_amount":"50.00","payer":{"email":"test_user_br@testuser.com","first_name":"APRO"},"transactions":{"payments":[{"amount":"50.00","payment_method":{"id":"pix","type":"bank_transfer"}}]}}
+          JSON
+          code=$(curl -sS -o /tmp/pix-create.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $key" --data @/tmp/pix.json)
+          [[ "$code" == "200" || "$code" == "201" ]]
+          id=$(jq -r '.id // empty' /tmp/pix-create.json)
+          [[ -n "$id" ]]
+          [[ "$(jq -r '.status' /tmp/pix-create.json)" == "action_required" ]]
+          [[ "$(jq -r '.status_detail' /tmp/pix-create.json)" == "waiting_transfer" ]]
+          jq -e '.transactions.payments | length == 1' /tmp/pix-create.json >/dev/null
+          jq -e '.transactions.payments[0].payment_method.id == "pix" and (.transactions.payments[0].payment_method.qr_code != null or .transactions.payments[0].payment_method.ticket_url != null)' /tmp/pix-create.json >/dev/null
+          code=$(curl -sS -o /tmp/pix-get.json -w '%{http_code}' -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" "https://api.mercadopago.com/v1/orders/$id")
+          [[ "$code" == "200" ]]
+          [[ "$(jq -r '.id' /tmp/pix-get.json)" == "$id" ]]
+          code=$(curl -sS -o /tmp/pix-replay.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $key" --data @/tmp/pix.json)
+          [[ "$code" == "200" || "$code" == "201" ]]
+          [[ "$(jq -r '.id' /tmp/pix-replay.json)" == "$id" ]]
+          echo "PIX_PROVIDER_PASS order=$id"
+
+      - name: Approved card APRO
+        run: |
+          set -euo pipefail
+          jq -n '{card_number:"5480832801033311",expiration_month:11,expiration_year:2030,security_code:"123",cardholder:{name:"APRO",identification:{type:"CPF",number:"12345678909"}}}' >/tmp/card.json
+          code=$(curl -sS -o /tmp/card-token.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/card_tokens -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' --data @/tmp/card.json)
+          [[ "$code" == "200" || "$code" == "201" ]]
+          tok=$(jq -r '.id // empty' /tmp/card-token.json); [[ -n "$tok" ]]
+          ext="audit-card-apro-${GITHUB_RUN_ID}"
+          jq -n --arg e "$ext" --arg t "$tok" '{type:"online",processing_mode:"automatic",capture_mode:"automatic",external_reference:$e,total_amount:"50.00",payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$t,installments:1}}]}}' >/tmp/order.json
+          code=$(curl -sS -o /tmp/order-apro.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $ext" --data @/tmp/order.json)
+          [[ "$code" == "200" || "$code" == "201" ]]
+          [[ "$(jq -r '.status' /tmp/order-apro.json)" == "processed" ]]
+          [[ "$(jq -r '.status_detail' /tmp/order-apro.json)" == "accredited" ]]
+          echo "CARD_APRO_PROVIDER_PASS order=$(jq -r '.id' /tmp/order-apro.json)"
+
+      - name: Rejected card OTHE
+        run: |
+          set -euo pipefail
+          jq -n '{card_number:"5480832801033311",expiration_month:11,expiration_year:2030,security_code:"123",cardholder:{name:"OTHE",identification:{type:"CPF",number:"12345678909"}}}' >/tmp/card.json
+          code=$(curl -sS -o /tmp/card-token.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/card_tokens -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' --data @/tmp/card.json)
+          [[ "$code" == "200" || "$code" == "201" ]]
+          tok=$(jq -r '.id // empty' /tmp/card-token.json); [[ -n "$tok" ]]
+          ext="audit-card-othe-${GITHUB_RUN_ID}"
+          jq -n --arg e "$ext" --arg t "$tok" '{type:"online",processing_mode:"automatic",capture_mode:"automatic",external_reference:$e,total_amount:"50.00",payer:{email:"test@testuser.com",identification:{type:"CPF",number:"12345678909"}},transactions:{payments:[{amount:"50.00",payment_method:{id:"master",type:"credit_card",token:$t,installments:1}}]}}' >/tmp/order.json
+          code=$(curl -sS -o /tmp/order-othe.json -w '%{http_code}' -X POST https://api.mercadopago.com/v1/orders -H "Authorization: Bearer $MERCADO_PAGO_ACCESS_TOKEN" -H 'Content-Type: application/json' -H "X-Idempotency-Key: $ext" --data @/tmp/order.json)
+          [[ "$code" == "402" ]]
+          jq -e '.errors[]? | select(.code == "failed")' /tmp/order-othe.json >/dev/null
+          echo "CARD_OTHE_PROVIDER_PASS"
