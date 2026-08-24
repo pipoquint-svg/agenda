@@ -13,34 +13,33 @@ jobs:
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@v4
-      - name: Instalar Playwright e PyYAML
+      - name: Instalar Playwright
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet pyyaml
           mkdir -p /tmp/mp-browser
           cd /tmp/mp-browser
           npm init -y >/dev/null
           npm install playwright@1.55.0 >/dev/null
           npx playwright install --with-deps chromium >/dev/null
-      - name: Extrair harness oficial da main
+      - name: Extrair JavaScript oficial do browser gate
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import yaml
-          p='.github/workflows/mercado-pago-staging-browser-gate.yml'
-          data=yaml.safe_load(open(p))
-          steps=data['jobs']['browser-card-gate']['steps']
-          run=next(s['run'] for s in steps if s.get('name')=='Run HTTPS browser scenarios')
-          open('/tmp/run-browser.sh','w').write(run)
-          PY
-          chmod +x /tmp/run-browser.sh
+          awk '
+            /cat > \/tmp\/mp-browser\/gate\.mjs <<'\''EOF'\''/ {capture=1; next}
+            capture && /^          EOF$/ {capture=0; exit}
+            capture {sub(/^          /, ""); print}
+          ' .github/workflows/mercado-pago-staging-browser-gate.yml > /tmp/mp-browser/gate.mjs
+          test -s /tmp/mp-browser/gate.mjs
+          grep -Fq "await scenario('APRO')" /tmp/mp-browser/gate.mjs
+          grep -Fq "await scenario('OTHE')" /tmp/mp-browser/gate.mjs
       - name: Executar APRO e OTHE no staging HTTPS
         run: |
           mkdir -p evidence
           set +e
-          /tmp/run-browser.sh > evidence/mp-browser-run.log 2>&1
+          cd /tmp/mp-browser
+          xvfb-run -a node gate.mjs > "$GITHUB_WORKSPACE/evidence/mp-browser-run.log" 2>&1
           code=$?
-          cat evidence/mp-browser-run.log
+          cat "$GITHUB_WORKSPACE/evidence/mp-browser-run.log"
           exit $code
       - name: Persist evidence
         if: always()
