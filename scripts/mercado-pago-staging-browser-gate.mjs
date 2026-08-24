@@ -145,10 +145,11 @@ async function fillBrick(page, scenario) {
     if (found.has('number') && found.has('expiration') && found.has('cvv') && found.has('holder')) {
       for (const frame of page.frames()) {
         try {
-          const buttons = frame.getByRole('button', { name: /pagar|pay|continuar|processar|confirmar/i })
-          for (let i = 0; i < await buttons.count(); i++) {
-            const button = buttons.nth(i)
+          const exactPay = frame.getByRole('button', { name: /^pagar$/i })
+          for (let i = 0; i < await exactPay.count(); i++) {
+            const button = exactPay.nth(i)
             if (await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false)) {
+              console.log(`${scenario}_PAYMENT_SUBMIT=${(await button.textContent().catch(() => 'Pagar'))?.trim() || 'Pagar'}`)
               await button.click()
               return
             }
