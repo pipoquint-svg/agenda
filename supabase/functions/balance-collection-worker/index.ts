@@ -44,10 +44,10 @@ Deno.serve(async (req) => {
     const workerId = `balance:${crypto.randomUUID()}`
     const emailEnabled = envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED')
 
-    const { data: kommoSettings, error: kommoError } = await client
-      .from('kommo_integration_settings').select('enabled').eq('id',1).maybeSingle()
-    if (kommoError) throw new Error('KOMMO_SETTINGS_LOOKUP_FAILED')
-    const kommoEnabled = kommoSettings?.enabled === true
+    // Balance delivery through Kommo remains deliberately fail-closed. The durable
+    // RENTAL_BALANCE_DUE_KOMMO jobs are retained in the outbox, but this worker must not
+    // claim them until a dedicated notifier exists and its provider gate is explicitly enabled.
+    const kommoDeliveryEnabled = false
 
     const { data: created, error: enqueueError } = await client.rpc('enqueue_due_rental_balance_collections')
     if (enqueueError) throw new Error('RENTAL_BALANCE_COLLECTION_ENQUEUE_FAILED')
@@ -56,7 +56,6 @@ Deno.serve(async (req) => {
 
     const jobTypes = ['RENTAL_BALANCE_CANCEL_NO_SHOW','RENTAL_BALANCE_CANCEL_EXPIRED']
     if (emailEnabled) jobTypes.push('RENTAL_BALANCE_DUE_EMAIL')
-    if (kommoEnabled) jobTypes.push('RENTAL_BALANCE_DUE_KOMMO')
 
     const { data: jobs, error: claimError } = await client.rpc('claim_integration_jobs', {
       p_worker_id:workerId,p_job_types:jobTypes,p_limit:20,
@@ -72,9 +71,6 @@ Deno.serve(async (req) => {
           await invokeFunction('balance-collection-provider-cancel',secret,{collection_id:job.entity_id,reason:'NO_SHOW'})
         } else if (job.job_type==='RENTAL_BALANCE_CANCEL_EXPIRED') {
           await invokeFunction('balance-collection-provider-cancel',secret,{collection_id:job.entity_id,reason:'EXPIRED'})
-        } else if (job.job_type==='RENTAL_BALANCE_DUE_KOMMO') {
-          if (!kommoEnabled) throw new Error('KOMMO_INTEGRATION_DISABLED')
-          await invokeFunction('balance-collection-notify-kommo',secret,{collection_id:job.entity_id})
         } else {
           throw new Error('UNSUPPORTED_BALANCE_JOB_TYPE')
         }
@@ -94,7 +90,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return jsonResponse({worker_id:workerId,collections_created:Number(created ?? 0),email_enabled:emailEnabled,kommo_enabled:kommoEnabled,claimed:(jobs ?? []).length,succeeded,retried,failed})
+    return jsonResponse({worker_id:workerId,collections_created:Number(created ?? 0),email_enabled:emailEnabled,kommo_delivery_enabled:kommoDeliveryEnabled,claimed:(jobs ?? []).length,succeeded,retried,failed})
   } catch (error) {
     const code = error instanceof Error ? error.message : 'BALANCE_WORKER_FAILED'
     return errorResponse(error,code==='INTERNAL_AUTH_REQUIRED'?401:500)
