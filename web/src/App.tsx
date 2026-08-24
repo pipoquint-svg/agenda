@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { AdminBalancesPage } from './AdminBalancesPage'
 import { AdminDashboard } from './AdminDashboard'
 import { AgendaAdmin } from './AgendaAdmin'
 import { BalanceCollectionPage } from './BalanceCollectionPage'
@@ -53,6 +54,7 @@ function applicationPath(): string {
 export function App() {
   const path = applicationPath()
 
+  if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
