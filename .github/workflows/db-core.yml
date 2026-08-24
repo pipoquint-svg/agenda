@@ -28,6 +28,7 @@ jobs:
           deno test supabase/functions/_shared/kommo_test.ts
           deno test supabase/functions/_shared/managed-event_test.ts
           deno test supabase/functions/_shared/mercado-pago_test.ts
+          deno test supabase/functions/_shared/mercado-pago-webhook-signature-regression_test.ts
           deno test supabase/functions/_shared/mercado-pago-runtime_test.ts
           deno test supabase/functions/_shared/public-rate-limit_test.ts
           deno test supabase/functions/_shared/transactional-email_test.ts
