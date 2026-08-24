@@ -45,7 +45,7 @@ function durationLabel(minutes: number): string {
 }
 
 function timeRange(startAt: string, endAt: string): string {
-  return `${time.format(new Date(startAt))}–${time.format(new Date(endAt))}`
+  return `${time.format(new Date(startAt))} às ${time.format(new Date(endAt))}`
 }
 
 function secondsLabel(total: number): string {
@@ -56,14 +56,16 @@ function secondsLabel(total: number): string {
 function readableError(error: unknown): string {
   const raw = error instanceof Error ? error.message : 'Não foi possível concluir esta etapa.'
   const known: Array<[string, string]> = [
+    ['INVALID_CONTRACTED_MINUTES', 'Escolha uma duração válida para a locação.'],
     ['INVALID_DURATION_BLOCKS', 'Escolha uma duração válida para a locação.'],
+    ['AMBIGUOUS_DURATION_CONTRACT', 'Esta página foi atualizada. Recarregue e escolha o horário novamente.'],
     ['DURATION_BLOCKS_NOT_ALLOWED', 'Este serviço possui duração fixa.'],
-    ['SLOT_NO_LONGER_AVAILABLE', 'Esse horário acabou de ficar indisponível. Escolha outro horário.'],
-    ['REQUIRED_EXTRA_MISSING', 'Revise os extras obrigatórios antes de continuar.'],
+    ['SLOT_NO_LONGER_AVAILABLE', 'Este horário acabou de ser reservado por outra pessoa. Escolha outro horário.'],
+    ['REQUIRED_EXTRA_MISSING', 'Revise os adicionais obrigatórios antes de continuar.'],
     ['INVALID_PEOPLE_COUNT', 'A quantidade de pessoas não é válida para este serviço.'],
-    ['PUBLIC_SERVICE_NOT_AVAILABLE_ON_PAGE', 'Esse serviço não está disponível nesta página.'],
+    ['PUBLIC_SERVICE_NOT_AVAILABLE_ON_PAGE', 'Este serviço não está disponível nesta página.'],
     ['EMPLOYEE_NOT_AVAILABLE_FOR_SERVICE', 'O profissional selecionado não está disponível para este serviço.'],
-    ['INVALID_EXTRA', 'Um dos extras selecionados não está disponível para este serviço.'],
+    ['INVALID_EXTRA', 'Um dos adicionais selecionados não está disponível para este serviço.'],
   ]
   return known.find(([key]) => raw.includes(key))?.[1] ?? 'Não foi possível concluir esta etapa. Tente novamente.'
 }
@@ -95,7 +97,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   const [slots, setSlots] = useState<BookingSlot[]>([])
   const [searchingSlots, setSearchingSlots] = useState(false)
   const [creatingHold, setCreatingHold] = useState<string | null>(null)
-  const [hold, setHold] = useState<(CheckoutHold & { duration_blocks?: number | null; contracted_minutes?: number }) | null>(null)
+  const [hold, setHold] = useState<(CheckoutHold & { contracted_minutes?: number }) | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [holdExpired, setHoldExpired] = useState(false)
 
@@ -104,6 +106,10 @@ export function BookingPageDuration({ slug }: { slug: string }) {
     [page, serviceId],
   )
   const extras = useMemo(() => selectedExtras(service, extraQuantities), [service, extraQuantities])
+  const selectedContractedMinutes = useMemo(
+    () => service ? contractedMinutes(service, durationBlocks) : 0,
+    [service, durationBlocks],
+  )
 
   useEffect(() => {
     let active = true
@@ -113,7 +119,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
       .then((data) => {
         if (!active) return
         setPage(data)
-        if (!data) setError('Página de agendamento não encontrada.')
+        if (!data) setError('Esta página de reservas não está disponível.')
       })
       .catch((cause) => active && setError(readableError(cause)))
       .finally(() => active && setLoading(false))
@@ -121,7 +127,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   }, [slug])
 
   useEffect(() => {
-    if (!service || !employeeRelationId) {
+    if (!service || !employeeRelationId || selectedContractedMinutes <= 0) {
       setQuote(null)
       return
     }
@@ -130,14 +136,14 @@ export function BookingPageDuration({ slug }: { slug: string }) {
       pageSlug: slug,
       service,
       serviceEmployeeId: employeeRelationId,
-      durationBlocks,
+      contractedMinutes: selectedContractedMinutes,
       extras,
       peopleCount,
     })
       .then((next) => active && setQuote(next))
       .catch(() => active && setQuote(null))
     return () => { active = false }
-  }, [durationBlocks, employeeRelationId, extras, peopleCount, service, slug])
+  }, [selectedContractedMinutes, employeeRelationId, extras, peopleCount, service, slug])
 
   useEffect(() => {
     if (!hold) {
@@ -190,7 +196,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   }
 
   async function searchSlots() {
-    if (!service || !employeeRelationId || !localDate) return
+    if (!service || !employeeRelationId || !localDate || selectedContractedMinutes <= 0) return
     setSearchingSlots(true)
     setError(null)
     setHoldExpired(false)
@@ -199,7 +205,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         pageSlug: slug,
         service,
         serviceEmployeeId: employeeRelationId,
-        durationBlocks,
+        contractedMinutes: selectedContractedMinutes,
         extras,
         peopleCount,
         localDate,
@@ -214,7 +220,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   }
 
   async function protectSlot(slot: BookingSlot) {
-    if (!service || !employeeRelationId) return
+    if (!service || !employeeRelationId || selectedContractedMinutes <= 0) return
     setCreatingHold(slot.slot_start_at)
     setError(null)
     try {
@@ -222,7 +228,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         pageSlug: slug,
         service,
         serviceEmployeeId: employeeRelationId,
-        durationBlocks,
+        contractedMinutes: selectedContractedMinutes,
         extras,
         peopleCount,
         requestedStartAt: slot.slot_start_at,
@@ -235,8 +241,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         pageSlug: slug,
         serviceId: service.id,
         serviceName: service.name,
-        durationBlocks,
-        contractedMinutes: nextHold.contracted_minutes ?? contractedMinutes(service, durationBlocks),
+        contractedMinutes: nextHold.contracted_minutes ?? selectedContractedMinutes,
         expiresAt: nextHold.expires_at,
       }))
     } catch (cause) {
@@ -247,7 +252,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
     }
   }
 
-  if (loading) return <main className="booking-shell"><div className="booking-card">Carregando agenda…</div></main>
+  if (loading) return <main className="booking-shell"><div className="booking-card">Carregando horários…</div></main>
   if (!page) return <main className="booking-shell"><div className="booking-card"><h1>Agenda indisponível</h1><p>{error}</p></div></main>
 
   return (
@@ -261,14 +266,14 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         </header>
 
         {error ? <div className="form-alert error" role="alert">{error}</div> : null}
-        {holdExpired ? <div className="form-alert error" role="alert">O tempo de proteção terminou. O horário foi liberado; escolha um horário novamente.</div> : null}
+        {holdExpired ? <div className="form-alert error" role="alert">O tempo para concluir a reserva terminou e este horário voltou a ficar disponível. Escolha um novo horário.</div> : null}
 
         {page.services.length === 0 ? (
-          <div className="booking-empty"><h2>Serviços ainda não publicados</h2><p>Esta página já está preparada, mas os serviços ainda precisam ser vinculados no administrativo.</p></div>
+          <div className="booking-empty"><h2>Nenhum atendimento disponível no momento</h2></div>
         ) : (
           <div className="booking-flow">
             <section className="booking-step">
-              <div className="step-title"><span>1</span><div><h2>Escolha o serviço</h2><p>Selecione o atendimento que deseja agendar.</p></div></div>
+              <div className="step-title"><span>1</span><div><h2>O que você deseja reservar?</h2><p>Selecione o atendimento que deseja agendar.</p></div></div>
               <div className="service-grid">
                 {page.services.map((item) => (
                   <button type="button" key={item.id} className={`service-option ${serviceId === item.id ? 'selected' : ''}`} onClick={() => chooseService(item.id)}>
@@ -285,7 +290,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
               <>
                 {service.duration_mode === 'BLOCKS' ? (
                   <section className="booking-step">
-                    <div className="step-title"><span>2</span><div><h2>Quanto tempo você precisa?</h2><p>Escolha qualquer duração disponível em intervalos de {service.booking_block_minutes ?? 30} minutos. Quanto maior o período, menor pode ficar o valor por hora.</p></div></div>
+                    <div className="step-title"><span>2</span><div><h2>Quanto tempo você precisa?</h2><p>Escolha a duração da locação em intervalos de {service.booking_block_minutes ?? 30} minutos. Quanto maior o período, menor pode ficar o valor por hora.</p></div></div>
 
                     {service.duration_presets?.length > 0 ? (
                       <div className="duration-preset-grid" aria-label="Tempos recomendados">
@@ -328,20 +333,18 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                       </label>
                       {durationBlocks ? (
                         <div className="duration-live-price" aria-live="polite">
-                          <small>Valor base para {durationLabel(contractedMinutes(service, durationBlocks))}</small>
+                          <small>Locação de {durationLabel(selectedContractedMinutes)}</small>
                           <strong>{money.format(durationBasePrice(service, durationBlocks))}</strong>
                           <span>{money.format(hourlyBasePrice(service, durationBlocks))}/h</span>
                         </div>
                       ) : null}
                     </div>
-
-                    {service.buffer_after_minutes > 0 ? <small className="duration-buffer-note">Você recebe todo o período escolhido. O tempo técnico após a locação é reservado internamente e não é descontado da sua reserva.</small> : null}
                   </section>
                 ) : null}
 
                 {service.employees.length > 1 ? (
                   <section className="booking-step">
-                    <div className="step-title"><span>•</span><div><h2>Profissional</h2><p>Escolha quem realizará o atendimento.</p></div></div>
+                    <div className="step-title"><span>•</span><div><h2>Escolha o profissional</h2><p>Escolha quem realizará o atendimento.</p></div></div>
                     <div className="choice-row">
                       {service.employees.map((employee) => (
                         <button type="button" className={`choice-pill ${employeeRelationId === employee.service_employee_id ? 'selected' : ''}`} key={employee.service_employee_id} onClick={() => { setEmployeeRelationId(employee.service_employee_id); resetAvailability() }}>{employee.name}</button>
@@ -352,17 +355,17 @@ export function BookingPageDuration({ slug }: { slug: string }) {
 
                 {service.extras.length > 0 ? (
                   <section className="booking-step">
-                    <div className="step-title"><span>•</span><div><h2>Extras</h2><p>Personalize o atendimento antes de escolher a data.</p></div></div>
+                    <div className="step-title"><span>•</span><div><h2>Adicionais</h2><p>Personalize o atendimento antes de escolher a data.</p></div></div>
                     <div className="extras-list">
                       {service.extras.map((extra) => {
                         const quantity = extraQuantities[extra.id] ?? 0
                         return (
                           <div className="extra-row" key={extra.id}>
                             <div>
-                              <strong>{extra.name}{extra.is_required ? ' · obrigatório' : ''}</strong>
+                              <strong>{extra.name}{extra.is_required ? ' · incluído na reserva' : ''}</strong>
                               {extra.description ? <small>{extra.description}</small> : null}
                               <span>+ {money.format(numeric(extra.price))}</span>
-                              {extra.schedule_placement === 'PREPEND' && (extra.default_schedule_minutes ?? 0) > 0 ? <small>Este extra pode antecipar seu horário de chegada.</small> : null}
+                              {extra.schedule_placement === 'PREPEND' && (extra.default_schedule_minutes ?? 0) > 0 ? <small>Com este adicional, seu atendimento começa mais cedo. O horário mostrado já considera sua chegada.</small> : null}
                             </div>
                             {extra.is_required ? <span className="required-badge">Incluído</span> : extra.max_quantity === 1 ? (
                               <label className="toggle-extra"><input type="checkbox" checked={quantity > 0} onChange={(event) => changeExtra(extra.id, event.target.checked ? 1 : 0)} /><span>{quantity > 0 ? 'Selecionado' : 'Adicionar'}</span></label>
@@ -377,7 +380,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                 ) : null}
 
                 <section className="booking-step">
-                  <div className="step-title"><span>•</span><div><h2>Pessoas</h2><p>A quantidade pode alterar disponibilidade e valor.</p></div></div>
+                  <div className="step-title"><span>•</span><div><h2>Quantas pessoas participarão?</h2><p>A quantidade pode alterar disponibilidade e valor.</p></div></div>
                   {service.minimum_people === service.maximum_people ? <p className="fixed-people">{service.minimum_people} {service.minimum_people === 1 ? 'pessoa' : 'pessoas'}</p> : (
                     <select className="people-select" value={peopleCount} onChange={(event) => { setPeopleCount(Number(event.target.value)); resetAvailability() }}>
                       {Array.from({ length: service.maximum_people - service.minimum_people + 1 }, (_, index) => service.minimum_people + index).map((value) => <option key={value} value={value}>{value} {value === 1 ? 'pessoa' : 'pessoas'}</option>)}
@@ -386,33 +389,33 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                 </section>
 
                 <section className="booking-step">
-                  <div className="step-title"><span>•</span><div><h2>Data e horário</h2><p>Os horários exibidos já consideram recursos, buffers, extras e bloqueios da agenda.</p></div></div>
+                  <div className="step-title"><span>•</span><div><h2>Data e horário</h2><p>Mostramos somente os horários realmente disponíveis para sua reserva.</p></div></div>
                   <div className="date-search">
                     <label>Data<input type="date" min={todayLocal()} value={localDate} onChange={(event) => { setLocalDate(event.target.value); setSlots([]) }} /></label>
-                    <button className="primary" type="button" onClick={searchSlots} disabled={!localDate || !employeeRelationId || searchingSlots}>{searchingSlots ? 'Consultando…' : 'Buscar horários'}</button>
+                    <button className="primary" type="button" onClick={searchSlots} disabled={!localDate || !employeeRelationId || searchingSlots}>{searchingSlots ? 'Buscando horários…' : 'Buscar horários'}</button>
                   </div>
 
                   {slots.length > 0 ? (
                     <div className="slots-grid" aria-label="Horários disponíveis">
                       {slots.map((slot) => {
-                        const differs = slot.slot_start_at !== slot.core_start_at || slot.slot_end_at !== slot.core_end_at
+                        const hasEarlierArrival = slot.slot_start_at !== slot.core_start_at
                         return (
                           <button type="button" className="slot-option" key={slot.slot_start_at} disabled={creatingHold !== null || hold !== null} onClick={() => protectSlot(slot)}>
-                            <strong>{timeRange(slot.slot_start_at, slot.slot_end_at)}</strong>
-                            {differs ? <small>Atendimento principal {timeRange(slot.core_start_at, slot.core_end_at)}</small> : <small>Período contratado</small>}
+                            <strong>{hasEarlierArrival ? `Chegada ${time.format(new Date(slot.slot_start_at))}` : timeRange(slot.core_start_at, slot.core_end_at)}</strong>
+                            {hasEarlierArrival ? <small>Atendimento contratado {timeRange(slot.core_start_at, slot.core_end_at)}</small> : <small>Período contratado</small>}
                             <span>{money.format(numeric(slot.commercial_value))}</span>
-                            {creatingHold === slot.slot_start_at ? <em>Protegendo…</em> : null}
+                            {creatingHold === slot.slot_start_at ? <em>Reservando horário…</em> : null}
                           </button>
                         )
                       })}
                     </div>
-                  ) : localDate && !searchingSlots ? <div className="booking-empty compact"><p>Nenhum horário listado ainda para esta busca. Tente outra data.</p></div> : null}
+                  ) : localDate && !searchingSlots ? <div className="booking-empty compact"><p>Nenhum horário disponível para esta busca. Tente outra data.</p></div> : null}
                 </section>
 
                 {quote ? (
                   <aside className="booking-summary">
-                    <div><small>Estimativa atual</small><strong>{money.format(numeric(quote.commercial_value))}</strong></div>
-                    <div><small>Período contratado</small><strong>{durationLabel(quote.core_duration_minutes ?? service.base_duration_minutes)}</strong></div>
+                    <div><small>Valor estimado</small><strong>{money.format(numeric(quote.commercial_value))}</strong></div>
+                    <div><small>Duração contratada</small><strong>{durationLabel(selectedContractedMinutes)}</strong></div>
                   </aside>
                 ) : null}
 
@@ -420,10 +423,10 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                   <section className="hold-confirmation" aria-live="polite">
                     <div className="hold-dot" />
                     <div>
-                      <small>Horário protegido</small>
-                      <h2>{timeRange(hold.slot_start_at, hold.slot_end_at)}</h2>
-                      {hold.slot_start_at !== hold.core_start_at || hold.slot_end_at !== hold.core_end_at ? <p>Atendimento principal {timeRange(hold.core_start_at, hold.core_end_at)}.</p> : null}
-                      <p>Preencha a próxima etapa antes do contador terminar. Se expirar, o horário volta a ficar disponível.</p>
+                      <small>Seu horário está reservado</small>
+                      <h2>{hold.slot_start_at !== hold.core_start_at ? `Chegada ${time.format(new Date(hold.slot_start_at))}` : timeRange(hold.core_start_at, hold.core_end_at)}</h2>
+                      {hold.slot_start_at !== hold.core_start_at ? <p>Atendimento contratado {timeRange(hold.core_start_at, hold.core_end_at)}.</p> : null}
+                      <p>Conclua sua reserva antes do tempo indicado para manter este horário.</p>
                     </div>
                     <strong className="hold-timer">{secondsLabel(remainingSeconds)}</strong>
                   </section>
