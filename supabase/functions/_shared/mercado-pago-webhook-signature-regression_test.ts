@@ -11,19 +11,15 @@ async function hmacHex(secret: string, text: string): Promise<string> {
   return Array.from(result).map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-Deno.test('Mercado Pago Orders webhook lowercases alphanumeric data.id in HMAC manifest', async () => {
-  const manifest = buildMercadoPagoWebhookManifest('ORDTST01M0TAKWKB9ETA8VYCQR1T3Q2J', 'request-xyz', '1742505638683')
-  assert(
-    manifest === 'id:ordtst01m0takwkb9eta8vycqr1t3q2j;request-id:request-xyz;ts:1742505638683;',
-    'Orders data.id must be lowercase in webhook manifest',
-  )
-
+Deno.test('Mercado Pago Orders webhook validates provider lowercase alphanumeric data.id manifest', async () => {
+  const dataId = 'ORDTST01M0TAKWKB9ETA8VYCQR1T3Q2J'
+  const canonicalManifest = `id:${dataId.toLowerCase()};request-id:request-xyz;ts:1742505638683;`
   const secret = 'test-secret'
-  const signature = await hmacHex(secret, manifest)
+  const signature = await hmacHex(secret, canonicalManifest)
   const valid = await verifyMercadoPagoWebhookSignature({
     signature: `ts=1742505638683,v1=${signature}`,
     requestId: 'request-xyz',
-    dataId: 'ORDTST01M0TAKWKB9ETA8VYCQR1T3Q2J',
+    dataId,
     secret,
   })
   assert(valid, 'uppercase Order query id must validate against lowercase provider manifest')
