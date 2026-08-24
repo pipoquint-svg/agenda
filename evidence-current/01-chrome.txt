@@ -1,0 +1,1 @@
+chrome=/usr/bin/google-chrome code=0
