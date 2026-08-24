@@ -1,0 +1,15 @@
+generated_at=2026-08-24T16:48:20Z
+source_main=b382dbca9c10d3b227252ce63ad63fa134f99637
+orchestrator_job_status=failure
+RUN_ID[mercado-pago-sandbox-deploy.yml]=32752719192
+RESULT[mercado-pago-sandbox-deploy.yml]=PASS
+RUN_ID[mercado-pago-sandbox-probe.yml]=32752758080
+RESULT[mercado-pago-sandbox-probe.yml]=PASS
+RUN_ID[mercado-pago-sandbox-pix-gate.yml]=32752775312
+RESULT[mercado-pago-sandbox-pix-gate.yml]=PASS
+RUN_ID[mercado-pago-sandbox-card-gate.yml]=32752794000
+RESULT[mercado-pago-sandbox-card-gate.yml]=PASS
+RUN_ID[mercado-pago-staging-browser-gate.yml]=32752818224
+RESULT[mercado-pago-staging-browser-gate.yml]=FAIL run=32752818224
+{"conclusion":"failure","jobs":[{"conclusion":"failure","name":"Browser HTTPS — APRO e OTHE"}],"status":"completed","url":"https://github.com/pipoquint-svg/agenda/actions/runs/32752818224"}
+TOTAL_FAILURES=1
