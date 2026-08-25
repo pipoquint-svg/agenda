@@ -47,12 +47,14 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const [coupons, services] = await Promise.all([
+      const [coupons, services, customers] = await Promise.all([
         client.rpc('admin_list_coupons'),
         client.rpc('service_admin_list_service_settings'),
+        client.from('customers').select('id,name,email').eq('customer_type', 'PERSON').order('name').limit(500),
       ])
       if (coupons.error) throw new Error(coupons.error.message)
       if (services.error) throw new Error(services.error.message)
+      if (customers.error) throw new Error(customers.error.message)
       return json({
         coupons: coupons.data ?? [],
         services: (services.data ?? []).map((service: Record<string, unknown>) => ({
@@ -63,6 +65,7 @@ Deno.serve(async (req) => {
           operation_scope: service.operation_scope,
           is_active: service.is_active,
         })),
+        customers: customers.data ?? [],
       })
     }
 
