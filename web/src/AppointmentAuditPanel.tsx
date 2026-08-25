@@ -2,12 +2,21 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   AdminAgendaApiError,
   downloadAppointmentTimeline,
+  getAdminAppointment,
   getAppointmentTimeline,
   unlockAppointmentTokenVerification,
+  type AppointmentCouponSnapshot,
   type AppointmentTimeline,
   type AppointmentTimelineEvent,
 } from './adminAgendaApi'
 import './appointmentAudit.css'
+
+const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+
+function numeric(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
 
 function dateTime(value: string): string {
   return new Intl.DateTimeFormat('pt-BR', {
@@ -49,8 +58,35 @@ function EventDetails({ event }: { event: AppointmentTimelineEvent }) {
   )
 }
 
+function CouponSummary({ coupon }: { coupon: AppointmentCouponSnapshot }) {
+  const nominal = coupon.discount_type === 'PERCENT'
+    ? `${numeric(coupon.discount_value)}%`
+    : money.format(numeric(coupon.discount_value))
+  return (
+    <section className="audit-coupon-summary" aria-label="Cupom aplicado à reserva">
+      <div>
+        <span>Cupom utilizado</span>
+        <strong>{coupon.code}</strong>
+      </div>
+      <div>
+        <span>Benefício cadastrado</span>
+        <strong>{nominal}</strong>
+      </div>
+      <div>
+        <span>Desconto nesta reserva</span>
+        <strong>− {money.format(numeric(coupon.discount_amount))}</strong>
+      </div>
+      <div>
+        <span>Total final</span>
+        <strong>{money.format(numeric(coupon.final_value))}</strong>
+      </div>
+    </section>
+  )
+}
+
 export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointmentId: string; accessToken: string }) {
   const [timeline, setTimeline] = useState<AppointmentTimeline | null>(null)
+  const [coupon, setCoupon] = useState<AppointmentCouponSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [forbidden, setForbidden] = useState(false)
   const [error, setError] = useState('')
@@ -61,7 +97,12 @@ export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointm
     setLoading(true)
     setError('')
     try {
-      setTimeline(await getAppointmentTimeline(appointmentId, accessToken))
+      const [timelineData, appointmentDetail] = await Promise.all([
+        getAppointmentTimeline(appointmentId, accessToken),
+        getAdminAppointment(appointmentId, accessToken),
+      ])
+      setTimeline(timelineData)
+      setCoupon(appointmentDetail.coupon ?? null)
       setForbidden(false)
     } catch (cause) {
       if (cause instanceof AdminAgendaApiError && cause.code === 'ADMIN_PERMISSION_DENIED') {
@@ -104,6 +145,8 @@ export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointm
 
   return (
     <section className="agenda-detail-section appointment-audit" aria-label="Trilha de autoria da reserva">
+      {coupon ? <CouponSummary coupon={coupon} /> : null}
+
       <div className="audit-heading">
         <div>
           <h3>Trilha de autoria</h3>
