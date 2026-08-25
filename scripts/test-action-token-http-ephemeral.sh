@@ -95,6 +95,39 @@ request() {
     "$FUNCTION_URL"
 }
 
+# After `supabase db reset`, Kong can answer OPTIONS before the Edge runtime has
+# re-established its upstream connection. Require one functional application-level
+# response before measuring the gate. Retry only startup/transport 5xx; any other
+# unexpected status fails immediately so this does not hide product regressions.
+warmup_token="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+functional_ready=false
+for _ in $(seq 1 30); do
+  warmup_meta="$(request "$warmup_token" "$WORK_DIR/warmup.json" || true)"
+  warmup_status="${warmup_meta%% *}"
+  if [[ "$warmup_status" == "400" ]]; then
+    functional_ready=true
+    break
+  fi
+  if [[ "$warmup_status" != "502" && "$warmup_status" != "503" && "$warmup_status" != "000" && -n "$warmup_status" ]]; then
+    echo "Edge Function warm-up returned unexpected HTTP $warmup_status" >&2
+    cat "$WORK_DIR/warmup.json" >&2 2>/dev/null || true
+    cat "$SERVE_LOG" >&2
+    exit 1
+  fi
+  if ! kill -0 "$SERVE_PID" >/dev/null 2>&1; then
+    echo 'Edge Function serve process exited during functional warm-up.' >&2
+    cat "$SERVE_LOG" >&2
+    exit 1
+  fi
+  sleep 1
+done
+if [[ "$functional_ready" != "true" ]]; then
+  echo 'Edge Function did not become functionally ready within 30 seconds.' >&2
+  cat "$WORK_DIR/warmup.json" >&2 2>/dev/null || true
+  cat "$SERVE_LOG" >&2
+  exit 1
+fi
+
 valid_meta="$(request "$valid_token" "$WORK_DIR/valid.json" || true)"
 valid_status="${valid_meta%% *}"
 if [[ "$valid_status" != "200" ]]; then
