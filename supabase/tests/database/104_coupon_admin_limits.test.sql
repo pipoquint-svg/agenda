@@ -1,0 +1,30 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select plan(15);
+select has_function('public','admin_list_coupons',array[]::text[],'coupon list RPC exists');
+select has_function('public','admin_coupon_metrics',array[]::text[],'coupon metrics RPC exists');
+select has_function('public','admin_coupon_usage',array['uuid'],'coupon usage RPC exists');
+select has_function('public','admin_create_coupon_audited',array['text','text','numeric','timestamp with time zone','timestamp with time zone','integer','integer','uuid','uuid[]','uuid'],'coupon create RPC exists');
+select has_function('public','admin_update_coupon_audited',array['uuid','text','text','numeric','timestamp with time zone','timestamp with time zone','integer','integer','uuid','uuid[]','boolean','uuid'],'coupon update RPC exists');
+select has_function('public','admin_remove_coupon_audited',array['uuid','uuid'],'coupon remove RPC exists');
+select ok(not has_function_privilege('authenticated','public.admin_list_coupons()','EXECUTE'),'browser cannot list coupons directly');
+select ok(not has_function_privilege('authenticated','public.admin_coupon_metrics()','EXECUTE'),'browser cannot read coupon metrics directly');
+select ok(has_function_privilege('service_role','public.admin_list_coupons()','EXECUTE'),'service role can list coupons after edge auth');
+select col_type_is('public','coupons','max_uses_per_customer','integer','per-customer limit column exists');
+insert into public.customers(id,name,email) values('44444444-4444-4444-8444-444444444440','Coupon Customer','coupon@example.test');
+insert into public.categories(id,name,slug,operation_scope) values('44444444-4444-4444-8444-444444444441','Coupon Category','coupon-category','BLACKSHEEP');
+insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,operation_scope) values('44444444-4444-4444-8444-444444444442','44444444-4444-4444-8444-444444444441','Coupon Service','coupon-service',60,100,'BLACKSHEEP');
+insert into public.employees(id,name) values('44444444-4444-4444-8444-444444444443','Coupon Employee');
+insert into public.service_employees(id,service_id,employee_id) values('44444444-4444-4444-8444-444444444444','44444444-4444-4444-8444-444444444442','44444444-4444-4444-8444-444444444443');
+insert into public.coupons(id,code,discount_type,discount_value,max_uses,max_uses_per_customer) values('44444444-4444-4444-8444-444444444445','LIMIT1','PERCENT',10,10,1);
+insert into public.appointments(id,public_code,service_id,service_employee_id,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value) values
+('44444444-4444-4444-8444-444444444446','COUPONA','44444444-4444-4444-8444-444444444442','44444444-4444-4444-8444-444444444444',now()+interval '1 day',now()+interval '1 day 1 hour',60,1,'44444444-4444-4444-8444-444444444440',90),
+('44444444-4444-4444-8444-444444444447','COUPONB','44444444-4444-4444-8444-444444444442','44444444-4444-4444-8444-444444444444',now()+interval '2 days',now()+interval '2 days 1 hour',60,1,'44444444-4444-4444-8444-444444444440',90);
+insert into public.appointment_discounts(appointment_id,coupon_id,code_snapshot,discount_type_snapshot,discount_value_snapshot,calculated_discount_amount) values('44444444-4444-4444-8444-444444444446','44444444-4444-4444-8444-444444444445','LIMIT1','PERCENT',10,10);
+select throws_ok($$insert into public.appointment_discounts(appointment_id,coupon_id,code_snapshot,discount_type_snapshot,discount_value_snapshot,calculated_discount_amount) values('44444444-4444-4444-8444-444444444447','44444444-4444-4444-8444-444444444445','LIMIT1','PERCENT',10,10)$$,'P0001','COUPON_CUSTOMER_USAGE_LIMIT_REACHED','same customer cannot exceed coupon per-customer limit');
+select is((select max_uses_per_customer from public.coupons where id='44444444-4444-4444-8444-444444444445'),1,'coupon stores per-customer limit');
+select ok(exists(select 1 from jsonb_array_elements(public.admin_list_coupons()) item where item->>'id'='44444444-4444-4444-8444-444444444445' and (item->>'actual_used_count')::int=1),'admin list exposes actual use');
+select is((public.admin_coupon_metrics()->>'total_uses')::int,1,'metrics count effective uses');
+select is(jsonb_array_length(public.admin_coupon_usage('44444444-4444-4444-8444-444444444445')),1,'usage detail returns reservation');
+select * from finish();rollback;

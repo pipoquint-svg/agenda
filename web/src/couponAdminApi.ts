@@ -1,0 +1,15 @@
+import { functionsBaseUrl, publicApiKey } from './supabase'
+
+export type CouponAdminRow = { id:string;code:string;discount_type:'FIXED'|'PERCENT';discount_value:number|string;valid_from:string|null;valid_until:string|null;is_active:boolean;source:string;customer_id:string|null;customer_name:string|null;source_appointment_id:string|null;max_uses:number|null;max_uses_per_customer:number|null;used_count:number;actual_used_count:number;status:'ACTIVE'|'INACTIVE'|'SCHEDULED'|'EXPIRED'|'EXHAUSTED';service_ids:string[] }
+export type CouponMetrics = { total_uses:number;coupons_used:number;active_coupons:number;most_used:{id:string;code:string;uses:number;discount_total:number|string}|null;ranking:Array<{id:string;code:string;uses:number;discount_total:number|string}> }
+export type CouponUsageRow = { appointment_id:string;public_code:string;start_at:string;customer_id:string|null;customer_name:string|null;customer_email:string|null;discount_amount:number|string;final_value:number|string }
+export type CouponServiceOption={id:string;name:string;category_id:string|null;category_name:string|null;operation_scope:'SABRINA'|'BLACKSHEEP'|null;is_active:boolean}
+export type CouponCustomerOption={id:string;name:string;email:string|null}
+export type CouponAdminBundle={coupons:CouponAdminRow[];metrics:CouponMetrics;services:CouponServiceOption[];customers:CouponCustomerOption[]}
+async function request(accessToken:string,init?:RequestInit,path=''){ const response=await fetch(`${functionsBaseUrl}/admin-coupons${path}`,{...init,headers:{apikey:publicApiKey,authorization:`Bearer ${accessToken}`,'content-type':'application/json',...(init?.headers??{})}});const payload=await response.json().catch(()=>({}));if(!response.ok) throw new Error(payload?.error?.code??`HTTP_${response.status}`);return payload }
+export async function loadCoupons(accessToken:string):Promise<CouponAdminBundle>{const body=await request(accessToken);return{coupons:body.coupons??[],metrics:body.metrics??{total_uses:0,coupons_used:0,active_coupons:0,most_used:null,ranking:[]},services:body.services??[],customers:body.customers??[]}}
+export async function loadCouponUsage(couponId:string,accessToken:string):Promise<CouponUsageRow[]>{const body=await request(accessToken,undefined,`?coupon_id=${encodeURIComponent(couponId)}`);return body.usage??[]}
+export type CouponMutation={coupon_id?:string;code:string;discount_type:'FIXED'|'PERCENT';discount_value:number;valid_from:string|null;valid_until:string|null;max_uses:number|null;max_uses_per_customer:number|null;customer_id:string|null;service_ids:string[];is_active?:boolean}
+export async function createCoupon(input:CouponMutation,accessToken:string){await request(accessToken,{method:'POST',body:JSON.stringify(input)})}
+export async function updateCoupon(input:CouponMutation&{coupon_id:string;is_active:boolean},accessToken:string){await request(accessToken,{method:'PUT',body:JSON.stringify(input)})}
+export async function removeCoupon(couponId:string,accessToken:string):Promise<{removed:boolean;archived:boolean}>{return request(accessToken,{method:'DELETE',body:JSON.stringify({coupon_id:couponId})})}

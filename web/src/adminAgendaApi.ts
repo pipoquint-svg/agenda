@@ -58,10 +58,19 @@ export type AdminAgendaResponse = {
   external_blocks: AdminExternalBlock[]
 }
 
+export type AppointmentCouponSnapshot = {
+  coupon_id: string | null
+  code: string
+  discount_type: 'FIXED' | 'PERCENT' | string
+  discount_value: number | string
+  discount_amount: number | string
+  final_value: number | string
+}
+
 export type AppointmentDetailResponse = {
   appointment: AdminAppointment & Record<string, unknown>
   customer: Record<string, unknown> | null
-  financial: Record<string, unknown>
+  financial: Record<string, unknown> & { coupon?: AppointmentCouponSnapshot | null }
   extras: Array<Record<string, unknown>>
   answers: Array<Record<string, unknown>>
   terms: Array<Record<string, unknown>>
