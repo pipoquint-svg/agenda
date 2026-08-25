@@ -8,6 +8,7 @@ import { BookingPageDuration } from './BookingPageDuration'
 import { CouponAdmin } from './CouponAdmin'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
+import { EmployeeAdmin } from './EmployeeAdmin'
 import { ManageReservation } from './ManageReservation'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
@@ -16,6 +17,7 @@ import { trackPublicPage } from './tracking'
 import './agendaAdmin.css'
 import './serviceSettingsAdmin.css'
 import './couponAdmin.css'
+import './employeeAdmin.css'
 import './checkout.css'
 
 function PublicBookingRoute({ slug }: { slug: string }) {
@@ -39,6 +41,7 @@ export function App() {
   const path = applicationPath()
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
+  if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes-avancadas')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/configuracoes') || path.startsWith('/admin/catalogo')) return <ServiceCatalogAdmin />
