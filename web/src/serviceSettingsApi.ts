@@ -20,6 +20,23 @@ export type DurationPreset = {
   sort_order: number
 }
 
+export type ServiceFieldType = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'DATE' | 'SELECT' | 'MULTISELECT' | 'BOOLEAN'
+
+export type ServiceCustomField = {
+  id?: string
+  field_key: string
+  label: string
+  field_type: ServiceFieldType
+  help_text: string | null
+  placeholder: string | null
+  is_required: boolean
+  sort_order: number
+  options_json: string[] | null
+  is_active: boolean
+}
+
+export type OperationScope = 'SABRINA' | 'BLACKSHEEP'
+
 export type PenaltyType = 'NONE' | 'FIXED' | 'PERCENT'
 
 export type ChangePolicy = {
@@ -45,8 +62,11 @@ export type ServiceSettings = {
   id: string
   name: string
   slug: string
-  category: string | null
+  short_description: string | null
+  full_description: string | null
+  operation_scope: OperationScope | null
   is_active: boolean
+  sort_order: number
   duration_mode: 'FIXED' | 'BLOCKS'
   base_duration_minutes: number
   booking_block_minutes: number | null
@@ -56,6 +76,7 @@ export type ServiceSettings = {
   base_price: number | string
   buffer_before_minutes: number
   buffer_after_minutes: number
+  custom_fields: ServiceCustomField[]
   pricing_tiers: DurationPricingTier[]
   duration_presets: DurationPreset[]
   change_policy: ChangePolicy | null
@@ -80,6 +101,31 @@ type DurationConfigurationPayload = {
   action: 'DURATION_CONFIGURATION'
   pricing_tiers: DurationPricingTier[]
   duration_presets: DurationPreset[]
+}
+
+export type CreateServicePayload = {
+  name: string
+  slug: string
+  operation_scope: OperationScope
+  short_description?: string | null
+  full_description?: string | null
+  duration_mode?: 'FIXED' | 'BLOCKS'
+  base_duration_minutes?: number
+  base_price?: number
+  buffer_before_minutes?: number
+  buffer_after_minutes?: number
+}
+
+export type UpdateServiceCatalogPayload = {
+  service_id: string
+  action: 'CATALOG'
+  name: string
+  slug: string
+  operation_scope: OperationScope
+  short_description: string | null
+  full_description: string | null
+  is_active: boolean
+  sort_order: number
 }
 
 export class ServiceSettingsApiError extends Error {
@@ -115,6 +161,26 @@ async function request(path: string, accessToken: string, init?: RequestInit): P
 export async function listServiceSettings(accessToken: string): Promise<ServiceSettings[]> {
   const body = await (await request('admin-service-settings', accessToken)).json()
   return body.services ?? []
+}
+
+export async function createService(payload: CreateServicePayload, accessToken: string): Promise<void> {
+  await request('admin-service-settings', accessToken, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export async function saveServiceCatalog(payload: UpdateServiceCatalogPayload, accessToken: string): Promise<void> {
+  await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+export async function removeService(serviceId: string, accessToken: string): Promise<{ removed: boolean; archived: boolean }> {
+  const response = await request('admin-service-settings', accessToken, { method: 'DELETE', body: JSON.stringify({ service_id: serviceId }) })
+  return response.json()
+}
+
+export async function saveCustomFields(serviceId: string, fields: ServiceCustomField[], accessToken: string): Promise<void> {
+  await request('admin-service-settings', accessToken, {
+    method: 'PUT',
+    body: JSON.stringify({ service_id: serviceId, action: 'CUSTOM_FIELDS', fields }),
+  })
 }
 
 export async function saveServiceTiming(payload: TimingPayload, accessToken: string): Promise<void> {
