@@ -120,8 +120,7 @@ Deno.serve(async (req) => {
     }
 
     if (entity === 'EXTRA') {
-      const canManageFinance = await can('FINANCE_MANAGE')
-      if (!canManageFinance) throw new Error('ADMIN_PERMISSION_DENIED')
+      await requirePermission('FINANCE_MANAGE')
       if (req.method === 'POST') {
         const { data, error } = await client.rpc('service_admin_create_extra_audited', {
           p_name: text(body?.name), p_description: text(body?.description) || null,
@@ -149,10 +148,9 @@ Deno.serve(async (req) => {
     if (entity !== 'SERVICE') throw new Error('SERVICE_SETTINGS_ENTITY_INVALID')
 
     if (req.method === 'POST') {
-      const canManageFinance = await can('FINANCE_MANAGE')
       const requestedBasePrice = numeric(body?.base_price ?? 0, 'base_price') ?? 0
       const requestedExtraPersonPrice = numeric(body?.price_per_extra_person ?? 0, 'price_per_extra_person') ?? 0
-      if ((requestedBasePrice !== 0 || requestedExtraPersonPrice !== 0) && !canManageFinance) throw new Error('ADMIN_PERMISSION_DENIED')
+      if (requestedBasePrice !== 0 || requestedExtraPersonPrice !== 0) await requirePermission('FINANCE_MANAGE')
       const { data, error } = await client.rpc('service_admin_create_service_catalog_audited', {
         p_category_id: uuid(body?.category_id, 'CATEGORY_ID_INVALID'),
         p_name: text(body?.name), p_slug: text(body?.slug), p_operation_scope: operationScope(body?.operation_scope),
@@ -177,8 +175,9 @@ Deno.serve(async (req) => {
 
     const action = text(body?.action).toUpperCase()
     if (action === 'CATALOG') {
-      const currentBasePriceChange = Number(body?.price_per_extra_person ?? 0) !== 0
-      if (currentBasePriceChange) await requirePermission('FINANCE_MANAGE')
+      // CATALOG always carries price_per_extra_person. Requiring FINANCE_MANAGE here also
+      // protects decreases and resets to zero, not only non-zero increases.
+      await requirePermission('FINANCE_MANAGE')
       const { data, error } = await client.rpc('service_admin_update_service_catalog_audited', {
         p_service_id: serviceId, p_category_id: uuid(body?.category_id, 'CATEGORY_ID_INVALID'),
         p_name: text(body?.name), p_slug: text(body?.slug), p_operation_scope: operationScope(body?.operation_scope),
