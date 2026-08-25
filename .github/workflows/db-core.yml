@@ -84,8 +84,12 @@ jobs:
       - name: Run distributed rate-limit concurrency test
         run: bash scripts/test-rate-limit-concurrency.sh
 
-      # This gate creates action-token/access evidence intentionally. Keep it after
-      # all authoritative DB suites so its disposable fixture cannot affect them.
+      # The HTTP gate intentionally creates action-token/access evidence. Give it a
+      # fresh disposable DB after all authoritative suites so neither side can leak
+      # state into the other. The runner is destroyed immediately afterwards.
+      - name: Reset disposable stack for action-token HTTP gate
+        run: supabase db reset
+
       - name: Run action-token HTTP gate in disposable local stack
         run: bash scripts/test-action-token-http-ephemeral.sh
 
