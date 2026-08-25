@@ -30,11 +30,6 @@ select is(
 with exposed as (
   select format('%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid)) as signature
   from pg_proc p
-  join pg_namespace n on n.oid = p.relnamespace
-  where false
-), actual as (
-  select format('%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid)) as signature
-  from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
     and p.prosecdef
@@ -44,7 +39,7 @@ with exposed as (
     )
 )
 select is(
-  (select string_agg(signature, E'\n' order by signature) from actual),
+  (select string_agg(signature, E'\n' order by signature) from exposed),
   E'public_get_booking_page(p_slug text)\npublic_list_available_slots(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_list_available_slots_duration(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_duration_blocks integer, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_list_available_slots_minutes(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_contracted_minutes integer, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_quote_booking(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_extra_selections jsonb, p_people_count integer)\npublic_quote_booking_duration(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_duration_blocks integer, p_extra_selections jsonb, p_people_count integer)\npublic_quote_booking_minutes(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_contracted_minutes integer, p_extra_selections jsonb, p_people_count integer)\nservice_bootstrap_first_owner_authenticated(p_display_name text)',
   'SECURITY DEFINER exposure matches the explicit public/authenticated allowlist'
 );
