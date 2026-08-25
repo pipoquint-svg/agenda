@@ -53,15 +53,27 @@ jobs:
           grep -Fq "client.rpc('expire_unconfirmed_free_visits')" supabase/functions/integration-worker/index.ts
           grep -Fq "PAYMENT_AFTER_EXPIRATION" supabase/tests/database/009_payment_state_machine.test.sql
 
-      - name: Gate Mercado Pago admin financial mutations
+      - name: Gate Mercado Pago financial mutations
         run: |
-          file='supabase/functions/admin-appointment-actions/index.ts'
-          grep -Fq "import { mercadoPagoRuntime }" "$file"
-          grep -Fq 'function providerFinancialMutationRuntime()' "$file"
-          grep -Fq 'creatingCharge: true' "$file"
-          grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$file"
-          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$file"; then
+          refund_file='supabase/functions/admin-appointment-actions/index.ts'
+          cancel_file='supabase/functions/balance-collection-provider-cancel/index.ts'
+
+          grep -Fq "import { mercadoPagoRuntime }" "$refund_file"
+          grep -Fq 'function providerFinancialMutationRuntime()' "$refund_file"
+          grep -Fq 'creatingCharge: true' "$refund_file"
+          grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$refund_file"
+          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$refund_file"; then
             echo 'Admin refund path bypasses the environment-scoped Mercado Pago runtime guard.' >&2
+            exit 1
+          fi
+
+          grep -Fq "import { mercadoPagoRuntime }" "$cancel_file"
+          grep -Fq "sandboxAccessToken: Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')" "$cancel_file"
+          grep -Fq "productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')" "$cancel_file"
+          grep -Fq 'creatingCharge: true' "$cancel_file"
+          grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$cancel_file"
+          if grep -Fq 'creatingCharge: false' "$cancel_file"; then
+            echo 'Provider cancellation path bypasses the financial-mutation production gate.' >&2
             exit 1
           fi
 
