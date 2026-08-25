@@ -59,17 +59,25 @@ psql "$DB_URL" -v ON_ERROR_STOP=1 -c "update public.appointment_access_tokens se
 supabase functions serve appointment-action-access --no-verify-jwt >"$SERVE_LOG" 2>&1 &
 SERVE_PID=$!
 
+ready=false
 for _ in $(seq 1 60); do
-  if curl --silent --output /dev/null --request OPTIONS "$FUNCTION_URL"; then
+  status="$(curl --silent --output /dev/null --write-out '%{http_code}' --request OPTIONS "$FUNCTION_URL" || true)"
+  if [[ "$status" == "200" || "$status" == "204" ]]; then
+    ready=true
     break
   fi
   if ! kill -0 "$SERVE_PID" >/dev/null 2>&1; then
+    echo 'Edge Function serve process exited before readiness.' >&2
     cat "$SERVE_LOG" >&2
     exit 1
   fi
   sleep 1
 done
-curl --silent --fail --output /dev/null --request OPTIONS "$FUNCTION_URL"
+if [[ "$ready" != "true" ]]; then
+  echo 'Edge Function route did not become ready within 60 seconds.' >&2
+  cat "$SERVE_LOG" >&2
+  exit 1
+fi
 
 request() {
   local token="$1"
@@ -87,9 +95,14 @@ request() {
     "$FUNCTION_URL"
 }
 
-valid_meta="$(request "$valid_token" "$WORK_DIR/valid.json")"
+valid_meta="$(request "$valid_token" "$WORK_DIR/valid.json" || true)"
 valid_status="${valid_meta%% *}"
-[[ "$valid_status" == "200" ]] || { cat "$WORK_DIR/valid.json" >&2; exit 1; }
+if [[ "$valid_status" != "200" ]]; then
+  echo "Valid token resolve failed: HTTP ${valid_status:-transport-error}" >&2
+  cat "$WORK_DIR/valid.json" >&2 2>/dev/null || true
+  cat "$SERVE_LOG" >&2
+  exit 1
+fi
 jq -e '.data.valid == true and .data.scope == "CANCEL" and .data.warning == "link pessoal, válido por tempo limitado, não encaminhe"' "$WORK_DIR/valid.json" >/dev/null
 
 invalid_token="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -105,10 +118,15 @@ printf '%s\n' '{"error":{"code":"LINK_INVALID_OR_EXPIRED"}}' > "$WORK_DIR/expect
 for case_name in missing wrong_scope expired consumed; do
   : > "$WORK_DIR/$case_name.times"
   for attempt in 1 2 3; do
-    meta="$(request "${TOKENS[$case_name]}" "$WORK_DIR/$case_name.$attempt.json")"
+    meta="$(request "${TOKENS[$case_name]}" "$WORK_DIR/$case_name.$attempt.json" || true)"
     status="${meta%% *}"
     elapsed="${meta##* }"
-    [[ "$status" == "400" ]] || { cat "$WORK_DIR/$case_name.$attempt.json" >&2; exit 1; }
+    if [[ "$status" != "400" ]]; then
+      echo "Invalid-token case $case_name failed: HTTP ${status:-transport-error}" >&2
+      cat "$WORK_DIR/$case_name.$attempt.json" >&2 2>/dev/null || true
+      cat "$SERVE_LOG" >&2
+      exit 1
+    fi
     [[ "$(jq -c . "$WORK_DIR/$case_name.$attempt.json")" == "$(jq -c . "$WORK_DIR/expected-error.json")" ]] || {
       echo "Anti-enumeration envelope differs for $case_name" >&2
       cat "$WORK_DIR/$case_name.$attempt.json" >&2
