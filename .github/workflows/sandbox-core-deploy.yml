@@ -124,6 +124,11 @@ jobs:
             balance-collection-notify-email
             balance-collection-provider-cancel
             balance-collection-worker
+            google-oauth
+            google-sync
+            google-webhook
+            google-watch
+            google-appointment-sync
             kommo-sync
             email-send
             integration-worker
@@ -184,6 +189,53 @@ jobs:
           body="$(mktemp)"
           status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
             --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/google-oauth")"
+          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+            echo "google-oauth admin auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/google-sync")"
+          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+            echo "google-sync admin/internal auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/google-watch")"
+          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+            echo "google-watch admin/internal auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/google-appointment-sync")"
+          if [[ "$status" != "401" ]] || ! grep -q 'INTERNAL_AUTH_REQUIRED' "$body"; then
+            echo "google-appointment-sync internal auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --request POST "$base/google-webhook")"
+          if [[ "$status" != "204" ]]; then
+            echo "google-webhook malformed notification smoke failed: HTTP $status" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
             "$base/integration-worker-trigger")"
           if [[ "$status" != "401" ]] || ! grep -q 'GITHUB_OIDC_REQUIRED' "$body"; then
             echo "integration-worker-trigger OIDC smoke failed: HTTP $status" >&2
@@ -221,7 +273,8 @@ jobs:
             echo '- Dados reais permitidos: `false`'
             echo '- Cobranças reais permitidas: `false`'
             echo '- Migration history: validado contra versões de `main`'
-            echo '- Google provider: não implantado por este workflow'
+            echo '- Google provider: funções implantadas, mas conexão/worker permanecem condicionados a OAuth explícito e `GOOGLE_INTEGRATION_ENABLED`'
+            echo '- Google custom-auth boundaries: smoke de OAuth/sync/watch/webhook/appointment-sync executado sem conectar conta'
             echo '- Admin read models/timeline: financeiro/pacotes/auditoria/equipe/integrações implantados com autenticação e permissão'
             echo '- Cobrança de saldo: admin/access/email/provider-cancel/worker implantados; worker protegido por autenticação interna'
             echo '- Kommo adapter/worker: código implantado, sincronização permanece condicionada a settings enabled e gate #112'
