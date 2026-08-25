@@ -64,22 +64,10 @@ function CouponSummary({ coupon }: { coupon: AppointmentCouponSnapshot }) {
     : money.format(numeric(coupon.discount_value))
   return (
     <section className="audit-coupon-summary" aria-label="Cupom aplicado à reserva">
-      <div>
-        <span>Cupom utilizado</span>
-        <strong>{coupon.code}</strong>
-      </div>
-      <div>
-        <span>Benefício cadastrado</span>
-        <strong>{nominal}</strong>
-      </div>
-      <div>
-        <span>Desconto nesta reserva</span>
-        <strong>− {money.format(numeric(coupon.discount_amount))}</strong>
-      </div>
-      <div>
-        <span>Total final</span>
-        <strong>{money.format(numeric(coupon.final_value))}</strong>
-      </div>
+      <div><span>Cupom utilizado</span><strong>{coupon.code}</strong></div>
+      <div><span>Benefício cadastrado</span><strong>{nominal}</strong></div>
+      <div><span>Desconto nesta reserva</span><strong>− {money.format(numeric(coupon.discount_amount))}</strong></div>
+      <div><span>Total final</span><strong>{money.format(numeric(coupon.final_value))}</strong></div>
     </section>
   )
 }
@@ -102,7 +90,7 @@ export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointm
         getAdminAppointment(appointmentId, accessToken),
       ])
       setTimeline(timelineData)
-      setCoupon(appointmentDetail.coupon ?? null)
+      setCoupon(appointmentDetail.financial?.coupon ?? null)
       setForbidden(false)
     } catch (cause) {
       if (cause instanceof AdminAgendaApiError && cause.code === 'ADMIN_PERMISSION_DENIED') {
@@ -119,11 +107,8 @@ export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointm
 
   async function exportTimeline() {
     setError('')
-    try {
-      await downloadAppointmentTimeline(appointmentId, accessToken)
-    } catch {
-      setError('Não foi possível exportar a trilha de autoria.')
-    }
+    try { await downloadAppointmentTimeline(appointmentId, accessToken) }
+    catch { setError('Não foi possível exportar a trilha de autoria.') }
   }
 
   async function unlock() {
@@ -146,35 +131,19 @@ export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointm
   return (
     <section className="agenda-detail-section appointment-audit" aria-label="Trilha de autoria da reserva">
       {coupon ? <CouponSummary coupon={coupon} /> : null}
-
       <div className="audit-heading">
-        <div>
-          <h3>Trilha de autoria</h3>
-          <p>Histórico cronológico de mudanças, acessos por link e evidências técnicas autorizadas.</p>
-        </div>
+        <div><h3>Trilha de autoria</h3><p>Histórico cronológico de mudanças, acessos por link e evidências técnicas autorizadas.</p></div>
         <button className="secondary" type="button" disabled={!timeline} onClick={() => void exportTimeline()}>Exportar CSV</button>
       </div>
-
       {error ? <div className="form-alert error" role="alert">{error}</div> : null}
       {loading ? <p role="status">Carregando trilha…</p> : null}
-
       {timeline?.security.locked ? (
         <div className="audit-lockout">
-          <div>
-            <strong>Verificação do link bloqueada</strong>
-            <p>{timeline.security.appointment_attempt_count} tentativa(s) na reserva; {timeline.security.locked_origin_count} origem(ns) bloqueada(s).</p>
-            <small>Liberar tentativas não reativa link expirado, consumido ou revogado.</small>
-          </div>
-          <label>
-            <span>Motivo da liberação</span>
-            <input value={unlockReason} maxLength={500} onChange={(event) => setUnlockReason(event.target.value)} placeholder="Registre o motivo operacional" />
-          </label>
-          <button className="secondary" type="button" disabled={unlocking || !unlockReason.trim()} onClick={() => void unlock()}>
-            {unlocking ? 'Liberando…' : 'Liberar tentativas'}
-          </button>
+          <div><strong>Verificação do link bloqueada</strong><p>{timeline.security.appointment_attempt_count} tentativa(s) na reserva; {timeline.security.locked_origin_count} origem(ns) bloqueada(s).</p><small>Liberar tentativas não reativa link expirado, consumido ou revogado.</small></div>
+          <label><span>Motivo da liberação</span><input value={unlockReason} maxLength={500} onChange={(event) => setUnlockReason(event.target.value)} placeholder="Registre o motivo operacional" /></label>
+          <button className="secondary" type="button" disabled={unlocking || !unlockReason.trim()} onClick={() => void unlock()}>{unlocking ? 'Liberando…' : 'Liberar tentativas'}</button>
         </div>
       ) : null}
-
       {timeline && timeline.events.length === 0 ? <p className="empty-state">Ainda não há eventos de autoria para esta reserva.</p> : null}
       {timeline ? (
         <ol className="audit-timeline">
@@ -182,10 +151,7 @@ export function AppointmentAuditPanel({ appointmentId, accessToken }: { appointm
             <li key={`${event.source}:${event.id}`}>
               <div className="audit-event-time">{dateTime(event.occurred_at)}</div>
               <div className="audit-event-card">
-                <div className="audit-event-title">
-                  <strong>{event.summary}</strong>
-                  <span>{originLabel(event.origin)}</span>
-                </div>
+                <div className="audit-event-title"><strong>{event.summary}</strong><span>{originLabel(event.origin)}</span></div>
                 {event.actor_name ? <p>Responsável: <strong>{event.actor_name}</strong>{event.actor_role ? ` · ${event.actor_role}` : ''}</p> : null}
                 {event.reason ? <p>Motivo: {event.reason}</p> : null}
                 <EventDetails event={event} />
