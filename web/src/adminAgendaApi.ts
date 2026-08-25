@@ -58,6 +58,15 @@ export type AdminAgendaResponse = {
   external_blocks: AdminExternalBlock[]
 }
 
+export type AppointmentCouponSnapshot = {
+  coupon_id: string | null
+  code: string
+  discount_type: 'FIXED' | 'PERCENT' | string
+  discount_value: number | string
+  discount_amount: number | string
+  final_value: number | string
+}
+
 export type AppointmentDetailResponse = {
   appointment: AdminAppointment & Record<string, unknown>
   customer: Record<string, unknown> | null
@@ -68,6 +77,7 @@ export type AppointmentDetailResponse = {
   payments: Array<Record<string, unknown>>
   package_usage: Record<string, unknown> | null
   resources: AdminResource[]
+  coupon?: AppointmentCouponSnapshot | null
 }
 
 export type ChangePolicyPreview = {
