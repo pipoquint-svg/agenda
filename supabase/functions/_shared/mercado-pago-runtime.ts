@@ -31,26 +31,25 @@ export function mercadoPagoRuntime(input: {
   // Charge creation therefore requires an environment-scoped secret. The generic
   // token remains only as a compatibility fallback for read/reconciliation calls.
   const genericAccessToken = clean(input.accessToken)
-  const sandboxAccessToken = clean(
-    input.sandboxAccessToken ?? Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'),
-  )
-  const productionAccessToken = clean(
-    input.productionAccessToken ?? Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'),
-  )
+  let scopedAccessToken = ''
 
-  let accessToken = genericAccessToken
   if (environment === 'sandbox') {
-    if (input.creatingCharge && !sandboxAccessToken) {
+    scopedAccessToken = input.sandboxAccessToken !== undefined
+      ? clean(input.sandboxAccessToken)
+      : clean(Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'))
+    if (input.creatingCharge && !scopedAccessToken) {
       throw new Error('MISSING_ENV:MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')
     }
-    accessToken = sandboxAccessToken || genericAccessToken
   } else {
-    if (input.creatingCharge && !productionAccessToken) {
+    scopedAccessToken = input.productionAccessToken !== undefined
+      ? clean(input.productionAccessToken)
+      : clean(Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'))
+    if (input.creatingCharge && !scopedAccessToken) {
       throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
     }
-    accessToken = productionAccessToken || genericAccessToken
   }
 
+  const accessToken = scopedAccessToken || genericAccessToken
   if (!accessToken) throw new Error('MISSING_ENV:MERCADO_PAGO_ACCESS_TOKEN')
 
   // Creating a real charge requires a second explicit production gate. Read/reconcile
