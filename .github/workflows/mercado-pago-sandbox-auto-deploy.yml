@@ -122,7 +122,28 @@ jobs:
             cat "$body" >&2
             exit 1
           fi
-          echo 'Signed webhook HMAC smoke: PASS (secret value not printed).'
+
+          request_id='mp-sandbox-request-id-smoke'
+          data_id='ORDTSTSANDBOXREQUESTIDSMOKE'
+          ts="$(date +%s%3N)"
+          manifest="id:${data_id};request-id:${request_id};ts:${ts};"
+          signature="$(printf '%s' "$manifest" | openssl dgst -sha256 -hmac "$MERCADO_PAGO_WEBHOOK_SECRET" -hex | awk '{print $2}')"
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-request-id: ${request_id}" \
+            --header "x-signature: ts=${ts},v1=${signature}" \
+            --data "{\"type\":\"sandbox_hmac_smoke\",\"live_mode\":false,\"data\":{\"id\":\"${data_id}\"}}" \
+            "$base/mercado-pago-webhook")"
+
+          if [[ "$status" != "200" ]] || ! grep -q 'UNSUPPORTED_EVENT_TYPE' "$body"; then
+            echo "mercado-pago-webhook x-request-id HMAC smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+          echo 'Signed webhook HMAC smokes: PASS (secret value not printed).'
 
       - name: Record evidence
         if: always()
@@ -137,6 +158,7 @@ jobs:
             echo '- Scoped credential: `MERCADO_PAGO_SANDBOX_ACCESS_TOKEN`'
             echo '- Webhook secret: synchronized from the `sandbox` environment'
             echo '- Signed webhook HMAC smoke: required'
+            echo '- Signed webhook HMAC with `x-request-id` + exact-case Order id: required'
             echo '- Real customer data: `false`'
             echo '- Real charges: `false`'
             echo '- Functions: `mercado-pago-payment`, `mercado-pago-webhook`'
