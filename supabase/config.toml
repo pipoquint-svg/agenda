@@ -42,6 +42,17 @@ verify_jwt = false
 [functions.email-send]
 verify_jwt = false
 
+# Historical email diagnostics are permanently retired. They stay publicly callable
+# only to return a deterministic 410 tombstone and must never read secrets or send mail.
+[functions.email-provider-probe]
+verify_jwt = false
+
+[functions.email-e2e-gate]
+verify_jwt = false
+
+[functions.email-live-status]
+verify_jwt = false
+
 [functions.integration-worker]
 verify_jwt = false
 
