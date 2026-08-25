@@ -1,0 +1,42 @@
+name: Sandbox Auth Config Probe
+
+on:
+  push:
+    branches: [qa/auth-config-sandbox]
+    paths:
+      - '.github/workflows/sandbox-auth-config-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 5
+    env:
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - name: Require sandbox token
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_ACCESS_TOKEN:-}"
+      - name: Read safe auth config fields only
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(mktemp)"
+          curl --fail-with-body --silent --show-error \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/config/auth" \
+            --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            --output "$response"
+          jq '{site_url, uri_allow_list, password_hibp_enabled, password_min_length}' "$response" | tee safe-auth-config.json
+          {
+            echo '## Sandbox Auth Config Probe'
+            echo
+            echo '```json'
+            cat safe-auth-config.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
