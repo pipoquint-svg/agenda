@@ -15,9 +15,3 @@ CREATE INDEX IF NOT EXISTS balance_collection_divergences_resolved_by_admin_idx
 
 CREATE INDEX IF NOT EXISTS customer_access_events_actor_admin_idx
   ON public.customer_access_events (actor_admin_id);
-
-CREATE INDEX IF NOT EXISTS kommo_guard_outgoing_messages_schedule_idx
-  ON public.kommo_guard_outgoing_messages (matched_schedule_id);
-
-CREATE INDEX IF NOT EXISTS kommo_guard_schedules_rule_idx
-  ON public.kommo_guard_schedules (rule_id);
