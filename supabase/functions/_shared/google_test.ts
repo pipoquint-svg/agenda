@@ -1,6 +1,7 @@
 import {
   decryptRefreshToken,
   encryptRefreshToken,
+  googleJson,
   googleOAuthUrl,
   normalizeGoogleEvent,
   sha256Hex,
@@ -31,6 +32,29 @@ Deno.test('OAuth URL requests offline access, state and minimal calendar scopes'
   assert(scope.includes('calendar.events'), 'must request event scope')
   assert(scope.includes('calendar.calendarlist.readonly'), 'must request calendar list scope')
   assert(scope.includes('openid') && scope.includes('email'), 'must identify connected Google account')
+})
+
+Deno.test('Google HTTP failures never persist arbitrary provider response bodies', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (() => Promise.resolve(new Response(
+    JSON.stringify({ error: { message: 'sensitive-account-and-calendar-context' } }),
+    { status: 403, headers: { 'content-type': 'application/json' } },
+  ))) as typeof fetch
+  try {
+    let message = ''
+    let status: number | undefined
+    try {
+      await googleJson('https://www.googleapis.com/calendar/v3/calendars/test/events', 'test-access-token')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+      status = (error as Error & { status?: number }).status
+    }
+    assert(message === 'GOOGLE_HTTP_403', 'provider error must be reduced to deterministic status code')
+    assert(status === 403, 'structured HTTP status must remain available for sync recovery logic')
+    assert(!message.includes('sensitive-account'), 'provider response body must not reach logs or persistence')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 Deno.test('event normalization stores only needed self attendee and Agenda metadata', () => {
