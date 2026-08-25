@@ -120,6 +120,7 @@ jobs:
           supabase secrets set \
             --project-ref "$SUPABASE_PROJECT_REF" \
             MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
+            MERCADO_PAGO_SANDBOX_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
             MERCADO_PAGO_WEBHOOK_URL="$MERCADO_PAGO_WEBHOOK_URL" \
             MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET" \
             MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
@@ -177,6 +178,7 @@ jobs:
             echo "- Source ref: \`${{ inputs.ref }}\`"
             echo "- APP_ENV: \`$APP_ENV\`"
             echo "- MERCADO_PAGO_ENV: \`$MERCADO_PAGO_ENV\`"
+            echo "- Scoped credential: \`MERCADO_PAGO_SANDBOX_ACCESS_TOKEN\`"
             echo "- ALLOW_REAL_CHARGES: \`$ALLOW_REAL_CHARGES\`"
             echo "- Webhook URL: \`$MERCADO_PAGO_WEBHOOK_URL\`"
             echo "- Webhook signing secret: CONFIGURADO"
