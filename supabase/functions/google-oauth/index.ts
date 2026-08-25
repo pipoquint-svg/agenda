@@ -22,8 +22,23 @@ type CalendarListResponse = {
 
 type UserInfo = { email?: string; id?: string }
 
+function requiredEnv(name: string): string {
+  const value = Deno.env.get(name)?.trim()
+  if (!value) throw new Error(`MISSING_ENV:${name}`)
+  return value
+}
+
 function successUrl(): string {
-  return Deno.env.get('GOOGLE_OAUTH_SUCCESS_URL') ?? Deno.env.get('APP_BASE_URL') ?? 'http://localhost:5173/admin/google'
+  const value = requiredEnv('GOOGLE_OAUTH_SUCCESS_URL')
+  const url = new URL(value)
+  if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('GOOGLE_OAUTH_SUCCESS_URL_INVALID')
+  return url.toString()
+}
+
+function allowedAccountEmail(): string {
+  const value = requiredEnv('GOOGLE_ALLOWED_ACCOUNT_EMAIL').toLowerCase()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) throw new Error('GOOGLE_ALLOWED_ACCOUNT_EMAIL_INVALID')
+  return value
 }
 
 function redirectResult(base: string, status: 'success' | 'error', code?: string): Response {
@@ -35,13 +50,15 @@ function redirectResult(base: string, status: 'success' | 'error', code?: string
 
 async function start(req: Request): Promise<Response> {
   const { adminId } = await requireAdminPermission(req, 'INTEGRATIONS_MANAGE')
+  allowedAccountEmail()
+  const destination = successUrl()
   const rawState = randomSecret(32)
   const stateHash = await sha256Hex(rawState)
   const client = adminClient()
   const { error } = await client.from('google_oauth_states').insert({
     state_hash: stateHash,
     requested_by_admin_user_id: adminId,
-    success_url: successUrl(),
+    success_url: destination,
     expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   })
   if (error) throw new Error('GOOGLE_OAUTH_STATE_CREATE_FAILED')
@@ -68,11 +85,13 @@ async function callback(url: URL): Promise<Response> {
     const tokens = await exchangeAuthorizationCode(code)
     const userInfo = await googleJson<UserInfo>('https://www.googleapis.com/oauth2/v2/userinfo', tokens.access_token)
     if (!userInfo.email) throw new Error('GOOGLE_ACCOUNT_EMAIL_UNAVAILABLE')
+    const accountEmail = userInfo.email.trim().toLowerCase()
+    if (accountEmail !== allowedAccountEmail()) throw new Error('GOOGLE_ACCOUNT_NOT_ALLOWED')
 
     const { data: existing } = await client
       .from('google_connections')
       .select('id, refresh_token_ciphertext')
-      .eq('account_email', userInfo.email)
+      .eq('account_email', accountEmail)
       .maybeSingle()
 
     let refreshCiphertext = existing?.refresh_token_ciphertext ?? null
@@ -82,7 +101,7 @@ async function callback(url: URL): Promise<Response> {
     const { data: connection, error: connectionError } = await client
       .from('google_connections')
       .upsert({
-        account_email: userInfo.email,
+        account_email: accountEmail,
         google_user_id: userInfo.id ?? null,
         refresh_token_ciphertext: refreshCiphertext,
         token_encryption_version: 1,
