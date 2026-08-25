@@ -55,8 +55,19 @@ jobs:
 
       - name: Gate Mercado Pago financial mutations
         run: |
+          charge_file='supabase/functions/mercado-pago-payment/index.ts'
           refund_file='supabase/functions/admin-appointment-actions/index.ts'
           cancel_file='supabase/functions/balance-collection-provider-cancel/index.ts'
+
+          grep -Fq "import { mercadoPagoRuntime }" "$charge_file"
+          grep -Fq 'function providerRuntime(options: { creatingCharge?: boolean } = {})' "$charge_file"
+          grep -Fq 'creatingCharge: options.creatingCharge === true' "$charge_file"
+          grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$charge_file"
+          grep -Fq '}, { creatingCharge: true })' "$charge_file"
+          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$charge_file"; then
+            echo 'Order charge path bypasses the environment-scoped Mercado Pago runtime guard.' >&2
+            exit 1
+          fi
 
           grep -Fq "import { mercadoPagoRuntime }" "$refund_file"
           grep -Fq 'function providerFinancialMutationRuntime()' "$refund_file"
