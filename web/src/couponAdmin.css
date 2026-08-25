@@ -1,0 +1,10 @@
+.coupon-layout { display: grid; grid-template-columns: 250px minmax(0,1fr); gap: 14px; align-items: start; }
+.coupon-layout .settings-service-list small { color: #777770; font-size: .7rem; }
+.coupon-search { width: 100%; margin-bottom: 8px; }
+.coupon-service-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.coupon-service-option { display: flex; gap: 8px; align-items: flex-start; border: 1px solid #e2e2dc; border-radius: 10px; padding: 9px; background: #fafaf7; }
+.coupon-service-option input { width: 17px; height: 17px; margin-top: 2px; }
+.coupon-service-option span { display: grid; gap: 2px; }
+.coupon-service-option strong { font-size: .83rem; }
+.coupon-service-option small { font-size: .7rem; color: #70706a; }
+@media (max-width: 860px) { .coupon-layout { grid-template-columns: 1fr; } .coupon-service-grid { grid-template-columns: 1fr; } }
