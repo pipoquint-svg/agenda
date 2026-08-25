@@ -15,7 +15,7 @@ patterns=(
   'AKIA[0-9A-Z]{16}'
   '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'
   'eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
-  '(SERVICE_ROLE|SERVICE_ROLE_KEY|ACCESS_TOKEN|CLIENT_SECRET|WEBHOOK_SECRET|PRIVATE_KEY|PASSWORD)[A-Za-z0-9_ -]*[=:][[:space:]]*["'"']?[^[:space:]"'"'${}<]{12,}'
+  "(SERVICE_ROLE|SERVICE_ROLE_KEY|ACCESS_TOKEN|CLIENT_SECRET|WEBHOOK_SECRET|PRIVATE_KEY|PASSWORD)[A-Za-z0-9_ -]*[=:][[:space:]]*[\"']?[^[:space:]\"'\\$\\{<>]{12,}"
 )
 
 mapfile -t refs < <(git for-each-ref --format='%(refname)' refs/heads refs/remotes refs/tags | grep -v '/HEAD$' | sort -u)
@@ -31,14 +31,14 @@ printf 'SECRET_SCAN_REF=%s\n' "${refs[@]}"
 
 findings=0
 for commit in "${commits[@]}"; do
-  for pattern in "${patterns[@]}"; do
+  for pattern_index in "${!patterns[@]}"; do
+    pattern="${patterns[$pattern_index]}"
     while IFS= read -r match; do
       [[ -z "$match" ]] && continue
-      # Never print the matched value. Keep only commit and repository path/line prefix.
-      location="${match%%:*}:${match#*:}"
-      location="${location%%:*}:${location#*:}"
-      location="${location%%:*}"
-      echo "SECRET_CANDIDATE commit=$commit location=$location pattern_index=$findings"
+      # git grep emits commit:path:line:content. Never print the content.
+      path="$(printf '%s' "$match" | cut -d: -f2)"
+      line="$(printf '%s' "$match" | cut -d: -f3)"
+      echo "SECRET_CANDIDATE commit=$commit path=$path line=$line pattern_index=$pattern_index"
       findings=$((findings + 1))
     done < <(git grep -nI -E "$pattern" "$commit" -- ':!package-lock.json' ':!web/package-lock.json' 2>/dev/null || true)
   done
