@@ -32,6 +32,7 @@ jobs:
       SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MERCADO_PAGO_ACCESS_TOKEN }}
+      MERCADO_PAGO_WEBHOOK_SECRET: ${{ secrets.MERCADO_PAGO_WEBHOOK_SECRET }}
 
     steps:
       - name: Checkout authoritative main
@@ -47,13 +48,14 @@ jobs:
           test "$ALLOW_REAL_CHARGES" = false
           test -n "${SUPABASE_ACCESS_TOKEN:-}"
           test -n "${MERCADO_PAGO_ACCESS_TOKEN:-}"
+          test -n "${MERCADO_PAGO_WEBHOOK_SECRET:-}"
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: 2.111.0
 
-      - name: Bind Mercado Pago credential to sandbox runtime
+      - name: Bind Mercado Pago sandbox credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -61,6 +63,7 @@ jobs:
             --project-ref "$SUPABASE_PROJECT_REF" \
             MERCADO_PAGO_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
             MERCADO_PAGO_SANDBOX_ACCESS_TOKEN="$MERCADO_PAGO_ACCESS_TOKEN" \
+            MERCADO_PAGO_WEBHOOK_SECRET="$MERCADO_PAGO_WEBHOOK_SECRET" \
             MERCADO_PAGO_ENV="$MERCADO_PAGO_ENV" \
             APP_ENV="$APP_ENV" \
             ALLOW_REAL_CHARGES="$ALLOW_REAL_CHARGES" \
@@ -90,10 +93,36 @@ jobs:
           body="$(mktemp)"
           status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' --request POST --header 'content-type: application/json' --data '{"type":"order","live_mode":false,"data":{"id":"ORDTSTSANDBOXSMOKE"}}' "$base/mercado-pago-webhook")"
           if [[ "$status" != "401" ]] || ! grep -q 'MERCADO_PAGO_SIGNATURE_REQUIRED' "$body"; then
-            echo "mercado-pago-webhook boundary smoke failed: HTTP $status" >&2
+            echo "mercado-pago-webhook unsigned boundary smoke failed: HTTP $status" >&2
             cat "$body" >&2
             exit 1
           fi
+
+      - name: Prove signed webhook secret end-to-end
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1"
+          data_id='ORDTSTSANDBOXHMACSMOKE'
+          canonical_id="$(printf '%s' "$data_id" | tr '[:upper:]' '[:lower:]')"
+          ts="$(date +%s%3N)"
+          manifest="id:${canonical_id};ts:${ts};"
+          signature="$(printf '%s' "$manifest" | openssl dgst -sha256 -hmac "$MERCADO_PAGO_WEBHOOK_SECRET" -hex | awk '{print $2}')"
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-signature: ts=${ts},v1=${signature}" \
+            --data "{\"type\":\"sandbox_hmac_smoke\",\"live_mode\":false,\"data\":{\"id\":\"${data_id}\"}}" \
+            "$base/mercado-pago-webhook")"
+
+          if [[ "$status" != "200" ]] || ! grep -q 'UNSUPPORTED_EVENT_TYPE' "$body"; then
+            echo "mercado-pago-webhook signed HMAC smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+          echo 'Signed webhook HMAC smoke: PASS (secret value not printed).'
 
       - name: Record evidence
         if: always()
@@ -106,6 +135,8 @@ jobs:
             echo "- Project: \`${SUPABASE_PROJECT_REF}\`"
             echo '- Environment: `sandbox`'
             echo '- Scoped credential: `MERCADO_PAGO_SANDBOX_ACCESS_TOKEN`'
+            echo '- Webhook secret: synchronized from the `sandbox` environment'
+            echo '- Signed webhook HMAC smoke: required'
             echo '- Real customer data: `false`'
             echo '- Real charges: `false`'
             echo '- Functions: `mercado-pago-payment`, `mercado-pago-webhook`'
