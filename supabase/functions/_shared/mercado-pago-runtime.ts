@@ -30,23 +30,17 @@ export function mercadoPagoRuntime(input: {
   // documents APP_USR credentials for both test and production in this solution.
   // Charge creation therefore requires an environment-scoped secret. The generic
   // token remains only as a compatibility fallback for read/reconciliation calls.
+  // This helper is intentionally pure: callers own environment access so unit tests
+  // never need Deno --allow-env and runtime configuration stays explicit.
   const genericAccessToken = clean(input.accessToken)
-  let scopedAccessToken = ''
+  const scopedAccessToken = environment === 'sandbox'
+    ? clean(input.sandboxAccessToken)
+    : clean(input.productionAccessToken)
 
-  if (environment === 'sandbox') {
-    scopedAccessToken = input.sandboxAccessToken !== undefined
-      ? clean(input.sandboxAccessToken)
-      : clean(Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'))
-    if (input.creatingCharge && !scopedAccessToken) {
-      throw new Error('MISSING_ENV:MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')
-    }
-  } else {
-    scopedAccessToken = input.productionAccessToken !== undefined
-      ? clean(input.productionAccessToken)
-      : clean(Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'))
-    if (input.creatingCharge && !scopedAccessToken) {
-      throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
-    }
+  if (input.creatingCharge && !scopedAccessToken) {
+    throw new Error(environment === 'sandbox'
+      ? 'MISSING_ENV:MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'
+      : 'MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
   }
 
   const accessToken = scopedAccessToken || genericAccessToken
