@@ -23,6 +23,7 @@ jobs:
       - name: Test Edge helpers
         run: |
           deno test supabase/functions/_shared/action-token-security_test.ts
+          deno test supabase/functions/_shared/audit-csv_test.ts
           deno test --allow-env supabase/functions/_shared/google_test.ts
           deno test supabase/functions/_shared/github-oidc_test.ts
           deno test supabase/functions/_shared/kommo_test.ts
