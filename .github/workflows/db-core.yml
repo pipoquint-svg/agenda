@@ -88,6 +88,18 @@ jobs:
             exit 1
           fi
 
+      - name: Gate Mercado Pago environment contract
+        run: |
+          env_file='.env.example'
+          runtime_file='supabase/functions/_shared/mercado-pago-runtime.ts'
+          grep -Fq 'MERCADO_PAGO_SANDBOX_ACCESS_TOKEN=' "$env_file"
+          grep -Fq 'MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN=' "$env_file"
+          grep -Fq 'MERCADO_PAGO_ACCESS_TOKEN=' "$env_file"
+          grep -Fq "optionalEnv('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')" "$runtime_file"
+          grep -Fq "optionalEnv('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')" "$runtime_file"
+          grep -Fq "throw new Error('MISSING_ENV:MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')" "$runtime_file"
+          grep -Fq "throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')" "$runtime_file"
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
