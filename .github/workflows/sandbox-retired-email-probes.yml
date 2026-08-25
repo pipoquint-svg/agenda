@@ -8,6 +8,10 @@ on:
       - 'supabase/functions/email-e2e-gate/**'
       - 'supabase/functions/email-live-status/**'
       - 'supabase/functions/kommo-guard-discovery/**'
+      - 'supabase/functions/kommo-guard-inspect/**'
+      - 'supabase/functions/kommo-token-sender-once/**'
+      - 'supabase/functions/kommo-provider-probe/**'
+      - 'supabase/functions/kommo-card-provider-gate/**'
       - 'supabase/config.toml'
       - '.github/workflows/sandbox-retired-email-probes.yml'
   workflow_dispatch:
@@ -53,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for fn in email-provider-probe email-e2e-gate email-live-status kommo-guard-discovery; do
+          for fn in email-provider-probe email-e2e-gate email-live-status kommo-guard-discovery kommo-guard-inspect kommo-token-sender-once kommo-provider-probe kommo-card-provider-gate; do
             supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api
           done
 
@@ -62,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1"
-          for fn in email-provider-probe email-e2e-gate email-live-status kommo-guard-discovery; do
+          for fn in email-provider-probe email-e2e-gate email-live-status kommo-guard-discovery kommo-guard-inspect kommo-token-sender-once kommo-provider-probe kommo-card-provider-gate; do
             body="$(mktemp)"
             status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' --request POST --header 'content-type: application/json' --data '{}' "$base/$fn")"
             if [[ "$status" != "410" ]]; then
@@ -87,5 +91,9 @@ jobs:
             echo '- `email-e2e-gate`: required HTTP 410'
             echo '- `email-live-status`: required HTTP 410'
             echo '- `kommo-guard-discovery`: required HTTP 410'
+            echo '- `kommo-guard-inspect`: required HTTP 410'
+            echo '- `kommo-token-sender-once`: required HTTP 410'
+            echo '- `kommo-provider-probe`: required HTTP 410'
+            echo '- `kommo-card-provider-gate`: required HTTP 410'
             echo '- No email send, Kommo provider call, secret read or application-state mutation is permitted by these functions.'
           } >> "$GITHUB_STEP_SUMMARY"

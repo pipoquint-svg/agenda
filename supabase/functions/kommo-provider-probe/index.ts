@@ -1,0 +1,1 @@
+Deno.serve(() => new Response(JSON.stringify({ ok: false, error: 'KOMMO_PROVIDER_PROBE_DISABLED' }), { status: 410, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } }))

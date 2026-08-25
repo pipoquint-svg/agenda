@@ -1,0 +1,1 @@
+Deno.serve(() => new Response(JSON.stringify({ ok: false, error: 'KOMMO_CARD_PROVIDER_GATE_DISABLED' }), { status: 410, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } }))
