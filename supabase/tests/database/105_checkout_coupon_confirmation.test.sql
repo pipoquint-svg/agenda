@@ -5,8 +5,8 @@ select plan(15);
 
 select col_type_is('public','checkout_holds','applied_coupon_id','uuid','hold stores applied coupon id');
 select col_type_is('public','checkout_holds','coupon_code_snapshot','text','hold stores coupon code snapshot');
-select col_type_is('public','checkout_holds','coupon_discount','numeric','hold stores effective coupon discount');
-select col_type_is('public','checkout_holds','pre_discount_value','numeric','hold stores subtotal before coupon');
+select col_type_is('public','checkout_holds','coupon_discount','numeric(12,2)','hold stores effective coupon discount');
+select col_type_is('public','checkout_holds','pre_discount_value','numeric(12,2)','hold stores subtotal before coupon');
 select has_function('public','apply_checkout_coupon',array['text','text'],'coupon application RPC exists');
 select has_function('public','clear_checkout_coupon',array['text'],'coupon clear RPC exists');
 select has_function('public','get_checkout_coupon_state',array['text'],'coupon confirmation state RPC exists');
