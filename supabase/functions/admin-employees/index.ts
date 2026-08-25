@@ -12,7 +12,8 @@ function json(body: unknown, status = 200) {
 function text(value: unknown) { return typeof value === 'string' ? value.trim() : '' }
 function uuid(value: unknown): string {
   const next = text(value)
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(next)) throw new Error('UUID_INVALID')
+  // PostgreSQL accepts canonical UUIDs independent of RFC version/variant; staging uses synthetic zero groups.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(next)) throw new Error('UUID_INVALID')
   return next
 }
 function uuidArray(value: unknown): string[] {
@@ -23,6 +24,11 @@ function timestamp(value: unknown): string {
   const next = text(value)
   if (!next || Number.isNaN(Date.parse(next))) throw new Error('TIMESTAMP_INVALID')
   return new Date(next).toISOString()
+}
+function requiredEnv(name: string): string {
+  const value = Deno.env.get(name)?.trim()
+  if (!value) throw new Error(`MISSING_ENV:${name}`)
+  return value
 }
 
 Deno.serve(async (req) => {
@@ -35,18 +41,30 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const [employees, services, google] = await Promise.all([
+      const [employees, services, google, mappings] = await Promise.all([
         client.rpc('admin_list_employees'),
         client.rpc('service_admin_list_service_settings'),
-        client.from('google_calendars').select('id,name,is_active,google_connection_id').eq('is_active', true).order('name'),
+        client.from('google_calendars').select('id,name,is_active,google_connection_id,access_role').eq('is_active', true).order('name'),
+        client.from('google_calendar_resources').select('google_calendar_id,resource_id'),
       ])
       if (employees.error) throw new Error(employees.error.message)
       if (services.error) throw new Error(services.error.message)
       if (google.error) throw new Error(google.error.message)
+      if (mappings.error) throw new Error(mappings.error.message)
+      const mappedByResource = new Map<string,string[]>()
+      for (const row of mappings.data ?? []) {
+        const list = mappedByResource.get(row.resource_id) ?? []
+        list.push(row.google_calendar_id)
+        mappedByResource.set(row.resource_id,list)
+      }
+      const employeeRows = (employees.data ?? []).map((employee: Record<string,unknown>) => ({
+        ...employee,
+        blocking_calendar_ids: typeof employee.resource_id === 'string' ? mappedByResource.get(employee.resource_id) ?? [] : [],
+      }))
       return json({
-        employees: employees.data ?? [],
+        employees: employeeRows,
         services: (services.data ?? []).map((s: Record<string, unknown>) => ({ id: s.id, name: s.name, category_id: s.category_id, category_name: s.category_name, operation_scope: s.operation_scope, is_active: s.is_active })),
-        google_calendars: google.data ?? [],
+        google_calendars: (google.data ?? []).map((calendar) => ({ ...calendar, writable: calendar.access_role === 'writer' || calendar.access_role === 'owner' })),
       })
     }
 
@@ -81,6 +99,24 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message)
       return json(data, 201)
     }
+    if (action === 'WRITE_CALENDAR' || action === 'CLEAR_WRITE_CALENDAR') {
+      if (!(await hasAdminPermission(admin.adminId, 'INTEGRATIONS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')
+      const serviceEmployeeId = uuid(body.service_employee_id)
+      if (action === 'CLEAR_WRITE_CALENDAR') {
+        const { data, error } = await client.rpc('admin_clear_service_employee_write_calendar_audited', { p_service_employee_id: serviceEmployeeId, p_admin_id: admin.adminId })
+        if (error) throw new Error(error.message)
+        return json(data)
+      }
+      const calendarId = uuid(body.google_calendar_id)
+      const prefix = requiredEnv('GOOGLE_TEST_CALENDAR_PREFIX')
+      const { data: calendar, error: calendarError } = await client.from('google_calendars').select('id,name,access_role,is_active').eq('id',calendarId).maybeSingle()
+      if (calendarError || !calendar?.is_active) throw new Error('GOOGLE_CALENDAR_NOT_ACTIVE')
+      if (!(calendar.access_role === 'writer' || calendar.access_role === 'owner')) throw new Error('GOOGLE_CALENDAR_WRITE_ACCESS_REQUIRED')
+      if (!calendar.name.toLocaleUpperCase('pt-BR').startsWith(prefix.toLocaleUpperCase('pt-BR'))) throw new Error('GOOGLE_TEST_CALENDAR_PREFIX_REQUIRED')
+      const { data, error } = await client.rpc('admin_set_service_employee_write_calendar_audited', { p_service_employee_id: serviceEmployeeId, p_google_calendar_id: calendarId, p_time_scope: text(body.time_scope).toUpperCase() || 'FULL_APPOINTMENT', p_admin_id: admin.adminId })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
     if (req.method === 'DELETE' || action === 'EXCEPTION_DELETE') {
       const { data, error } = await client.rpc('admin_remove_employee_exception_audited', { p_exception_id: uuid(body.exception_id), p_admin_id: admin.adminId })
       if (error) throw new Error(error.message)
@@ -89,7 +125,7 @@ Deno.serve(async (req) => {
     throw new Error('EMPLOYEE_ACTION_INVALID')
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'EMPLOYEE_ADMIN_FAILED'
-    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401 : code === 'ADMIN_PERMISSION_DENIED' ? 403 : 400
+    const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401 : code === 'ADMIN_PERMISSION_DENIED' ? 403 : code.startsWith('MISSING_ENV') ? 503 : 400
     return json({ error: { code } }, status)
   }
 })
