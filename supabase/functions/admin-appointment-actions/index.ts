@@ -1,3 +1,4 @@
+import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
 
 const corsHeaders = {
@@ -39,12 +40,6 @@ function uuid(value: unknown, code = 'APPOINTMENT_ID_INVALID'): string {
   return next
 }
 
-function requiredEnv(name: string): string {
-  const value = Deno.env.get(name)?.trim()
-  if (!value) throw new Error(`MISSING_ENV:${name}`)
-  return value
-}
-
 function changeOrigin(value: unknown): 'CLIENT' | 'OPERATION' {
   const next = typeof value === 'string' ? value.trim().toUpperCase() : ''
   if (next !== 'CLIENT' && next !== 'OPERATION') throw new Error('CHANGE_ORIGIN_REQUIRED')
@@ -83,12 +78,27 @@ function refundSnapshot(raw: Record<string, unknown>): Record<string, unknown> {
   }
 }
 
+function providerFinancialMutationRuntime() {
+  // Refunds mutate real provider money just like charge creation. Reuse the same
+  // environment-scoped credential + explicit production gate so a generic token can
+  // never authorize a real refund by accident.
+  return mercadoPagoRuntime({
+    environment: Deno.env.get('MERCADO_PAGO_ENV'),
+    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
+    sandboxAccessToken: Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'),
+    productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'),
+    allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
+    creatingCharge: true,
+  })
+}
+
 async function mercadoPagoRefund(input: {
   paymentId: string
   amount: number
   fullAvailableAmount: number
   idempotencyKey: string
 }): Promise<{ status: number; data: Record<string, unknown> }> {
+  const runtime = providerFinancialMutationRuntime()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
@@ -96,7 +106,7 @@ async function mercadoPagoRefund(input: {
     const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(input.paymentId)}/refunds`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')}`,
+        authorization: `Bearer ${runtime.accessToken}`,
         accept: 'application/json',
         'content-type': 'application/json',
         'x-idempotency-key': input.idempotencyKey,
@@ -220,7 +230,8 @@ Deno.serve(async (req) => {
             idempotencyKey,
           })
         } catch (cause) {
-          console.error('Mercado Pago refund unavailable', cause)
+          const causeCode = cause instanceof Error ? cause.message.split(':')[0] : 'MERCADO_PAGO_REFUND_PROVIDER_ERROR'
+          console.error('[OPERATION_ALERT] MERCADO_PAGO_REFUND_UNAVAILABLE', { code: causeCode })
           return json({ error: { code: 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE' }, policy_action_id: policyActionId, completed: results }, 503)
         }
 
@@ -269,7 +280,7 @@ Deno.serve(async (req) => {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_APPOINTMENT_ACTION_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
-      : code.startsWith('MISSING_ENV') ? 503
+      : code.startsWith('MISSING_ENV') || code === 'REAL_CHARGES_DISABLED' || code === 'MERCADO_PAGO_ENV_INVALID' ? 503
       : 400
     return json({ error: { code } }, status)
   }
