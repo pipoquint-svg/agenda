@@ -69,9 +69,6 @@ jobs:
       - name: Rebuild database from migrations
         run: supabase db reset
 
-      - name: Run action-token HTTP gate in disposable local stack
-        run: bash scripts/test-action-token-http-ephemeral.sh
-
       - name: Run pgTAP database tests
         run: supabase test db
 
@@ -86,6 +83,11 @@ jobs:
 
       - name: Run distributed rate-limit concurrency test
         run: bash scripts/test-rate-limit-concurrency.sh
+
+      # This gate creates action-token/access evidence intentionally. Keep it after
+      # all authoritative DB suites so its disposable fixture cannot affect them.
+      - name: Run action-token HTTP gate in disposable local stack
+        run: bash scripts/test-action-token-http-ephemeral.sh
 
       - name: Stop local Supabase
         if: always()
