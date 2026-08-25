@@ -48,6 +48,12 @@ verify_jwt = false
 [functions.kommo-token-sender-once]
 verify_jwt = false
 
+[functions.kommo-provider-probe]
+verify_jwt = false
+
+[functions.kommo-card-provider-gate]
+verify_jwt = false
+
 # Internal transactional-email adapter. It requires x-internal-secret and reads the
 # provider API key only from the Edge secret environment.
 [functions.email-send]
