@@ -33,7 +33,7 @@ BEGIN
   VALUES (p_auth_user_id, v_display_name, 'OWNER', true)
   RETURNING id INTO v_admin_id;
 
-  v_profile := public.service_admin_get_access_profile(p_auth_user_id);
+  v_profile := public.service_admin_get_access_profile(v_admin_id);
 
   INSERT INTO public.audit_logs (
     admin_user_id,
@@ -43,9 +43,7 @@ BEGIN
     before_json,
     after_json,
     origin,
-    request_id,
-    reason,
-    occurred_at
+    request_id
   ) VALUES (
     v_admin_id,
     'ADMIN_USER',
@@ -57,12 +55,11 @@ BEGIN
       'auth_user_id', p_auth_user_id,
       'display_name', v_display_name,
       'role', 'OWNER',
-      'is_active', true
+      'is_active', true,
+      'bootstrap', true
     ),
-    'SYSTEM_JOB',
-    p_request_id,
-    'Initial system owner bootstrap',
-    now()
+    'SYSTEM',
+    p_request_id
   );
 
   RETURN v_profile;
