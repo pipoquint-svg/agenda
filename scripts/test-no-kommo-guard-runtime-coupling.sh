@@ -27,11 +27,15 @@ grep -Fq 'KOMMO_GUARD_CLEANUP_INVENTORY_MISMATCH' "$cleanup_migration"
 grep -Fq 'KOMMO_GUARD_CLEANUP_DATA_DRIFT_DETECTED' "$cleanup_migration"
 grep -Fq 'KOMMO_GUARD_CLEANUP_EXTERNAL_FK_DEPENDENCY' "$cleanup_migration"
 grep -Fq 'DROP FUNCTION IF EXISTS public.kommo_guard_adjust_due(timestamptz);' "$cleanup_migration"
-if grep -Eiq '\bCASCADE\b' "$cleanup_migration"; then
+
+# Ignore comments when checking executable SQL. Mentioning CASCADE in the safety
+# contract must not itself trip the gate.
+executable_cleanup="$(grep -Ev '^[[:space:]]*--' "$cleanup_migration" || true)"
+if grep -Eiq '(^|[[:space:]])CASCADE([[:space:];]|$)' <<<"$executable_cleanup"; then
   echo 'Kommo Guard cleanup migration must not use CASCADE.' >&2
   exit 1
 fi
-if grep -Eiq '\bCREATE[[:space:]]+(TABLE|FUNCTION|TRIGGER|POLICY|VIEW)\b[^;]*kommo_guard_' "$cleanup_migration"; then
+if grep -Eiq '(^|[[:space:]])CREATE[[:space:]]+(TABLE|FUNCTION|TRIGGER|POLICY|VIEW)[[:space:]]' <<<"$executable_cleanup"; then
   echo 'Kommo Guard cleanup migration must not recreate runtime objects.' >&2
   exit 1
 fi
