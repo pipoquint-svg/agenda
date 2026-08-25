@@ -12,7 +12,6 @@ function json(body: unknown, status = 200) {
 function text(value: unknown) { return typeof value === 'string' ? value.trim() : '' }
 function uuid(value: unknown): string {
   const next = text(value)
-  // PostgreSQL accepts canonical UUIDs independent of RFC version/variant; staging uses synthetic zero groups.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(next)) throw new Error('UUID_INVALID')
   return next
 }
@@ -114,6 +113,27 @@ Deno.serve(async (req) => {
       if (!(calendar.access_role === 'writer' || calendar.access_role === 'owner')) throw new Error('GOOGLE_CALENDAR_WRITE_ACCESS_REQUIRED')
       if (!calendar.name.toLocaleUpperCase('pt-BR').startsWith(prefix.toLocaleUpperCase('pt-BR'))) throw new Error('GOOGLE_TEST_CALENDAR_PREFIX_REQUIRED')
       const { data, error } = await client.rpc('admin_set_service_employee_write_calendar_audited', { p_service_employee_id: serviceEmployeeId, p_google_calendar_id: calendarId, p_time_scope: text(body.time_scope).toUpperCase() || 'FULL_APPOINTMENT', p_admin_id: admin.adminId })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+    if (action === 'BLOCKING_CALENDAR_MAP' || action === 'BLOCKING_CALENDAR_UNMAP') {
+      if (!(await hasAdminPermission(admin.adminId, 'INTEGRATIONS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')
+      const employeeId = uuid(body.employee_id)
+      const calendarId = uuid(body.google_calendar_id)
+      const prefix = requiredEnv('GOOGLE_TEST_CALENDAR_PREFIX')
+      const [{ data: employee, error: employeeError }, { data: calendar, error: calendarError }] = await Promise.all([
+        client.from('employees').select('id,resource_id,is_active').eq('id', employeeId).maybeSingle(),
+        client.from('google_calendars').select('id,name,is_active').eq('id', calendarId).maybeSingle(),
+      ])
+      if (employeeError || !employee?.is_active || !employee.resource_id) throw new Error('EMPLOYEE_RESOURCE_NOT_AVAILABLE')
+      if (calendarError || !calendar?.is_active) throw new Error('GOOGLE_CALENDAR_NOT_ACTIVE')
+      if (!calendar.name.toLocaleUpperCase('pt-BR').startsWith(prefix.toLocaleUpperCase('pt-BR'))) throw new Error('GOOGLE_TEST_CALENDAR_PREFIX_REQUIRED')
+      if (action === 'BLOCKING_CALENDAR_MAP') {
+        const { data, error } = await client.rpc('service_admin_add_google_calendar_resource_mapping', { p_google_calendar_id: calendarId, p_resource_id: employee.resource_id, p_admin_user_id: admin.adminId })
+        if (error) throw new Error(error.message)
+        return json(data)
+      }
+      const { data, error } = await client.rpc('service_admin_remove_google_calendar_resource_mapping', { p_google_calendar_id: calendarId, p_resource_id: employee.resource_id, p_admin_user_id: admin.adminId, p_reason: 'EMPLOYEE_ADMIN_UNMAP' })
       if (error) throw new Error(error.message)
       return json(data)
     }
