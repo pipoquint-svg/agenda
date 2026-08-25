@@ -1,4 +1,22 @@
-import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
+import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
+
+const corsHeaders = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8' },
+  })
+}
+
+function errorResponse(error: unknown, status = 400): Response {
+  const message = error instanceof Error ? error.message : 'UNKNOWN_ERROR'
+  return jsonResponse({ error: { code: message } }, status)
+}
 
 const INTERNAL_CALL_TIMEOUT_MS = 20_000
 
@@ -180,7 +198,7 @@ async function manage(req: Request): Promise<Response> {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204 })
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   try {
     if (req.method === 'GET') return await readModel(req)
     if (req.method === 'POST') return await manage(req)

@@ -1,4 +1,4 @@
-import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
+import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
 import {
   encryptRefreshToken,
   exchangeAuthorizationCode,
@@ -8,6 +8,24 @@ import {
   randomSecret,
   sha256Hex,
 } from '../_shared/google.ts'
+
+const corsHeaders = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
+  'access-control-allow-methods': 'POST, GET, OPTIONS',
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8' },
+  })
+}
+
+function errorResponse(error: unknown, status = 400): Response {
+  const message = error instanceof Error ? error.message : 'UNKNOWN_ERROR'
+  return jsonResponse({ error: { code: message } }, status)
+}
 
 type CalendarListResponse = {
   items?: Array<{
@@ -174,7 +192,7 @@ async function callback(url: URL): Promise<Response> {
 Deno.serve(async (req) => {
   try {
     const url = new URL(req.url)
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204 })
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
     if (url.searchParams.get('action') === 'callback' || url.searchParams.has('code') || url.searchParams.has('error')) {
       return await callback(url)
     }
