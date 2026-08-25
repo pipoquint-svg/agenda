@@ -15,6 +15,7 @@ import { TrackingConsentBanner } from './TrackingConsentBanner'
 import { trackPublicPage } from './tracking'
 import './agendaAdmin.css'
 import './serviceSettingsAdmin.css'
+import './couponAdmin.css'
 import './checkout.css'
 
 function PublicBookingRoute({ slug }: { slug: string }) {
