@@ -111,6 +111,7 @@ jobs:
             demand-capture
             demand-capture-admin
             admin-agenda
+            admin-appointment-timeline
             admin-balance-collections
             admin-dashboard
             admin-operation-settings
@@ -199,6 +200,15 @@ jobs:
             exit 1
           fi
 
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request GET "$base/admin-appointment-timeline?appointment_id=95800000-0000-0000-0000-000000000030")"
+          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+            echo "admin-appointment-timeline auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
       - name: Record evidence
         if: always()
         shell: bash
@@ -212,7 +222,7 @@ jobs:
             echo '- Cobranças reais permitidas: `false`'
             echo '- Migration history: validado contra versões de `main`'
             echo '- Google provider: não implantado por este workflow'
-            echo '- Admin read models: financeiro/pacotes/auditoria/equipe/integrações implantados com autenticação e permissão'
+            echo '- Admin read models/timeline: financeiro/pacotes/auditoria/equipe/integrações implantados com autenticação e permissão'
             echo '- Cobrança de saldo: admin/access/email/provider-cancel/worker implantados; worker protegido por autenticação interna'
             echo '- Kommo adapter/worker: código implantado, sincronização permanece condicionada a settings enabled e gate #112'
             echo '- Email adapter/worker/trigger: código implantado; flags LIVE permanecem em Edge secrets e não são alteradas pelo deploy'
