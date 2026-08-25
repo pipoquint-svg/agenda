@@ -106,7 +106,7 @@ jobs:
             echo '- Site URL: staging canônico'
             echo '- Redirect allowlist: `/gestao` + staging wildcard'
             echo '- Minimum password length: required `12`'
-            echo "- Leaked password protection: `${{ steps.hibp.outputs.state || 'NOT_RUN' }}`"
+            echo '- Leaked password protection: `${{ steps.hibp.outputs.state || 'NOT_RUN' }}`'
             echo '- External OAuth/provider settings: not included in PATCH'
             if [[ -f safe-auth-config.json ]]; then
               echo
