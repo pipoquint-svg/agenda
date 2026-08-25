@@ -24,7 +24,7 @@ select public.service_admin_get_appointment_base(p_appointment_id)
       from public.appointment_discounts ad
       join public.appointments a on a.id=ad.appointment_id
       where ad.appointment_id=p_appointment_id
-      order by ad.created_at,ad.id
+      order by ad.created_at
       limit 1
     )
   );
