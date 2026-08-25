@@ -3,7 +3,7 @@ import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supaba
 const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
-  'access-control-allow-methods': 'GET, PUT, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
 }
 
 function json(body: unknown, status = 200): Response {
@@ -21,6 +21,10 @@ function uuid(value: unknown): string {
   return next
 }
 
+function text(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 function integer(value: unknown, field: string, nullable = false): number | null {
   if (nullable && (value === null || value === undefined || value === '')) return null
   const next = Number(value)
@@ -33,6 +37,12 @@ function numeric(value: unknown, field: string, nullable = false): number | null
   const next = Number(value)
   if (!Number.isFinite(next)) throw new Error(`${field.toUpperCase()}_INVALID`)
   return next
+}
+
+function operationScope(value: unknown): 'SABRINA' | 'BLACKSHEEP' {
+  const scope = text(value).toUpperCase()
+  if (scope !== 'SABRINA' && scope !== 'BLACKSHEEP') throw new Error('SERVICE_OPERATION_SCOPE_INVALID')
+  return scope
 }
 
 function redactCommercial(data: unknown): unknown {
@@ -55,7 +65,7 @@ function redactCommercial(data: unknown): unknown {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
-  if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
+  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
     const admin = await requireAdmin(req)
@@ -75,21 +85,73 @@ Deno.serve(async (req) => {
 
     await requirePermission('SERVICES_MANAGE')
     const body = await req.json()
+
+    if (req.method === 'POST') {
+      const canManageFinance = await can('FINANCE_MANAGE')
+      const requestedBasePrice = numeric(body?.base_price ?? 0, 'base_price') ?? 0
+      if (requestedBasePrice !== 0 && !canManageFinance) throw new Error('ADMIN_PERMISSION_DENIED')
+      const { data, error } = await client.rpc('service_admin_create_service_audited', {
+        p_name: text(body?.name),
+        p_slug: text(body?.slug),
+        p_operation_scope: operationScope(body?.operation_scope),
+        p_short_description: text(body?.short_description) || null,
+        p_full_description: text(body?.full_description) || null,
+        p_duration_mode: body?.duration_mode === 'BLOCKS' ? 'BLOCKS' : 'FIXED',
+        p_base_duration_minutes: integer(body?.base_duration_minutes ?? 60, 'base_duration_minutes'),
+        p_base_price: requestedBasePrice,
+        p_buffer_before_minutes: integer(body?.buffer_before_minutes ?? 0, 'buffer_before_minutes'),
+        p_buffer_after_minutes: integer(body?.buffer_after_minutes ?? 0, 'buffer_after_minutes'),
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data, 201)
+    }
+
     const serviceId = uuid(body?.service_id)
+
+    if (req.method === 'DELETE') {
+      const { data, error } = await client.rpc('service_admin_remove_service_audited', {
+        p_service_id: serviceId,
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
     const action = typeof body?.action === 'string' ? body.action : ''
 
+    if (action === 'CATALOG') {
+      const { data, error } = await client.rpc('service_admin_update_catalog_audited', {
+        p_service_id: serviceId,
+        p_name: text(body?.name),
+        p_slug: text(body?.slug),
+        p_operation_scope: operationScope(body?.operation_scope),
+        p_short_description: text(body?.short_description) || null,
+        p_full_description: text(body?.full_description) || null,
+        p_is_active: body?.is_active !== false,
+        p_sort_order: integer(body?.sort_order ?? 0, 'sort_order'),
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
+    if (action === 'CUSTOM_FIELDS') {
+      const fields = Array.isArray(body?.fields) ? body.fields : null
+      if (!fields) throw new Error('SERVICE_FIELDS_INVALID')
+      const { data, error } = await client.rpc('service_admin_replace_custom_fields_audited', {
+        p_service_id: serviceId,
+        p_fields: fields,
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
+
     if (action === 'OPERATION_SCOPE') {
-      const scope = body?.operation_scope === null || body?.operation_scope === undefined
-        ? null
-        : typeof body.operation_scope === 'string'
-          ? body.operation_scope.trim().toUpperCase()
-          : ''
-      if (scope !== null && scope !== '' && scope !== 'BLACKSHEEP' && scope !== 'SABRINA') {
-        throw new Error('SERVICE_OPERATION_SCOPE_INVALID')
-      }
       const { data, error } = await client.rpc('service_admin_update_operation_scope', {
         p_service_id: serviceId,
-        p_operation_scope: scope || null,
+        p_operation_scope: operationScope(body?.operation_scope),
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
