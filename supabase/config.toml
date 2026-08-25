@@ -37,9 +37,15 @@ verify_jwt = false
 [functions.kommo-sync]
 verify_jwt = false
 
-# Historical Kommo provider-discovery probe. Provider validation is complete; this
-# slug is retained only as an inert 410 tombstone and must never call Kommo.
+# Historical Kommo diagnostics are permanently retired. These slugs are kept only as
+# deterministic 410 tombstones and must never read secrets, call Kommo or mutate state.
 [functions.kommo-guard-discovery]
+verify_jwt = false
+
+[functions.kommo-guard-inspect]
+verify_jwt = false
+
+[functions.kommo-token-sender-once]
 verify_jwt = false
 
 # Internal transactional-email adapter. It requires x-internal-secret and reads the
