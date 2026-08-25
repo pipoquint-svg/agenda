@@ -122,8 +122,11 @@ export async function googleJson<T>(url: string, accessToken: string, init: Requ
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json')
   const response = await fetch(url, { ...init, headers })
   if (!response.ok) {
-    const text = await response.text()
-    const error = new Error(`GOOGLE_HTTP_${response.status}:${text.slice(0, 500)}`)
+    // Provider response bodies can include user/account/resource context and are not
+    // needed for deterministic retry/reconnect decisions. Persist only our bounded
+    // status code; never copy arbitrary Google text into logs or database last_error.
+    await response.body?.cancel().catch(() => undefined)
+    const error = new Error(`GOOGLE_HTTP_${response.status}`)
     ;(error as Error & { status?: number }).status = response.status
     throw error
   }
