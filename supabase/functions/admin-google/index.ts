@@ -36,7 +36,9 @@ function requiredEnv(name: string): string {
 
 function uuid(value: unknown, code: string): string {
   const text = typeof value === 'string' ? value.trim() : ''
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) {
+  // PostgreSQL uuid accepts canonical UUID values regardless of RFC version/variant bits.
+  // Synthetic staging identifiers intentionally use zeroed version/variant groups.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
     throw new Error(code)
   }
   return text
