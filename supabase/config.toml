@@ -37,9 +37,25 @@ verify_jwt = false
 [functions.kommo-sync]
 verify_jwt = false
 
+# Historical Kommo provider-discovery probe. Provider validation is complete; this
+# slug is retained only as an inert 410 tombstone and must never call Kommo.
+[functions.kommo-guard-discovery]
+verify_jwt = false
+
 # Internal transactional-email adapter. It requires x-internal-secret and reads the
 # provider API key only from the Edge secret environment.
 [functions.email-send]
+verify_jwt = false
+
+# Historical email diagnostics are permanently retired. They stay publicly callable
+# only to return a deterministic 410 tombstone and must never read secrets or send mail.
+[functions.email-provider-probe]
+verify_jwt = false
+
+[functions.email-e2e-gate]
+verify_jwt = false
+
+[functions.email-live-status]
 verify_jwt = false
 
 [functions.integration-worker]
