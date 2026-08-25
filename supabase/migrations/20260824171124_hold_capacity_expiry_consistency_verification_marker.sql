@@ -1,0 +1,1 @@
+do $$ begin if position('expire_due_appointment_holds' in pg_get_functiondef('public.public_create_checkout_hold(text,uuid,uuid,jsonb,integer,timestamptz)'::regprocedure)) = 0 then raise exception 'HOLD_CAPACITY_FIX_NOT_ACTIVE'; end if; end $$;
