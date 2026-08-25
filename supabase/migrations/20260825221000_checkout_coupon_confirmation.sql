@@ -26,7 +26,7 @@ begin
  select * into v_hold from public.checkout_holds where public_token_hash=v_hash for update;
  if not found then raise exception using errcode='P0001',message='HOLD_NOT_FOUND';end if;
  if v_hold.status<>'ACTIVE' or v_hold.expires_at<=now() then raise exception using errcode='P0001',message='HOLD_EXPIRED';end if;
- if exists(select 1 from public.customer_hour_package_holds ph where ph.checkout_hold_id=v_hold.id and ph.status='HELD') then raise exception using errcode='P0001',message='COUPON_PACKAGE_POLICY_REQUIRES_DECISION';end if;
+ if exists(select 1 from public.checkout_hour_package_reservations ph where ph.checkout_hold_id=v_hold.id and ph.status='HELD') then raise exception using errcode='P0001',message='COUPON_PACKAGE_POLICY_REQUIRES_DECISION';end if;
  select * into v_coupon from public.coupons c where upper(c.code)=v_code for update;
  if not found or not v_coupon.is_active or (v_coupon.valid_from is not null and now()<v_coupon.valid_from) or (v_coupon.valid_until is not null and now()>v_coupon.valid_until) then raise exception using errcode='P0001',message='INVALID_COUPON';end if;
  if v_coupon.max_uses is not null and v_coupon.used_count>=v_coupon.max_uses then raise exception using errcode='P0001',message='COUPON_USAGE_LIMIT_REACHED';end if;
