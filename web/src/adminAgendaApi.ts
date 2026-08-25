@@ -70,14 +70,13 @@ export type AppointmentCouponSnapshot = {
 export type AppointmentDetailResponse = {
   appointment: AdminAppointment & Record<string, unknown>
   customer: Record<string, unknown> | null
-  financial: Record<string, unknown>
+  financial: Record<string, unknown> & { coupon?: AppointmentCouponSnapshot | null }
   extras: Array<Record<string, unknown>>
   answers: Array<Record<string, unknown>>
   terms: Array<Record<string, unknown>>
   payments: Array<Record<string, unknown>>
   package_usage: Record<string, unknown> | null
   resources: AdminResource[]
-  coupon?: AppointmentCouponSnapshot | null
 }
 
 export type ChangePolicyPreview = {
