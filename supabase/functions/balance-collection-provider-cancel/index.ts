@@ -13,11 +13,15 @@ async function stableKey(value: string): Promise<string> {
 }
 
 async function cancelOrder(orderId: string, idempotencyKey: string): Promise<{ ok: boolean; status: number; code: string | null }> {
+  // Cancelling a provider Order is a financial mutation. Use the same environment-
+  // scoped credentials and explicit production gate required by charge/refund paths.
   const runtime = mercadoPagoRuntime({
     environment: Deno.env.get('MERCADO_PAGO_ENV'),
     accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
+    sandboxAccessToken: Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'),
+    productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'),
     allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
-    creatingCharge: false,
+    creatingCharge: true,
   })
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
