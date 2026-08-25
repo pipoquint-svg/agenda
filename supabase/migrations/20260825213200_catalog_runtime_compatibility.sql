@@ -100,3 +100,18 @@ begin
   );
 end;
 $$;
+
+-- Creating a new function after renaming the protected core quote restores PostgreSQL's
+-- default PUBLIC EXECUTE grant. Re-apply the public-booking boundary explicitly: browser
+-- roles may quote only through the page-scoped wrappers, while service_role retains the
+-- internal core capability.
+revoke all on function public.calculate_booking_quote(uuid,uuid,jsonb,integer,timestamptz,text)
+  from public, anon, authenticated;
+grant execute on function public.calculate_booking_quote(uuid,uuid,jsonb,integer,timestamptz,text)
+  to service_role;
+
+-- The renamed implementation is an internal helper too; do not expose it accidentally.
+revoke all on function public.calculate_booking_quote_catalog_base(uuid,uuid,jsonb,integer,timestamptz,text)
+  from public, anon, authenticated;
+grant execute on function public.calculate_booking_quote_catalog_base(uuid,uuid,jsonb,integer,timestamptz,text)
+  to service_role;
