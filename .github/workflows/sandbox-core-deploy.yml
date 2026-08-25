@@ -154,7 +154,7 @@ jobs:
             --request POST --header 'content-type: application/json' \
             --data '{"action":"CONTEXT","checkout_hold_token":"invalid-token-that-is-long-enough-for-smoke-test"}' \
             "$base/booking-checkout")"
-          if [[ "$status" != "400" ]]; then
+          if [[ "$status" != "409" ]] || ! grep -q 'CHECKOUT_HOLD_NOT_ACTIVE' "$body"; then
             echo "booking-checkout smoke failed: HTTP $status" >&2
             cat "$body" >&2
             exit 1
