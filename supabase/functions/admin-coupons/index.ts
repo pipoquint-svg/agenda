@@ -13,7 +13,7 @@ function text(value: unknown) { return typeof value === 'string' ? value.trim() 
 function uuid(value: unknown, nullable = false): string | null {
   if (nullable && (value === null || value === undefined || value === '')) return null
   const next = text(value)
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(next)) throw new Error('UUID_INVALID')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(next)) throw new Error('UUID_INVALID')
   return next
 }
 function integer(value: unknown, field: string, nullable = false): number | null {
