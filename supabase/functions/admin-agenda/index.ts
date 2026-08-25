@@ -1,4 +1,5 @@
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
+import { appointmentTimelineCsv } from '../_shared/audit-csv.ts'
 import { customerFinancialTermsChanged } from './customerTermsPermission.ts'
 
 const corsHeaders = {
@@ -94,26 +95,6 @@ function requestEvidence(req: Request) {
   const requestId = (req.headers.get('x-request-id') ?? crypto.randomUUID()).trim()
   if (!ip || !userAgent || !requestId) throw new Error('AUTHORSHIP_ADMIN_EVIDENCE_REQUIRED')
   return { ip, userAgent, requestId }
-}
-
-function csvCell(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  const text = typeof value === 'string' ? value : JSON.stringify(value)
-  return `"${text.replaceAll('"', '""')}"`
-}
-
-function timelineCsv(payload: unknown): string {
-  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
-  const events = Array.isArray(root.events) ? root.events as Array<Record<string, unknown>> : []
-  const columns = [
-    'occurred_at', 'origin', 'action', 'summary', 'actor_name', 'actor_role', 'actor_permissions',
-    'reason', 'ip_address', 'user_agent', 'request_id', 'token_scope', 'destination_masked', 'provider',
-    'before', 'after',
-  ]
-  return [
-    columns.join(','),
-    ...events.map((event) => columns.map((column) => csvCell(event[column])).join(',')),
-  ].join('\n')
 }
 
 Deno.serve(async (req) => {
@@ -261,7 +242,7 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message)
       const safeData = canViewFinance ? data : redactFinance(data)
       if (action === 'timeline_export') {
-        return new Response(timelineCsv(safeData), {
+        return new Response(appointmentTimelineCsv(safeData), {
           status: 200,
           headers: {
             ...corsHeaders,
