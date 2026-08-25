@@ -1,8 +1,17 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { sha256Hex } from '../_shared/google.ts'
 
+function googleIntegrationEnabled(): boolean {
+  return (Deno.env.get('GOOGLE_INTEGRATION_ENABLED') ?? '').trim().toLowerCase() === 'true'
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response(null, { status: 405 })
+
+  // A watch can be provisioned before the worker is globally enabled as part of the
+  // staged activation gate. Acknowledge Google pushes during that interval without
+  // creating jobs that the worker is intentionally forbidden to claim.
+  if (!googleIntegrationEnabled()) return new Response(null, { status: 204 })
 
   const channelId = req.headers.get('x-goog-channel-id')
   const resourceId = req.headers.get('x-goog-resource-id')
