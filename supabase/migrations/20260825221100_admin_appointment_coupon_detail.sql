@@ -1,0 +1,36 @@
+-- Preserve the existing appointment detail contract and add the coupon snapshot used by this reservation.
+
+alter function public.service_admin_get_appointment(uuid)
+  rename to service_admin_get_appointment_base;
+
+create or replace function public.service_admin_get_appointment(p_appointment_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path=public
+as $$
+select public.service_admin_get_appointment_base(p_appointment_id)
+  || jsonb_build_object(
+    'coupon', (
+      select jsonb_build_object(
+        'coupon_id', ad.coupon_id,
+        'code', ad.code_snapshot,
+        'discount_type', ad.discount_type_snapshot,
+        'discount_value', ad.discount_value_snapshot,
+        'discount_amount', ad.calculated_discount_amount,
+        'final_value', a.commercial_value
+      )
+      from public.appointment_discounts ad
+      join public.appointments a on a.id=ad.appointment_id
+      where ad.appointment_id=p_appointment_id
+      order by ad.created_at,ad.id
+      limit 1
+    )
+  );
+$$;
+
+revoke all on function public.service_admin_get_appointment_base(uuid) from public,anon,authenticated;
+revoke all on function public.service_admin_get_appointment(uuid) from public,anon,authenticated;
+grant execute on function public.service_admin_get_appointment_base(uuid) to service_role;
+grant execute on function public.service_admin_get_appointment(uuid) to service_role;
