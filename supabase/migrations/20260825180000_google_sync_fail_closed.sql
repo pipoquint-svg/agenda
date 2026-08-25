@@ -80,6 +80,14 @@ as $$
   );
 $$;
 
+-- PostgreSQL grants EXECUTE on newly created functions to PUBLIC by default. Keep the
+-- core availability engine private exactly as before this wrapper was introduced;
+-- public traffic must continue through page-scoped booking RPCs only.
+revoke all on function public.list_available_slots(uuid,uuid,jsonb,integer,date,text)
+  from public, anon, authenticated;
+grant execute on function public.list_available_slots(uuid,uuid,jsonb,integer,date,text)
+  to service_role;
+
 alter function public.list_available_slots_for_duration(uuid,uuid,integer,jsonb,integer,date,text)
   rename to list_available_slots_for_duration_without_google_sync_gate;
 
@@ -127,6 +135,14 @@ as $$
     where not public.google_resource_sync_is_ready(r.resource_id, 600)
   );
 $$;
+
+-- The duration core is likewise an internal scheduling primitive. Duration-specific
+-- public APIs already expose their own page-scoped wrappers and must not inherit the
+-- default PUBLIC grant from this re-creation.
+revoke all on function public.list_available_slots_for_duration(uuid,uuid,integer,jsonb,integer,date,text)
+  from public, anon, authenticated;
+grant execute on function public.list_available_slots_for_duration(uuid,uuid,integer,jsonb,integer,date,text)
+  to service_role;
 
 -- Defense in depth: even a caller that bypasses the slot-listing wrappers cannot
 -- create a fresh checkout/pre-reservation allocation while Google state is stale.
