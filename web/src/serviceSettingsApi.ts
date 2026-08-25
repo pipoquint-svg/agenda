@@ -28,8 +28,13 @@ export type ExtraCatalogItem = {
   service_count: number
 }
 
-export type ServiceExtra = ExtraCatalogItem & {
+export type ServiceExtra = {
   extra_id: string
+  name: string
+  description: string | null
+  price: number | string
+  duration_delta_minutes: number
+  is_active: boolean
   sort_order: number
   is_required: boolean
   max_quantity: number
