@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(18);
+select plan(19);
 
 select has_function('public','claim_birthday_notification_deliveries',array['integer'],'birthday delivery claim function exists');
 select has_function('public','prepare_birthday_notification_delivery_window',array['uuid'],'birthday delivery window function exists');
