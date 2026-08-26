@@ -30,6 +30,22 @@ function nullableUuid(value: unknown): string | null {
   return next
 }
 
+function operationScope(value: string | null): 'SABRINA' | 'BLACKSHEEP' | null {
+  if (value === null || value === '') return null
+  if (value === 'SABRINA' || value === 'BLACKSHEEP') return value
+  throw new Error('OPERATION_SCOPE_INVALID')
+}
+
+async function scopedBundle(client: ReturnType<typeof adminClient>, scope: 'SABRINA' | 'BLACKSHEEP') {
+  const [{ data: resolved, error: resolvedError }, { data: override, error: overrideError }] = await Promise.all([
+    client.rpc('service_admin_get_operation_settings_v2', { p_operation_scope: scope }),
+    client.from('operation_setting_overrides').select('*').eq('operation_scope', scope).maybeSingle(),
+  ])
+  if (resolvedError) throw new Error(resolvedError.message)
+  if (overrideError) throw new Error(overrideError.message)
+  return { resolved, override: override ?? null }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -42,6 +58,10 @@ Deno.serve(async (req) => {
       if (!(await hasAdminPermission(admin.adminId, 'SERVICES_VIEW'))) {
         throw new Error('ADMIN_PERMISSION_DENIED')
       }
+      const scope = operationScope(new URL(req.url).searchParams.get('operation_scope'))
+      if (scope) return json(await scopedBundle(client, scope))
+
+      // Legacy singleton response remains unchanged when no scope is requested.
       const { data, error } = await client.rpc('service_admin_get_operation_settings')
       if (error) throw new Error(error.message)
       return json(data)
@@ -55,9 +75,26 @@ Deno.serve(async (req) => {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new Error('OPERATION_SETTINGS_PAYLOAD_INVALID')
     }
-    assertExactKeys(body as Record<string, unknown>, ['dashboard_occupancy_resource_id'])
-    const resourceId = nullableUuid((body as Record<string, unknown>).dashboard_occupancy_resource_id)
+    const record = body as Record<string, unknown>
 
+    if ('operation_scope' in record || 'patch' in record) {
+      assertExactKeys(record, ['operation_scope', 'patch'])
+      const scope = operationScope(typeof record.operation_scope === 'string' ? record.operation_scope : null)
+      if (!scope || !record.patch || typeof record.patch !== 'object' || Array.isArray(record.patch)) {
+        throw new Error('OPERATION_SETTINGS_PAYLOAD_INVALID')
+      }
+      const { error } = await client.rpc('service_admin_update_operation_settings_v2', {
+        p_operation_scope: scope,
+        p_patch: record.patch,
+        p_actor_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(await scopedBundle(client, scope))
+    }
+
+    // Legacy dashboard occupancy mutation remains unchanged.
+    assertExactKeys(record, ['dashboard_occupancy_resource_id'])
+    const resourceId = nullableUuid(record.dashboard_occupancy_resource_id)
     const { data, error } = await client.rpc('service_admin_set_dashboard_occupancy_resource', {
       p_resource_id: resourceId,
       p_actor_admin_id: admin.adminId,
@@ -68,7 +105,7 @@ Deno.serve(async (req) => {
     const code = error instanceof Error ? error.message.split(':')[0] : 'OPERATION_SETTINGS_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED'
       ? 401
-      : code === 'ADMIN_PERMISSION_DENIED'
+      : code === 'ADMIN_PERMISSION_DENIED' || code === 'ADMIN_FINANCE_PERMISSION_REQUIRED'
         ? 403
         : 400
     return json({ error: { code } }, status)
