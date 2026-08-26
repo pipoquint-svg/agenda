@@ -12,8 +12,8 @@ Inventário do fechamento V1. Não altera comportamento.
 | `service_admin_confirm_pre_reservation` em modo `INVOICE` | pré-reserva administrativa | sim | mesmo trigger | podia omitir snapshot se o serviço não tivesse política |
 | fixtures `TOKEN-EVIDENCE-1/2` | inserção sintética direta no banco | não | não | violações históricas conhecidas; não representam caminho comercial |
 
-## Garantia após o hardening
+## Sequenciamento do hardening
 
-O hardening de origem exige política própria para qualquer serviço ativo e impede a remoção da política enquanto o serviço estiver ativo. O trigger de snapshot deixa de retornar silenciosamente e passa a falhar com `APPOINTMENT_CHANGE_POLICY_MISSING_FOR_SERVICE` se a rede de segurança for alcançada.
+Este PR fecha somente a garantia na origem: serviço ativo exige política própria e a política não pode ser removida enquanto o serviço permanecer ativo. O `RAISE EXCEPTION` explícito no trigger de snapshot será aplicado no PR seguinte do mesmo I-09, depois de adequar as fixtures transacionais dos testes ao novo invariante. Isso evita introduzir um modo de falha permanente em confirmação/pagamento enquanto os testes históricos ainda criam serviços sintéticos ativos sem política.
 
-As duas fixtures históricas permanecem separadas da análise de caminhos de aplicação e a constraint de destino continua `NOT VALID` até o tratamento determinístico autorizado.
+As duas fixtures históricas permanecem separadas da análise de caminhos de aplicação e a constraint de destino do #230 continua `NOT VALID` até o tratamento determinístico autorizado.
