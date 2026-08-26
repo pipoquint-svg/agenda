@@ -14,6 +14,7 @@ import { EmployeeAdmin } from './EmployeeAdmin'
 import { ManageReservation } from './ManageReservation'
 import { NotificationsAdmin } from './NotificationsAdmin'
 import { OperationSettingsAdmin } from './OperationSettingsAdmin'
+import { OpsHealthAdmin } from './OpsHealthAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
@@ -49,6 +50,7 @@ export function App() {
   if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
   if (path.startsWith('/admin/notificacoes')) return <NotificationsAdmin />
   if (path.startsWith('/admin/aniversarios')) return <BirthdaySettingsAdmin />
+  if (path.startsWith('/admin/saude')) return <OpsHealthAdmin />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes-avancadas')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/configuracoes')) return <OperationSettingsAdmin />
