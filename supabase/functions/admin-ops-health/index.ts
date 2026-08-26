@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
         .order('created_at', { ascending: false })
         .limit(1000),
       client.from('birthday_automation_settings')
-        .select('operation_scope,is_active,send_message,generate_coupon,send_on_birthday,days_before,coupon_prefix,coupon_discount_type,coupon_discount_value,coupon_validity_days,coupon_max_uses,coupon_max_uses_per_customer,updated_at')
+        .select('operation_scope,is_active,send_message,generate_coupon,send_on_birthday,days_before,updated_at')
         .order('operation_scope'),
       client.from('birthday_automation_cycles')
         .select('operation_scope,trigger_kind,target_date,created_at')
@@ -122,7 +122,6 @@ Deno.serve(async (req) => {
       notifications: {
         counts: countBy(notifications, ['event_key', 'channel', 'status']),
         pending: notifications.filter((row) => row.status === 'PENDING').length,
-        processing: notifications.filter((row) => row.status === 'PROCESSING').length,
         recent_failures: recentNotificationFailures,
       },
       birthday: {
