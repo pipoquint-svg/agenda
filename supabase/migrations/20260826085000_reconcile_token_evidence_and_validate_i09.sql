@@ -1,4 +1,4 @@
--- I-09 finalization.
+-- I-09 finalization, phase 1: deterministic fixture repair only.
 --
 -- The only rows preventing validation in the sandbox are two historical,
 -- synthetic action-token fixtures created directly as CONFIRMED before the
@@ -10,6 +10,8 @@
 -- Preserve those fixtures instead of deleting them. Reconstruct only the
 -- minimum historical confirmation metadata needed by the invariant. No
 -- commercial policy is inferred and no active service policy is created.
+-- Constraint validation is intentionally a following migration so deferred
+-- trigger events from this repair are committed before ALTER TABLE VALIDATE.
 
 do $$
 declare
@@ -114,9 +116,3 @@ begin
   end if;
 end
 $$;
-
-alter table public.appointments
-  validate constraint appointments_confirmed_requires_policy_snapshot_ck;
-
-alter table public.appointments
-  validate constraint appointments_change_policy_snapshot_fk;
