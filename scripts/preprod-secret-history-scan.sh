@@ -4,6 +4,9 @@ set -euo pipefail
 # Historical secret scan for V1 pre-production gate.
 # Coverage: every commit reachable from every fetched local/remote branch and tag.
 # Tooling: git rev-list + git grep. Findings are redacted to commit/path/line only.
+# Intentional non-secrets are classified from context without printing their values:
+# - Mercado Pago APP_USR values assigned to variables explicitly named PUBLIC_KEY;
+# - documented replace-* placeholders inside *.env.example files.
 
 patterns=(
   'APP_USR-[A-Za-z0-9_-]{20,}'
@@ -30,14 +33,32 @@ echo "SECRET_SCAN_COMMITS=${#commits[@]}"
 printf 'SECRET_SCAN_REF=%s\n' "${refs[@]}"
 
 findings=0
+classified_public_keys=0
+classified_placeholders=0
 for commit in "${commits[@]}"; do
   for pattern_index in "${!patterns[@]}"; do
     pattern="${patterns[$pattern_index]}"
     while IFS= read -r match; do
       [[ -z "$match" ]] && continue
-      # git grep emits commit:path:line:content. Never print the content.
+      # git grep emits commit:path:line:content. Content is used only for classification and never printed.
       path="$(printf '%s' "$match" | cut -d: -f2)"
       line="$(printf '%s' "$match" | cut -d: -f3)"
+      content="$(printf '%s' "$match" | cut -d: -f4-)"
+
+      # Mercado Pago uses APP_USR for both public and private credentials. A value is non-secret
+      # only when the source line explicitly assigns it to a PUBLIC_KEY variable.
+      if [[ "$pattern_index" == "0" && "$content" == *PUBLIC_KEY* ]]; then
+        classified_public_keys=$((classified_public_keys + 1))
+        continue
+      fi
+
+      # Example files intentionally carry obvious replacement tokens. Do not suppress any
+      # non-example file or any value that is not an explicit replace-* placeholder.
+      if [[ "$pattern_index" == "9" && "$path" == *.env.example && "$content" =~ =[[:space:]]*[\"\']?replace- ]]; then
+        classified_placeholders=$((classified_placeholders + 1))
+        continue
+      fi
+
       echo "SECRET_CANDIDATE commit=$commit path=$path line=$line pattern_index=$pattern_index"
       findings=$((findings + 1))
     done < <(git grep -nI -E "$pattern" "$commit" -- ':!package-lock.json' ':!web/package-lock.json' 2>/dev/null || true)
@@ -45,6 +66,8 @@ for commit in "${commits[@]}"; do
 done
 
 echo "SECRET_SCAN_PATTERN_COUNT=${#patterns[@]}"
+echo "SECRET_SCAN_CLASSIFIED_PUBLIC_KEYS=$classified_public_keys"
+echo "SECRET_SCAN_CLASSIFIED_PLACEHOLDERS=$classified_placeholders"
 echo "SECRET_SCAN_FINDINGS=$findings"
 if ((findings > 0)); then
   echo 'Historical secret candidates found. Rotation and classification are required before this gate can close.' >&2
