@@ -30,10 +30,17 @@ declare
   v_queued_messages integer := 0;
   v_skipped_existing integer := 0;
   v_service_count integer;
+  v_year integer;
+  v_is_leap boolean;
+  v_feb28 date;
+  v_mar01 date;
 begin
   if p_run_date is null then
     raise exception using errcode = 'P0001', message = 'BIRTHDAY_RUN_DATE_REQUIRED';
   end if;
+
+  v_year := extract(year from p_run_date)::integer;
+  v_is_leap := (v_year % 400 = 0) or (v_year % 4 = 0 and v_year % 100 <> 0);
 
   for v_setting in
     select *
@@ -54,16 +61,26 @@ begin
         )
       order by c.id
     loop
-      -- Feb 29 requires an explicit business decision for non-leap years. Fail closed instead of inventing Feb 28/Mar 1 semantics.
-      begin
-        v_birthday_date := make_date(
-          extract(year from p_run_date)::integer,
-          extract(month from v_customer.birth_date)::integer,
-          extract(day from v_customer.birth_date)::integer
-        );
-      exception when datetime_field_overflow then
-        raise exception using errcode = 'P0001', message = 'BIRTHDAY_LEAP_DAY_POLICY_REQUIRED';
-      end;
+      -- Feb 29 in a non-leap year has two plausible business interpretations (Feb 28 or Mar 1).
+      -- Do not choose one. Only fail on dates where either interpretation could trigger; unrelated days keep running.
+      if extract(month from v_customer.birth_date)::integer = 2
+         and extract(day from v_customer.birth_date)::integer = 29
+         and not v_is_leap then
+        v_feb28 := make_date(v_year, 2, 28);
+        v_mar01 := make_date(v_year, 3, 1);
+        if (v_setting.send_on_birthday and p_run_date in (v_feb28, v_mar01))
+           or (v_setting.days_before is not null and v_setting.days_before > 0
+               and p_run_date in (v_feb28 - v_setting.days_before, v_mar01 - v_setting.days_before)) then
+          raise exception using errcode = 'P0001', message = 'BIRTHDAY_LEAP_DAY_POLICY_REQUIRED';
+        end if;
+        continue;
+      end if;
+
+      v_birthday_date := make_date(
+        v_year,
+        extract(month from v_customer.birth_date)::integer,
+        extract(day from v_customer.birth_date)::integer
+      );
 
       for v_trigger_kind in
         select trigger_kind
