@@ -6,7 +6,7 @@ type Template = {
   category_id: string | null; title_template: string; body_template: string; is_active: boolean;
   variable_schema: string[]; reminder_offset_minutes: number | null; service_ids: string[]; version_count: number;
 }
-type Option = { id: string; name: string; operation_scope?: string; category_id?: string | null; operation_code?: string; is_active?: boolean }
+type Option = { id: string; name: string; operation_scope?: string; category_id?: string | null; is_active?: boolean }
 type Payload = {
   templates: Template[]; services: Option[]; categories: Option[];
   options: { events: string[]; channels: string[]; audiences: string[]; variables: string[] }
@@ -53,7 +53,7 @@ export function NotificationsAdmin() {
     })
   }, [load])
 
-  const filteredCategories = useMemo(() => (data?.categories ?? []).filter((item) => !form.operation_scope || item.operation_code === form.operation_scope), [data, form.operation_scope])
+  const filteredCategories = useMemo(() => (data?.categories ?? []).filter((item) => !form.operation_scope || item.operation_scope === form.operation_scope), [data, form.operation_scope])
   const filteredServices = useMemo(() => (data?.services ?? []).filter((item) => !form.operation_scope || item.operation_scope === form.operation_scope).filter((item) => !form.category_id || item.category_id === form.category_id), [data, form.operation_scope, form.category_id])
 
   function edit(template: Template) {
