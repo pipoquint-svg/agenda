@@ -3,6 +3,7 @@ import { AdminBalancesPage } from './AdminBalancesPage'
 import { AdminDashboard } from './AdminDashboard'
 import { AgendaAdmin } from './AgendaAdmin'
 import { BalanceCollectionPage } from './BalanceCollectionPage'
+import { BirthdaySettingsAdmin } from './BirthdaySettingsAdmin'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
 import { CouponAdmin } from './CouponAdmin'
@@ -45,6 +46,7 @@ export function App() {
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
   if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
   if (path.startsWith('/admin/notificacoes')) return <NotificationsAdmin />
+  if (path.startsWith('/admin/aniversarios')) return <BirthdaySettingsAdmin />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes-avancadas')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/configuracoes')) return <OperationSettingsAdmin />
