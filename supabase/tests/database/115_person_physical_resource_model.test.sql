@@ -5,11 +5,15 @@ select plan(7);
 
 select ok(
   exists (
-    select 1 from pg_constraint c
-    where c.conrelid='public.resources'::regclass
-      and c.contype='c'
-      and pg_get_constraintdef(c.oid) like '%PHYSICAL%'
-      and pg_get_constraintdef(c.oid) like '%PERSON%'
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    join pg_enum e on e.enumtypid = t.oid
+    where n.nspname='public'
+      and t.typname='resource_type'
+    group by t.oid
+    having bool_or(e.enumlabel='PHYSICAL')
+       and bool_or(e.enumlabel='PERSON')
   ),
   'resources distinguish PHYSICAL and PERSON'
 );
