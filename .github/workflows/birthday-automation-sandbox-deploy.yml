@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/birthday-automation-trigger/**'
+      - 'supabase/functions/birthday-email-worker/**'
       - 'supabase/functions/_shared/github-oidc.ts'
+      - 'supabase/config.toml'
       - '.github/workflows/birthday-automation-sandbox-deploy.yml'
   workflow_dispatch:
 
@@ -45,21 +47,35 @@ jobs:
         with:
           version: 2.111.0
 
-      - name: Deploy isolated birthday trigger
+      - name: Deploy isolated birthday functions
         shell: bash
-        run: supabase functions deploy birthday-automation-trigger --project-ref "$SUPABASE_PROJECT_REF" --use-api
+        run: |
+          set -euo pipefail
+          supabase functions deploy birthday-email-worker --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          supabase functions deploy birthday-automation-trigger --project-ref "$SUPABASE_PROJECT_REF" --use-api
 
-      - name: Smoke fail-closed OIDC boundary
+      - name: Smoke fail-closed birthday boundaries
         shell: bash
         run: |
           set -euo pipefail
           base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1"
+
           body="$(mktemp)"
           status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
             --request POST --header 'content-type: application/json' --data '{}' \
             "$base/birthday-automation-trigger")"
           if [[ "$status" != '401' ]] || ! grep -q 'GITHUB_OIDC_REQUIRED' "$body"; then
             echo "birthday-automation-trigger OIDC smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request POST --header 'content-type: application/json' --data '{}' \
+            "$base/birthday-email-worker")"
+          if [[ "$status" != '401' ]] || ! grep -q 'INTERNAL_AUTH_REQUIRED' "$body"; then
+            echo "birthday-email-worker internal auth smoke failed: HTTP $status" >&2
             cat "$body" >&2
             exit 1
           fi
@@ -76,5 +92,6 @@ jobs:
             echo '- Dados reais permitidos: `false`'
             echo '- Cobranças reais permitidas: `false`'
             echo '- Trigger: protegido por OIDC específico do workflow de aniversário'
-            echo '- Provider: nenhum provider é chamado pelo trigger; ele somente executa o runtime SQL idempotente'
+            echo '- Consumer: protegido por segredo interno e gate adicional `BIRTHDAY_EMAIL_DELIVERY_ENABLED`'
+            echo '- Provider: o deploy não habilita o gate de entrega e o smoke não chama Resend'
           } >> "$GITHUB_STEP_SUMMARY"

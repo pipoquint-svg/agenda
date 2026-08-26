@@ -39,20 +39,26 @@ jobs:
           token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<<"$token_response")"
           test -n "$token"
 
-          body="$(mktemp)"
-          status="$(curl --silent --show-error \
-            --output "$body" \
-            --write-out '%{http_code}' \
-            --request POST \
-            --header "Authorization: Bearer ${token}" \
-            --header 'Content-Type: application/json' \
-            --data '{}' \
-            "$BIRTHDAY_URL")"
+          for attempt in 1 2 3; do
+            body="$(mktemp)"
+            status="$(curl --silent --show-error \
+              --output "$body" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${token}" \
+              --header 'Content-Type: application/json' \
+              --data '{}' \
+              "$BIRTHDAY_URL")"
 
-          cat "$body"
-          echo
-          if [[ "$status" != '200' ]]; then
-            echo "birthday-automation-trigger failed with HTTP $status" >&2
-            exit 1
-          fi
-          grep -q '"ok":true' "$body"
+            cat "$body"
+            echo
+            if [[ "$status" == '200' ]] && grep -q '"ok":true' "$body"; then
+              exit 0
+            fi
+            if [[ "$status" != 5* ]] || [[ "$attempt" == '3' ]]; then
+              echo "birthday-automation-trigger failed with HTTP $status on attempt $attempt" >&2
+              exit 1
+            fi
+            echo "Transient birthday automation failure; retrying idempotently ($attempt/3)" >&2
+            sleep 15
+          done

@@ -59,9 +59,13 @@ verify_jwt = false
 [functions.kommo-card-provider-gate]
 verify_jwt = false
 
-# Internal transactional-email adapter. It requires x-internal-secret and reads the
-# provider API key only from the Edge secret environment.
+# Internal transactional-email adapters. They require x-internal-secret and read the
+# provider API key only from the Edge secret environment. Birthday delivery has an
+# additional BIRTHDAY_EMAIL_DELIVERY_ENABLED fail-closed gate.
 [functions.email-send]
+verify_jwt = false
+
+[functions.birthday-email-worker]
 verify_jwt = false
 
 # Historical email diagnostics are permanently retired. They stay publicly callable
