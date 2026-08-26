@@ -39,6 +39,16 @@ function operationScope(value: unknown): 'SABRINA' | 'BLACKSHEEP' {
   return next as 'SABRINA' | 'BLACKSHEEP'
 }
 
+async function rawOverride(client: ReturnType<typeof adminClient>, scope: 'SABRINA' | 'BLACKSHEEP') {
+  const { data, error } = await client
+    .from('operation_setting_overrides')
+    .select('*')
+    .eq('operation_scope', scope)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data ?? null
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -60,6 +70,9 @@ Deno.serve(async (req) => {
           p_operation_scope: scope,
         })
         if (error) throw new Error(error.message)
+        if (url.searchParams.get('include_override') === '1') {
+          return json({ resolved: data, override: await rawOverride(client, scope) })
+        }
         return json(data)
       }
 
@@ -93,7 +106,7 @@ Deno.serve(async (req) => {
         p_actor_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json({ resolved: data, override: await rawOverride(client, scope) })
     }
 
     // Backward-compatible singleton mutation used only by dashboard occupancy settings.
