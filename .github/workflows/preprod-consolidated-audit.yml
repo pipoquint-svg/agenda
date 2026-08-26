@@ -1,0 +1,80 @@
+name: Preprod Consolidated Audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/preprod-consolidated-audit.sh'
+      - '.github/workflows/preprod-consolidated-audit.yml'
+      - 'supabase/migrations/**'
+      - 'supabase/functions/**'
+      - 'supabase/tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: staging
+  ALLOW_REAL_CUSTOMER_DATA: 'false'
+  ALLOW_REAL_CHARGES: 'false'
+
+jobs:
+  consolidated-audit:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 20
+    env:
+      SANDBOX_DATABASE_URL: ${{ secrets.SANDBOX_DATABASE_URL }}
+
+    steps:
+      - name: Checkout full working tree
+        uses: actions/checkout@v4
+
+      - name: Require sandbox-only execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APP_ENV" = staging
+          test "$ALLOW_REAL_CUSTOMER_DATA" = false
+          test "$ALLOW_REAL_CHARGES" = false
+          test -n "${SANDBOX_DATABASE_URL:-}"
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start migrated local database
+        shell: bash
+        run: supabase start
+
+      - name: Rebuild local schema from repository migrations
+        shell: bash
+        run: supabase db reset
+
+      - name: Run consolidated audit
+        shell: bash
+        env:
+          LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: bash scripts/preprod-consolidated-audit.sh
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprod-consolidated-audit
+          path: artifacts/preprod-audit
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop local Supabase
+        if: always()
+        shell: bash
+        run: supabase stop --no-backup || true
