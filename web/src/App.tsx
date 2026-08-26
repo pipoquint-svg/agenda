@@ -7,6 +7,7 @@ import { BirthdaySettingsAdmin } from './BirthdaySettingsAdmin'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
 import { BookingPageDuration } from './BookingPageDuration'
 import { CouponAdmin } from './CouponAdmin'
+import { CustomerAdmin } from './CustomerAdmin'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { EmployeeAdmin } from './EmployeeAdmin'
@@ -44,6 +45,7 @@ export function App() {
   const path = applicationPath()
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
+  if (path.startsWith('/admin/clientes')) return <CustomerAdmin />
   if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
   if (path.startsWith('/admin/notificacoes')) return <NotificationsAdmin />
   if (path.startsWith('/admin/aniversarios')) return <BirthdaySettingsAdmin />

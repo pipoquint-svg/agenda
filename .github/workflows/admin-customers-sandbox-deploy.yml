@@ -1,0 +1,52 @@
+name: Admin Customers Sandbox Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/admin-customers/**'
+      - 'supabase/functions/_shared/**'
+      - '.github/workflows/admin-customers-sandbox-deploy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agenda-admin-customers-sandbox
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: sandbox
+    timeout-minutes: 10
+    env:
+      APP_ENV: staging
+      ALLOW_REAL_CUSTOMER_DATA: 'false'
+      ALLOW_REAL_CHARGES: 'false'
+      SUPABASE_PROJECT_REF: jlyvlvmspfjwbcmhmhwz
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require sandbox isolation
+        run: |
+          set -euo pipefail
+          test "$APP_ENV" = staging
+          test "$ALLOW_REAL_CUSTOMER_DATA" = false
+          test "$ALLOW_REAL_CHARGES" = false
+          test -n "${SUPABASE_ACCESS_TOKEN:-}"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+      - name: Deploy admin customers
+        run: supabase functions deploy admin-customers --project-ref "$SUPABASE_PROJECT_REF" --use-api
+      - name: Smoke auth boundary
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' --request GET "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/admin-customers")"
+          if [[ "$status" != "401" ]] || ! grep -Eq 'ADMIN_AUTH_REQUIRED|UNAUTHORIZED_NO_AUTH_HEADER' "$body"; then
+            echo "admin-customers auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
