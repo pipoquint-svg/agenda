@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(9);
+select plan(10);
 
 select has_function('public','finalize_birthday_email_delivery',array['uuid','uuid','text','text'],'birthday email finalizer exists');
 select ok(not has_function_privilege('anon','public.finalize_birthday_email_delivery(uuid,uuid,text,text)','EXECUTE'),'anon cannot finalize birthday email');
