@@ -24,6 +24,7 @@ delete from public.hour_package_services where hour_package_id = '$PACKAGE_ID'::
 delete from public.hour_packages where id = '$PACKAGE_ID'::uuid;
 delete from public.checkout_holds where id in ('$HOLD_A'::uuid, '$HOLD_B'::uuid);
 delete from public.service_employees where id = '$SERVICE_EMPLOYEE_ID'::uuid;
+delete from public.service_change_policies where service_id = '$SERVICE_ID'::uuid;
 delete from public.services where id = '$SERVICE_ID'::uuid;
 delete from public.categories where id = '$CATEGORY_ID'::uuid;
 delete from public.employees where id = '$EMPLOYEE_ID'::uuid;
@@ -50,9 +51,11 @@ values ('$EMPLOYEE_ID'::uuid, 'Package Race Employee');
 insert into public.categories (id, name, slug)
 values ('$CATEGORY_ID'::uuid, 'Package Race', 'package-race-test');
 
+-- Create inactive first so the fixture can install its explicit policy before
+-- the active-service invariant is checked at commit.
 insert into public.services (
   id, category_id, name, slug, base_duration_minutes, base_price,
-  minimum_people, maximum_people, maximum_booking_horizon_days
+  minimum_people, maximum_people, maximum_booking_horizon_days, is_active
 ) values (
   '$SERVICE_ID'::uuid,
   '$CATEGORY_ID'::uuid,
@@ -62,8 +65,29 @@ insert into public.services (
   240.00,
   1,
   10,
-  5000
+  5000,
+  false
 );
+
+insert into public.service_change_policies (
+  service_id,
+  notice_hours,
+  reschedule_first_early_percent,
+  reschedule_first_late_percent,
+  reschedule_repeat_percent,
+  cancellation_late_percent
+) values (
+  '$SERVICE_ID'::uuid,
+  24,
+  0,
+  0,
+  0,
+  0
+);
+
+update public.services
+set is_active = true
+where id = '$SERVICE_ID'::uuid;
 
 insert into public.service_employees (id, service_id, employee_id)
 values ('$SERVICE_EMPLOYEE_ID'::uuid, '$SERVICE_ID'::uuid, '$EMPLOYEE_ID'::uuid);
