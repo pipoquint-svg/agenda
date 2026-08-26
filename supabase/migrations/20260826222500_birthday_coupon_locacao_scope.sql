@@ -63,7 +63,7 @@ for each row execute function public.guard_birthday_coupon_service_scope();
 
 drop trigger if exists birthday_coupon_requires_locacao_service on public.coupons;
 create constraint trigger birthday_coupon_requires_locacao_service
-after insert or update of source on public.coupons
+after insert or update on public.coupons
 deferrable initially deferred
 for each row execute function public.assert_birthday_coupon_has_locacao_service();
 
