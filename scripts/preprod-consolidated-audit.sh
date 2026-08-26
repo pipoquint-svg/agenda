@@ -12,6 +12,7 @@ report="$out_dir/report.md"
   echo '# Auditoria consolidada V1 pré-produção'
   echo
   echo "Commit: \`${GITHUB_SHA:-local}\`"
+  echo "Baseline estrutural: \`${AUDIT_SCHEMA_BASELINE:-head}\`"
   echo
 } > "$report"
 
@@ -95,6 +96,7 @@ done
 {
   echo '## 3. Diff estrutural schema declarado × sandbox'
   echo
+  echo "Baseline usada: \`${AUDIT_SCHEMA_BASELINE:-head}\`."
   echo 'Cobertura: tabelas/views + colunas, definições de constraints, índices e estrutura de funções do schema `public`. Somente o sufixo operacional `NOT VALID` é normalizado; o estado de validação é verificado por testes dedicados.'
   echo
   for object in columns constraints indexes functions; do
@@ -114,6 +116,6 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 
 if (( schema_failed != 0 )); then
-  echo 'Structural schema drift detected between migrated repository state and sandbox.' >&2
+  echo 'Structural schema drift detected between selected repository baseline and sandbox.' >&2
   exit 1
 fi
