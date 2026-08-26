@@ -16,18 +16,25 @@ report="$out_dir/report.md"
 } > "$report"
 
 # 1) Working-tree debt/test markers. This intentionally scans the checked-out
-# repository rather than GitHub code search so coverage is complete.
+# repository rather than GitHub code search so coverage is complete. Generated
+# Supabase state is excluded because it is not repository source.
 marker_file="$out_dir/tree-markers.txt"
 : > "$marker_file"
 while IFS= read -r -d '' file; do
   grep -nEi '\b(TODO|FIXME|XXX|HACK)\b|pend[eê]ncia|\.skip\s*\(|\.todo\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@skip|SKIP[[:space:]]*:' "$file" \
     | sed "s#^#$file:#" >> "$marker_file" || true
-done < <(find . -type f -not -path './.git/*' -not -path './node_modules/*' -not -path './web/node_modules/*' -not -path './artifacts/*' -print0)
+done < <(find . -type f \
+  -not -path './.git/*' \
+  -not -path './node_modules/*' \
+  -not -path './web/node_modules/*' \
+  -not -path './artifacts/*' \
+  -not -path './supabase/.temp/*' \
+  -print0)
 
 {
   echo '## 1. Marcadores de dívida e testes pulados'
   echo
-  echo "Cobertura: todos os arquivos da árvore, excluindo apenas .git, node_modules e artefatos gerados."
+  echo 'Cobertura: todos os arquivos versionáveis da árvore; excluídos .git, node_modules, artifacts e supabase/.temp gerado localmente.'
   echo
   echo "Ocorrências: **$(wc -l < "$marker_file" | tr -d ' ')**"
   if [[ -s "$marker_file" ]]; then
@@ -59,12 +66,12 @@ done < <(find supabase/functions -mindepth 2 -maxdepth 2 -type f -name index.ts 
 {
   echo '## 2. Edge Functions — tratamento de erro/status'
   echo
-  echo "Cobertura: **$edge_count entrypoints** `supabase/functions/*/index.ts`, sem amostragem."
+  printf 'Cobertura: **%s entrypoints** `supabase/functions/*/index.ts`, sem amostragem.\n' "$edge_count"
   echo
   echo '| Function | catch/rejection | resposta/status explícito | throw/error path |'
   echo '|---|---:|---:|---:|'
   tail -n +2 "$edge_file" | while IFS=$'\t' read -r fn catch status err; do
-    echo "| \`$fn\` | $catch | $status | $err |"
+    printf '| `%s` | %s | %s | %s |\n' "$fn" "$catch" "$status" "$err"
   done
   echo
   echo '> `no` não é automaticamente defeito: funções podem delegar erro/status a helpers importados. O inventário serve para revisão integral e evita falso negativo por índice de busca.'
@@ -72,11 +79,15 @@ done < <(find supabase/functions -mindepth 2 -maxdepth 2 -type f -name index.ts 
 } >> "$report"
 
 # 3) Structural schema comparison: declared/migrated local database vs sandbox.
-# Compare semantic catalog objects, not migration history.
+# Compare semantic catalog structure, not migration history or source formatting.
+# Function bodies are intentionally excluded here: pg_get_functiondef preserves
+# non-semantic source formatting/comments and produced false drift for equivalent
+# definitions. Function structure includes identity args, result, language,
+# volatility, security-definer, parallel mode, strictness, leakproof and config.
 query_columns="copy (select n.nspname, c.relname, a.attnum, a.attname, format_type(a.atttypid,a.atttypmod), a.attnotnull, coalesce(pg_get_expr(d.adbin,d.adrelid),''), a.attidentity, a.attgenerated from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where n.nspname='public' and c.relkind in ('r','p','v','m') and a.attnum>0 and not a.attisdropped order by 1,2,3) to stdout with csv"
 query_constraints="copy (select c.relname, con.conname, con.contype, con.condeferrable, con.condeferred, con.convalidated, pg_get_constraintdef(con.oid,true) from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' order by 1,2) to stdout with csv"
 query_indexes="copy (select tablename,indexname,indexdef from pg_indexes where schemaname='public' order by 1,2) to stdout with csv"
-query_functions="copy (select p.proname, pg_get_function_identity_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, p.provolatile, p.prosecdef, regexp_replace(pg_get_functiondef(p.oid),'[[:space:]]+',' ','g') from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_language l on l.oid=p.prolang where n.nspname='public' order by 1,2) to stdout with csv"
+query_functions="copy (select p.proname, pg_get_function_identity_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, p.provolatile, p.prosecdef, p.proparallel, p.proisstrict, p.proleakproof, coalesce(array_to_string(p.proconfig,E'\\n'),'') from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_language l on l.oid=p.prolang where n.nspname='public' order by 1,2) to stdout with csv"
 
 schema_failed=0
 for object in columns constraints indexes functions; do
@@ -92,7 +103,7 @@ done
 {
   echo '## 3. Diff estrutural schema declarado × sandbox'
   echo
-  echo 'Cobertura: tabelas/views + colunas, constraints, índices e funções do schema `public`. Histórico de migrations não é usado como substituto.'
+  echo 'Cobertura: tabelas/views + colunas, constraints, índices e estrutura de funções do schema `public`. Histórico de migrations não é usado como substituto.'
   echo
   for object in columns constraints indexes functions; do
     if [[ -s "$out_dir/${object}.diff" ]]; then
