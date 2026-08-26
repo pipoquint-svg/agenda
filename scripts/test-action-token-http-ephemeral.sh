@@ -18,17 +18,22 @@ trap cleanup EXIT
 
 # This fixture exists only inside the local Supabase instance created by CI. Any
 # ACCESS/network evidence produced below disappears when the runner is torn down.
+# The service is created inactive, receives its explicit synthetic policy and is
+# only then activated, matching the production invariant without weakening it.
 psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 insert into public.categories(id,name,slug)
 values ('95800000-0000-0000-0000-000000000001','HTTP Action Token','http-action-token-test');
 insert into public.employees(id,name)
 values ('95800000-0000-0000-0000-000000000002','HTTP Action Token Employee');
-insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,maximum_booking_horizon_days,confirmation_percentage)
-values ('95800000-0000-0000-0000-000000000010','95800000-0000-0000-0000-000000000001','HTTP Action Token Service','http-action-token-service',60,1000,1,2,5000,50);
+insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,maximum_booking_horizon_days,confirmation_percentage,is_active)
+values ('95800000-0000-0000-0000-000000000010','95800000-0000-0000-0000-000000000001','HTTP Action Token Service','http-action-token-service',60,1000,1,2,5000,50,false);
 insert into public.service_employees(id,service_id,employee_id)
 values ('95800000-0000-0000-0000-000000000011','95800000-0000-0000-0000-000000000010','95800000-0000-0000-0000-000000000002');
 insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
 values ('95800000-0000-0000-0000-000000000010',48,0,20,30,30);
+update public.services
+set is_active = true
+where id = '95800000-0000-0000-0000-000000000010';
 insert into public.customers(id,name,email,phone)
 values ('95800000-0000-0000-0000-000000000020','HTTP Action Token Customer','http.action.token@example.com','48999995555');
 insert into public.appointments(id,public_code,service_id,service_employee_id,service_name_snapshot,primary_customer_id,status,financial_status,start_at,end_at,duration_minutes,people_count,commercial_value,confirmed_at)
