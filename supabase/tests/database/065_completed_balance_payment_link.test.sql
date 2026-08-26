@@ -2,7 +2,6 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 select plan(4);
-select set_config('agenda.test_now','2026-08-24 18:00:00-03',true);
 
 insert into public.categories(id,name,slug)
 values('96600000-0000-0000-0000-000000000001','Completed Balance','completed-balance');
@@ -28,7 +27,7 @@ insert into public.appointments(
  commercial_value,billing_mode_snapshot,confirmation_percentage_snapshot
 ) values(
  '96600000-0000-0000-0000-000000000006','BAL-COMP','96600000-0000-0000-0000-000000000003','96600000-0000-0000-0000-000000000004','Locação BlackSheep','96600000-0000-0000-0000-000000000005','COMPLETED','PARTIALLY_PAID',
- '2026-08-24 15:00:00-03','2026-08-24 17:30:00-03','2026-08-24 15:00:00-03','2026-08-24 17:00:00-03',150,120,0,30,1,1000,'CHECKOUT',50
+ current_timestamp - interval '3 hours',current_timestamp - interval '30 minutes',current_timestamp - interval '3 hours',current_timestamp - interval '1 hour',150,120,0,30,1,1000,'CHECKOUT',50
 );
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,payment_purpose)
 values('96600000-0000-0000-0000-000000000006','CHARGE','CARD','MERCADO_PAGO','APPROVED',500,500,'CONTRACT');
@@ -37,7 +36,7 @@ insert into public.appointment_balance_collections(
  id,appointment_id,sequence,source,status,amount_snapshot,issued_at,expires_at
 ) values(
  '96600000-0000-0000-0000-000000000007','96600000-0000-0000-0000-000000000006',1,'AUTO_START','PENDING',500,
- '2026-08-24 15:00:00-03','2026-08-26 15:00:00-03'
+ current_timestamp - interval '1 hour',current_timestamp + interval '47 hours'
 );
 
 create temporary table test_completed_balance_token as
