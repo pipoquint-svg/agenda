@@ -115,6 +115,7 @@ jobs:
             admin-balance-collections
             admin-dashboard
             admin-operation-settings
+            admin-birthday-settings
             admin-notifications
             admin-service-settings
             admin-appointment-actions
@@ -247,8 +248,17 @@ jobs:
           body="$(mktemp)"
           status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
             --request GET "$base/admin-notifications")"
-          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+          if [[ "$status" != "401" ]] || ! grep -Eq 'ADMIN_AUTH_REQUIRED|UNAUTHORIZED_NO_AUTH_HEADER' "$body"; then
             echo "admin-notifications auth smoke failed: HTTP $status" >&2
+            cat "$body" >&2
+            exit 1
+          fi
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+            --request GET "$base/admin-birthday-settings")"
+          if [[ "$status" != "401" ]] || ! grep -Eq 'ADMIN_AUTH_REQUIRED|UNAUTHORIZED_NO_AUTH_HEADER' "$body"; then
+            echo "admin-birthday-settings auth smoke failed: HTTP $status" >&2
             cat "$body" >&2
             exit 1
           fi
@@ -287,6 +297,7 @@ jobs:
             echo '- Google custom-auth boundaries: smoke de OAuth/sync/watch/webhook/appointment-sync executado sem conectar conta'
             echo '- Admin read models/timeline: financeiro/pacotes/auditoria/equipe/integrações implantados com autenticação e permissão'
             echo '- Admin notifications: gateway implantado e boundary de autenticação validado sem enviar mensagens'
+            echo '- Admin birthday settings: gateway implantado e boundary de autenticação validado; automação permanece sem runtime'
             echo '- Cobrança de saldo: admin/access/email/provider-cancel/worker implantados; worker protegido por autenticação interna'
             echo '- Kommo adapter/worker: código implantado, sincronização permanece condicionada a settings enabled e gate #112'
             echo '- Email adapter/worker/trigger: código implantado; flags LIVE permanecem em Edge secrets e não são alteradas pelo deploy'
