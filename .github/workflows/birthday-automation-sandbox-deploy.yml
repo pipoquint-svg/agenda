@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/birthday-automation-trigger/**'
+      - 'supabase/functions/birthday-email-worker/**'
       - 'supabase/functions/_shared/github-oidc.ts'
+      - 'supabase/functions/_shared/transactional-email.ts'
       - '.github/workflows/birthday-automation-sandbox-deploy.yml'
   workflow_dispatch:
 
@@ -40,29 +42,45 @@ jobs:
           test "$ALLOW_REAL_CHARGES" = false
           test -n "${SUPABASE_ACCESS_TOKEN:-}"
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check isolated birthday functions
+        shell: bash
+        run: |
+          deno check supabase/functions/birthday-automation-trigger/index.ts
+          deno check supabase/functions/birthday-email-worker/index.ts
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: 2.111.0
 
-      - name: Deploy isolated birthday trigger
+      - name: Deploy isolated birthday functions
         shell: bash
-        run: supabase functions deploy birthday-automation-trigger --project-ref "$SUPABASE_PROJECT_REF" --use-api
+        run: |
+          set -euo pipefail
+          supabase functions deploy birthday-automation-trigger --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          supabase functions deploy birthday-email-worker --project-ref "$SUPABASE_PROJECT_REF" --use-api
 
-      - name: Smoke fail-closed OIDC boundary
+      - name: Smoke fail-closed OIDC boundaries
         shell: bash
         run: |
           set -euo pipefail
           base="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1"
-          body="$(mktemp)"
-          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
-            --request POST --header 'content-type: application/json' --data '{}' \
-            "$base/birthday-automation-trigger")"
-          if [[ "$status" != '401' ]] || ! grep -q 'GITHUB_OIDC_REQUIRED' "$body"; then
-            echo "birthday-automation-trigger OIDC smoke failed: HTTP $status" >&2
-            cat "$body" >&2
-            exit 1
-          fi
+          for fn in birthday-automation-trigger birthday-email-worker; do
+            body="$(mktemp)"
+            status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+              --request POST --header 'content-type: application/json' --data '{}' \
+              "$base/$fn")"
+            if [[ "$status" != '401' ]] || ! grep -q 'GITHUB_OIDC_REQUIRED' "$body"; then
+              echo "$fn OIDC smoke failed: HTTP $status" >&2
+              cat "$body" >&2
+              exit 1
+            fi
+          done
 
       - name: Record evidence
         if: always()
@@ -75,6 +93,7 @@ jobs:
             echo '- Ambiente: `staging`'
             echo '- Dados reais permitidos: `false`'
             echo '- Cobranças reais permitidas: `false`'
-            echo '- Trigger: protegido por OIDC específico do workflow de aniversário'
-            echo '- Provider: nenhum provider é chamado pelo trigger; ele somente executa o runtime SQL idempotente'
+            echo '- Runtime e consumer: protegidos pelo OIDC específico do workflow de aniversário'
+            echo '- Consumer de e-mail: possui gate adicional `BIRTHDAY_EMAIL_DELIVERY_ENABLED` e respeita allowlist/gates transacionais'
+            echo '- Nenhuma flag LIVE é alterada por este deploy'
           } >> "$GITHUB_STEP_SUMMARY"
