@@ -170,7 +170,7 @@ Deno.serve(async (req) => {
         'coupon.code': String(discount?.code_snapshot ?? ''),
         'coupon.discount': money(discount?.calculated_discount_amount ?? 0),
       }
-      const allowed = new Set(Array.isArray(template.variable_schema) ? template.variable_schema.map(String) : [])
+      const allowed = new Set<string>(Array.isArray(template.variable_schema) ? template.variable_schema.map((item: unknown) => String(item)) : [])
       const subject = renderTemplate(String(template.title_template ?? ''), allowed, values)
       const text = renderTemplate(String(template.body_template ?? ''), allowed, values)
       message = { subject, text, html: `<p>${htmlEscape(text).replaceAll('\n', '<br>')}</p>` }
