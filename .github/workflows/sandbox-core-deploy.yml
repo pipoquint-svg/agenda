@@ -247,7 +247,7 @@ jobs:
           body="$(mktemp)"
           status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
             --request GET "$base/admin-notifications")"
-          if [[ "$status" != "401" ]] || ! grep -q 'ADMIN_AUTH_REQUIRED' "$body"; then
+          if [[ "$status" != "401" ]] || ! grep -Eq 'ADMIN_AUTH_REQUIRED|UNAUTHORIZED_NO_AUTH_HEADER' "$body"; then
             echo "admin-notifications auth smoke failed: HTTP $status" >&2
             cat "$body" >&2
             exit 1
