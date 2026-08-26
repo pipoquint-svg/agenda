@@ -3,6 +3,7 @@ import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessTok
 import {
   buildManagedGoogleEvent,
   deterministicAgendaGoogleEventId,
+  renderManagedNotificationTemplate,
   type ManagedAppointmentDesiredState,
 } from '../_shared/managed-event.ts'
 
@@ -10,6 +11,92 @@ function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
   if (!expected || supplied !== expected) throw new Error('INTERNAL_AUTH_REQUIRED')
+}
+
+function numeric(value: unknown): number {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+function money(value: unknown): string {
+  return numeric(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+async function applyConfiguredCalendarTemplate(
+  client: ReturnType<typeof adminClient>,
+  appointmentId: string,
+  desired: ManagedAppointmentDesiredState,
+): Promise<ManagedAppointmentDesiredState> {
+  const { data: appointment, error: appointmentError } = await client
+    .from('appointments')
+    .select('id,service_id,service_employee_id,primary_customer_id,public_code,start_at,end_at,financial_status,commercial_value,service_name_snapshot,service_description_snapshot')
+    .eq('id', appointmentId)
+    .maybeSingle()
+  if (appointmentError || !appointment) throw new Error('GOOGLE_TEMPLATE_APPOINTMENT_LOOKUP_FAILED')
+
+  const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template', {
+    p_event_key: 'APPOINTMENT_APPROVED',
+    p_channel: 'GOOGLE_CALENDAR',
+    p_audience: 'EMPLOYEE',
+    p_service_id: appointment.service_id,
+  })
+  if (resolverError) throw new Error('GOOGLE_NOTIFICATION_TEMPLATE_RESOLUTION_FAILED')
+  const template = Array.isArray(rows) ? rows[0] : null
+  if (!template) return desired
+
+  const { data: service, error: serviceError } = await client
+    .from('services')
+    .select('id,name,full_description,operation_scope')
+    .eq('id', appointment.service_id)
+    .maybeSingle()
+  if (serviceError || !service) throw new Error('GOOGLE_TEMPLATE_SERVICE_LOOKUP_FAILED')
+  const scope = String(service.operation_scope ?? '').trim().toUpperCase()
+
+  const [{ data: customer }, { data: financial }, { data: extras }, { data: discount }, { data: operationSettings }, { data: serviceEmployee }] = await Promise.all([
+    appointment.primary_customer_id
+      ? client.from('customers').select('id,name,email').eq('id', appointment.primary_customer_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    client.rpc('get_appointment_financial_summary', { p_appointment_id: appointmentId }),
+    client.from('appointment_extras').select('name_snapshot,quantity').eq('appointment_id', appointmentId),
+    client.from('appointment_discounts').select('code_snapshot,calculated_discount_amount').eq('appointment_id', appointmentId).maybeSingle(),
+    scope ? client.rpc('service_admin_get_operation_settings_v2', { p_operation_scope: scope }) : Promise.resolve({ data: null }),
+    appointment.service_employee_id
+      ? client.from('service_employees').select('employee_id').eq('id', appointment.service_employee_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
+
+  let employeeName = ''
+  if (serviceEmployee?.employee_id) {
+    const { data: employee } = await client.from('employees').select('name').eq('id', serviceEmployee.employee_id).maybeSingle()
+    employeeName = String(employee?.name ?? '')
+  }
+
+  const values: Record<string, string> = {
+    'appointment.public_code': String(appointment.public_code ?? ''),
+    'appointment.start_at': String(appointment.start_at ?? ''),
+    'appointment.end_at': String(appointment.end_at ?? ''),
+    'customer.name': String(customer?.name ?? ''),
+    'customer.email': String(customer?.email ?? ''),
+    'employee.name': employeeName,
+    'service.name': String(appointment.service_name_snapshot ?? service.name ?? ''),
+    'service.description': String(appointment.service_description_snapshot ?? service.full_description ?? ''),
+    'operation.name': String(operationSettings?.public_name ?? ''),
+    'operation.email': String(operationSettings?.public_email ?? ''),
+    'operation.phone': String(operationSettings?.public_phone ?? ''),
+    'operation.address': String(operationSettings?.public_address ?? ''),
+    'operation.site_url': String(operationSettings?.public_site_url ?? ''),
+    'payment.total': money(appointment.commercial_value),
+    'payment.status': String(appointment.financial_status ?? financial?.financial_status ?? ''),
+    'extras.summary': (extras ?? []).map((item: any) => `${item.name_snapshot} × ${item.quantity}`).join(', '),
+    'coupon.code': String(discount?.code_snapshot ?? ''),
+    'coupon.discount': money(discount?.calculated_discount_amount ?? 0),
+  }
+  const allowed = Array.isArray(template.variable_schema) ? template.variable_schema.map((item: unknown) => String(item)) : []
+
+  return {
+    ...desired,
+    summary: renderManagedNotificationTemplate(String(template.title_template ?? ''), allowed, values),
+    description: renderManagedNotificationTemplate(String(template.body_template ?? ''), allowed, values),
+  }
 }
 
 async function mirrorCancelled(
@@ -53,12 +140,16 @@ Deno.serve(async (req) => {
       p_appointment_id: appointmentId,
     })
     if (desiredError) throw new Error(desiredError.message)
-    const desired = desiredData as ManagedAppointmentDesiredState
+    let desired = desiredData as ManagedAppointmentDesiredState
 
     if (entityVersion < desired.version) {
       return jsonResponse({ stale: true, current_version: desired.version, appointment_id: appointmentId })
     }
     if (entityVersion > desired.version) throw new Error('ENTITY_VERSION_AHEAD_OF_APPOINTMENT')
+
+    if (desired.desired_action === 'PRESENT') {
+      desired = await applyConfiguredCalendarTemplate(client, appointmentId, desired)
+    }
 
     const { data: mirrors, error: mirrorError } = await client
       .from('google_calendar_events')
