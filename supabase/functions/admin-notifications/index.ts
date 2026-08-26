@@ -18,6 +18,7 @@ const variables = [
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
   'payment.total', 'payment.status', 'extras.summary', 'coupon.code', 'coupon.discount',
 ]
+const financialVariables = new Set(['payment.total', 'payment.status', 'coupon.discount'])
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8' } })
@@ -54,6 +55,7 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET') {
       if (!(await hasAdminPermission(admin.adminId, 'SERVICES_VIEW'))) throw new Error('ADMIN_PERMISSION_DENIED')
+      const canViewFinance = await hasAdminPermission(admin.adminId, 'FINANCE_MANAGE')
       const url = new URL(req.url)
       const templateId = url.searchParams.get('template_id')
       if (templateId) {
@@ -75,7 +77,12 @@ Deno.serve(async (req) => {
           id: service.id, name: service.name, operation_scope: service.operation_scope, category_id: service.category_id, is_active: service.is_active,
         })),
         categories: categories.data ?? [],
-        options: { events, channels, audiences, variables },
+        options: {
+          events,
+          channels,
+          audiences,
+          variables: canViewFinance ? variables : variables.filter((item) => !financialVariables.has(item)),
+        },
       })
     }
 
@@ -93,6 +100,9 @@ Deno.serve(async (req) => {
     if (operationScope !== null && !['SABRINA', 'BLACKSHEEP'].includes(operationScope)) throw new Error('NOTIFICATION_OPERATION_SCOPE_INVALID')
     const requestedVariables = Array.isArray(record.variable_schema) ? record.variable_schema.map((item) => text(item) as string) : []
     if (requestedVariables.some((item) => !variables.includes(item))) throw new Error('NOTIFICATION_VARIABLE_INVALID')
+    if (requestedVariables.some((item) => financialVariables.has(item)) && !(await hasAdminPermission(admin.adminId, 'FINANCE_MANAGE'))) {
+      throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
+    }
 
     const { data, error } = await client.rpc('service_admin_upsert_notification_template', {
       p_template_id: uuid(record.template_id, true),
@@ -115,7 +125,7 @@ Deno.serve(async (req) => {
     const code = error instanceof Error ? error.message.split(':')[0] : 'NOTIFICATION_ADMIN_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED'
       ? 401
-      : code === 'ADMIN_PERMISSION_DENIED'
+      : code === 'ADMIN_PERMISSION_DENIED' || code === 'ADMIN_FINANCE_PERMISSION_REQUIRED'
         ? 403
         : 400
     return json({ error: { code } }, status)
