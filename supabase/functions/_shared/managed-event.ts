@@ -16,6 +16,19 @@ export type ManagedAppointmentDesiredState = {
   description?: string
 }
 
+export function renderManagedNotificationTemplate(
+  source: string,
+  allowedVariables: Iterable<string>,
+  values: Record<string, string>,
+): string {
+  const allowed = new Set(allowedVariables)
+  return source.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, rawKey) => {
+    const key = String(rawKey).trim()
+    if (!allowed.has(key)) throw new Error(`NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:${key}`)
+    return values[key] ?? ''
+  })
+}
+
 export function deterministicAgendaGoogleEventId(appointmentId: string): string {
   const normalized = appointmentId.toLowerCase().replaceAll('-', '')
   if (!/^[0-9a-v]+$/.test(normalized)) throw new Error('APPOINTMENT_ID_NOT_GOOGLE_EVENT_ID_COMPATIBLE')
