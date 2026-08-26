@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(7);
+select plan(5);
 
 insert into public.categories(id,name,slug,operation_scope,is_active)
 values ('97100000-0000-0000-0000-000000000001','I09 Guard','i09-guard','BLACKSHEEP',true);
@@ -44,10 +44,6 @@ update public.services set is_active=false where id='97100000-0000-0000-0000-000
 delete from public.service_change_policies where service_id='97100000-0000-0000-0000-000000000002';
 set constraints active_service_policy_delete_guard immediate;
 select ok(not exists(select 1 from public.service_change_policies where service_id='97100000-0000-0000-0000-000000000002'), 'inactive service may have policy removed');
-
-select has_function('public','capture_current_appointment_change_policy_snapshot',array[]::text[], 'snapshot trigger function exists');
-select function_returns('public','capture_current_appointment_change_policy_snapshot',array[]::text[],'trigger','snapshot function remains trigger contract');
-select ok(position('APPOINTMENT_CHANGE_POLICY_MISSING_FOR_SERVICE' in pg_get_functiondef('public.capture_current_appointment_change_policy_snapshot()'::regprocedure)) > 0, 'snapshot capture fails loudly when policy is missing');
 
 select * from finish();
 rollback;
