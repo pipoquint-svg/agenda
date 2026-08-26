@@ -10,6 +10,7 @@ import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { EmployeeAdmin } from './EmployeeAdmin'
 import { ManageReservation } from './ManageReservation'
+import { NotificationsAdmin } from './NotificationsAdmin'
 import { OperationSettingsAdmin } from './OperationSettingsAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
@@ -43,6 +44,7 @@ export function App() {
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
   if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
+  if (path.startsWith('/admin/notificacoes')) return <NotificationsAdmin />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes-avancadas')) return <ServiceSettingsAdmin />
   if (path.startsWith('/admin/configuracoes')) return <OperationSettingsAdmin />
