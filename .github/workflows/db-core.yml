@@ -62,23 +62,35 @@ jobs:
           charge_file='supabase/functions/mercado-pago-payment/index.ts'
           refund_file='supabase/functions/admin-appointment-actions/index.ts'
           cancel_file='supabase/functions/balance-collection-provider-cancel/index.ts'
+
           grep -Fq "import { mercadoPagoRuntime }" "$charge_file"
           grep -Fq 'function providerRuntime(options: { creatingCharge?: boolean } = {})' "$charge_file"
           grep -Fq 'creatingCharge: options.creatingCharge === true' "$charge_file"
           grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$charge_file"
           grep -Fq '}, { creatingCharge: true })' "$charge_file"
-          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$charge_file"; then echo 'Order charge path bypasses the environment-scoped Mercado Pago runtime guard.' >&2; exit 1; fi
+          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$charge_file"; then
+            echo 'Order charge path bypasses the environment-scoped Mercado Pago runtime guard.' >&2
+            exit 1
+          fi
+
           grep -Fq "import { mercadoPagoRuntime }" "$refund_file"
           grep -Fq 'function providerFinancialMutationRuntime()' "$refund_file"
           grep -Fq 'creatingCharge: true' "$refund_file"
           grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$refund_file"
-          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$refund_file"; then echo 'Admin refund path bypasses the environment-scoped Mercado Pago runtime guard.' >&2; exit 1; fi
+          if grep -Fq "requiredEnv('MERCADO_PAGO_ACCESS_TOKEN')" "$refund_file"; then
+            echo 'Admin refund path bypasses the environment-scoped Mercado Pago runtime guard.' >&2
+            exit 1
+          fi
+
           grep -Fq "import { mercadoPagoRuntime }" "$cancel_file"
           grep -Fq "sandboxAccessToken: Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')" "$cancel_file"
           grep -Fq "productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')" "$cancel_file"
           grep -Fq 'creatingCharge: true' "$cancel_file"
           grep -Fq 'authorization: `Bearer ${runtime.accessToken}`' "$cancel_file"
-          if grep -Fq 'creatingCharge: false' "$cancel_file"; then echo 'Provider cancellation path bypasses the financial-mutation production gate.' >&2; exit 1; fi
+          if grep -Fq 'creatingCharge: false' "$cancel_file"; then
+            echo 'Provider cancellation path bypasses the financial-mutation production gate.' >&2
+            exit 1
+          fi
 
       - name: Gate Mercado Pago environment contract
         run: |
@@ -109,18 +121,7 @@ jobs:
         run: supabase db reset
 
       - name: Run pgTAP database tests
-        run: |
-          set -o pipefail
-          supabase test db 2>&1 | tee pgtap-report.txt
-
-      - name: Upload pgTAP diagnostic
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: i09-pgtap-report
-          path: pgtap-report.txt
-          if-no-files-found: error
-          retention-days: 2
+        run: supabase test db
 
       - name: Run Gate A concurrency test
         run: bash scripts/test-concurrency.sh
@@ -134,6 +135,9 @@ jobs:
       - name: Run distributed rate-limit concurrency test
         run: bash scripts/test-rate-limit-concurrency.sh
 
+      # The HTTP gate intentionally creates action-token/access evidence. Give it a
+      # fresh disposable DB after all authoritative suites so neither side can leak
+      # state into the other. The runner is destroyed immediately afterwards.
       - name: Reset disposable stack for action-token HTTP gate
         run: supabase db reset
 
