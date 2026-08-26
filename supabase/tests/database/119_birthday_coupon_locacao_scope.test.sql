@@ -1,9 +1,10 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(4);
+select plan(6);
 
 select has_function('public','guard_birthday_coupon_service_scope',array[]::text[],'birthday coupon service-scope guard exists');
+select has_function('public','assert_birthday_coupon_has_locacao_service',array[]::text[],'birthday coupon deferred LOCACAO invariant exists');
 
 insert into public.categories(id,name,slug,operation_scope)
 values ('98800000-0000-0000-0000-000000000001','Birthday Scope Fixture','birthday-scope-fixture','BLACKSHEEP');
@@ -49,7 +50,7 @@ values ('98800000-0000-0000-0000-000000000005','98800000-0000-0000-0000-00000000
 select is(
   (select count(*)::integer from public.coupon_services where coupon_id='98800000-0000-0000-0000-000000000005'),
   1,
-  'BIRTHDAY coupon silently excludes ENSAIO service'
+  'BIRTHDAY coupon excludes ENSAIO service'
 );
 
 select ok(
@@ -62,6 +63,25 @@ select ok(
       and st.key <> 'LOCACAO'
   ),
   'BIRTHDAY coupon cannot retain a non-LOCACAO service link'
+);
+
+-- Prove the valid fixture satisfies the deferred invariant before exercising the fail-closed case.
+set constraints birthday_coupon_requires_locacao_service immediate;
+set constraints birthday_coupon_requires_locacao_service deferred;
+
+insert into public.coupons(
+  id,code,discount_type,discount_value,is_active,source,customer_id,max_uses,max_uses_per_customer,used_count
+) values (
+  '98800000-0000-0000-0000-000000000006','NIVER50-NO-RENTAL','PERCENT',50,false,'BIRTHDAY',
+  '98800000-0000-0000-0000-000000000004',1,1,0
+);
+insert into public.coupon_services(coupon_id,service_id)
+values ('98800000-0000-0000-0000-000000000006','98800000-0000-0000-0000-000000000003');
+select throws_ok(
+  $$set constraints birthday_coupon_requires_locacao_service immediate$$,
+  'P0001',
+  'BIRTHDAY_COUPON_REQUIRES_LOCACAO_SERVICE',
+  'BIRTHDAY coupon fails closed when no LOCACAO service survives eligibility filtering'
 );
 
 select * from finish();
