@@ -1,11 +1,24 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(8);
+select plan(11);
 
 select has_table('public','operation_setting_overrides','per-operation overrides table exists');
 select col_is_pk('public','operation_setting_overrides','operation_scope','operation scope is the stable override key');
 select has_function('public','service_admin_get_operation_settings_v2',array['text'],'resolved settings read model exists');
+
+select ok(
+  not has_function_privilege('anon','public.service_admin_get_operation_settings_v2(text)','EXECUTE'),
+  'anon cannot execute privileged scoped settings reader'
+);
+select ok(
+  not has_function_privilege('authenticated','public.service_admin_get_operation_settings_v2(text)','EXECUTE'),
+  'authenticated cannot execute privileged scoped settings reader'
+);
+select ok(
+  has_function_privilege('service_role','public.service_admin_get_operation_settings_v2(text)','EXECUTE'),
+  'service_role can execute privileged scoped settings reader'
+);
 
 select is(
   public.service_admin_get_operation_settings_v2('SABRINA')->>'timezone',
