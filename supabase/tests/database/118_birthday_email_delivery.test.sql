@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(19);
+select plan(20);
 
 select has_function('public','claim_birthday_notification_deliveries',array['integer'],'birthday delivery claim function exists');
 select has_function('public','prepare_birthday_notification_delivery_window',array['uuid'],'birthday delivery window function exists');
@@ -12,8 +12,20 @@ select ok(pg_get_constraintdef((select oid from pg_constraint where conrelid='pu
 
 insert into public.categories(id,name,slug,operation_scope)
 values ('98700000-0000-0000-0000-000000000001','Birthday Delivery BlackSheep','birthday-delivery-blacksheep','BLACKSHEEP');
-insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,operation_scope,is_active)
-values ('98700000-0000-0000-0000-000000000002','98700000-0000-0000-0000-000000000001','Birthday Delivery Rental','birthday-delivery-rental',60,180,1,10,'BLACKSHEEP',false);
+insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,operation_scope,is_active,service_type_id)
+values (
+  '98700000-0000-0000-0000-000000000002',
+  '98700000-0000-0000-0000-000000000001',
+  'Birthday Delivery Rental',
+  'birthday-delivery-rental',
+  60,
+  180,
+  1,
+  10,
+  'BLACKSHEEP',
+  false,
+  (select id from public.service_type where key='LOCACAO')
+);
 insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
 values ('98700000-0000-0000-0000-000000000002',48,0,0,0,100);
 update public.services set is_active=true where id='98700000-0000-0000-0000-000000000002';
@@ -42,6 +54,30 @@ select ok(exists(
   where c.customer_id='98700000-0000-0000-0000-000000000005' and c.source='BIRTHDAY'
     and c.code like 'NIVER50-2030-P-%' and not c.is_active and c.valid_from is null and c.valid_until is null
 ),'email-bound birthday coupon stays inactive with no validity window before provider delivery');
+select ok(
+  exists (
+    select 1
+    from public.coupons c
+    join public.coupon_services cs on cs.coupon_id=c.id
+    join public.services s on s.id=cs.service_id
+    join public.service_type st on st.id=s.service_type_id
+    where c.customer_id='98700000-0000-0000-0000-000000000005'
+      and c.source='BIRTHDAY'
+      and cs.service_id='98700000-0000-0000-0000-000000000002'
+      and st.key='LOCACAO'
+  )
+  and not exists (
+    select 1
+    from public.coupons c
+    join public.coupon_services cs on cs.coupon_id=c.id
+    join public.services s on s.id=cs.service_id
+    left join public.service_type st on st.id=s.service_type_id
+    where c.customer_id='98700000-0000-0000-0000-000000000005'
+      and c.source='BIRTHDAY'
+      and st.key is distinct from 'LOCACAO'
+  ),
+  'end-to-end birthday coupon is linked only to LOCACAO services'
+);
 select is((select count(*)::integer from public.notification_delivery_logs where event_key='BIRTHDAY' and customer_id='98700000-0000-0000-0000-000000000005' and status='PENDING'),1,'birthday delivery starts pending');
 
 create temporary table claimed_delivery as
