@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout full working tree
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Require sandbox-only execution
         shell: bash
@@ -51,13 +53,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
 
+      - name: Select structural baseline
+        id: structural-baseline
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo 'restore_head_migrations=false' >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" = 'pull_request' ]] \
+            && [[ -n "${PR_BASE_SHA:-}" ]] \
+            && ! git diff --quiet "$PR_BASE_SHA" "$PR_HEAD_SHA" -- supabase/migrations; then
+            echo "Schema-changing PR detected; structural drift will be checked against PR base $PR_BASE_SHA."
+            git checkout "$PR_BASE_SHA" -- supabase/migrations
+            echo 'restore_head_migrations=true' >> "$GITHUB_OUTPUT"
+            echo "AUDIT_SCHEMA_BASELINE=pr-base:$PR_BASE_SHA" >> "$GITHUB_ENV"
+          else
+            echo "AUDIT_SCHEMA_BASELINE=head:${PR_HEAD_SHA:-$GITHUB_SHA}" >> "$GITHUB_ENV"
+          fi
+
       - name: Start migrated local database
         shell: bash
         run: supabase start
 
-      - name: Rebuild local schema from repository migrations
+      - name: Rebuild structural baseline from repository migrations
         shell: bash
         run: supabase db reset
+
+      - name: Restore PR-head migrations for tree audit
+        if: steps.structural-baseline.outputs.restore_head_migrations == 'true'
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git checkout "$PR_HEAD_SHA" -- supabase/migrations
 
       - name: Run consolidated audit
         shell: bash
