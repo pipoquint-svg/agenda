@@ -205,7 +205,7 @@ begin
 
           v_recipient_hash := case
             when nullif(lower(btrim(v_customer.email)), '') is null then null
-            else encode(digest(lower(btrim(v_customer.email)), 'sha256'), 'hex')
+            else encode(extensions.digest(lower(btrim(v_customer.email)), 'sha256'), 'hex')
           end;
 
           if v_recipient_hash is null then
