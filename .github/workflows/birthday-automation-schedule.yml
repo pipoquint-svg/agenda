@@ -23,6 +23,7 @@ jobs:
         env:
           OIDC_AUDIENCE: blacksheep-agenda-birthday-scheduler
           BIRTHDAY_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/birthday-automation-trigger
+          BIRTHDAY_EMAIL_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/birthday-email-worker
         run: |
           set -euo pipefail
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
@@ -39,20 +40,28 @@ jobs:
           token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<<"$token_response")"
           test -n "$token"
 
-          body="$(mktemp)"
-          status="$(curl --silent --show-error \
-            --output "$body" \
-            --write-out '%{http_code}' \
-            --request POST \
-            --header "Authorization: Bearer ${token}" \
-            --header 'Content-Type: application/json' \
-            --data '{}' \
-            "$BIRTHDAY_URL")"
+          invoke() {
+            local name="$1"
+            local url="$2"
+            local body
+            body="$(mktemp)"
+            local status
+            status="$(curl --silent --show-error \
+              --output "$body" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${token}" \
+              --header 'Content-Type: application/json' \
+              --data '{}' \
+              "$url")"
+            cat "$body"
+            echo
+            if [[ "$status" != '200' ]]; then
+              echo "$name failed with HTTP $status" >&2
+              exit 1
+            fi
+            grep -q '"ok":true' "$body"
+          }
 
-          cat "$body"
-          echo
-          if [[ "$status" != '200' ]]; then
-            echo "birthday-automation-trigger failed with HTTP $status" >&2
-            exit 1
-          fi
-          grep -q '"ok":true' "$body"
+          invoke birthday-automation-trigger "$BIRTHDAY_URL"
+          invoke birthday-email-worker "$BIRTHDAY_EMAIL_URL"
