@@ -1,15 +1,19 @@
 begin;
 select plan(4);
 
-select like(
-  pg_get_functiondef('public.service_admin_update_operation_scope(uuid,text,uuid)'::regprocedure),
-  '%SERVICE_OPERATION_SCOPE_REQUIRED%',
+select ok(
+  position(
+    'SERVICE_OPERATION_SCOPE_REQUIRED' in
+    pg_get_functiondef('public.service_admin_update_operation_scope(uuid,text,uuid)'::regprocedure)
+  ) > 0,
   'admin mutation rejects clearing operation scope'
 );
 
-select like(
-  pg_get_functiondef('public.service_admin_update_operation_scope(uuid,text,uuid)'::regprocedure),
-  '%TOKEN_EVIDENCE_OPERATION_SCOPE_IMMUTABLE%',
+select ok(
+  position(
+    'TOKEN_EVIDENCE_OPERATION_SCOPE_IMMUTABLE' in
+    pg_get_functiondef('public.service_admin_update_operation_scope(uuid,text,uuid)'::regprocedure)
+  ) > 0,
   'admin mutation cannot classify Token Evidence fixture arbitrarily'
 );
 
