@@ -28,6 +28,8 @@ DELETE FROM public.resource_availability_rules WHERE resource_id='$STUDIO'::uuid
 DELETE FROM public.availability_rules WHERE service_employee_id='$SERVICE_EMPLOYEE'::uuid;
 DELETE FROM public.service_resources WHERE service_id='$SERVICE'::uuid;
 DELETE FROM public.service_employees WHERE id='$SERVICE_EMPLOYEE'::uuid;
+UPDATE public.services SET is_active=false WHERE id='$SERVICE'::uuid;
+DELETE FROM public.service_change_policies WHERE service_id='$SERVICE'::uuid;
 DELETE FROM public.services WHERE id='$SERVICE'::uuid;
 DELETE FROM public.employees WHERE id='$EMPLOYEE'::uuid;
 DELETE FROM public.resources WHERE id IN ('$STUDIO'::uuid,'$PERSON'::uuid);
@@ -54,11 +56,16 @@ INSERT INTO public.employees(id,name,resource_id) VALUES ('$EMPLOYEE'::uuid,'Pre
 INSERT INTO public.services(
   id,category_id,name,slug,base_duration_minutes,base_price,buffer_before_minutes,buffer_after_minutes,
   minimum_people,maximum_people,maximum_booking_horizon_days,duration_mode,booking_block_minutes,
-  minimum_booking_blocks,maximum_booking_blocks,price_per_block
+  minimum_booking_blocks,maximum_booking_blocks,price_per_block,is_active
 ) VALUES (
   '$SERVICE'::uuid,'$CAT'::uuid,'Prebook Race Rental','prebook-race-rental',30,100,0,30,
-  1,10,5000,'BLOCKS',30,2,12,100
+  1,10,5000,'BLOCKS',30,2,12,100,false
 );
+INSERT INTO public.service_change_policies(
+  service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,
+  reschedule_repeat_percent,cancellation_late_percent
+) VALUES ('$SERVICE'::uuid,48,0,0,0,0);
+UPDATE public.services SET is_active=true WHERE id='$SERVICE'::uuid;
 INSERT INTO public.service_employees(id,service_id,employee_id)
 VALUES ('$SERVICE_EMPLOYEE'::uuid,'$SERVICE'::uuid,'$EMPLOYEE'::uuid);
 INSERT INTO public.service_resources(service_id,resource_id,is_required)
