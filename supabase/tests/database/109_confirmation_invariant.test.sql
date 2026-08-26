@@ -9,9 +9,9 @@ select ok(
     where conrelid='public.appointments'::regclass
       and conname='appointments_confirmed_requires_policy_snapshot_ck'
       and contype='c'
-      and not convalidated
+      and convalidated
   ),
-  'CONFIRMED timestamp/snapshot check exists as NOT VALID'
+  'CONFIRMED timestamp/snapshot check is validated after deterministic fixture reconciliation'
 );
 
 select ok(
@@ -22,9 +22,9 @@ select ok(
       and contype='f'
       and condeferrable
       and condeferred
-      and not convalidated
+      and convalidated
   ),
-  'snapshot marker FK is deferred and NOT VALID'
+  'snapshot marker FK remains deferred and is validated after deterministic fixture reconciliation'
 );
 
 insert into public.employees(id,name)
