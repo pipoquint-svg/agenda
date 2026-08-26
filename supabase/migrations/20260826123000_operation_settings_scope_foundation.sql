@@ -47,7 +47,7 @@ returns jsonb
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
   with base as (
     select * from public.operation_settings where id = 1
