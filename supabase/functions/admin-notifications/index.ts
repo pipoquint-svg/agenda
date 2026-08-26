@@ -16,7 +16,7 @@ const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at',
   'customer.name', 'customer.email', 'employee.name', 'service.name', 'service.description',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
-  'payment.total', 'payment.status', 'extras.summary', 'coupon.code', 'coupon.discount',
+  'payment.total', 'payment.status', 'extras.summary', 'coupon.code', 'coupon.discount', 'coupon.expires_at',
 ]
 const financialVariables = new Set(['payment.total', 'payment.status', 'coupon.discount'])
 
