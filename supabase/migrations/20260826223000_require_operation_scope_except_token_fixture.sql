@@ -1,24 +1,7 @@
--- Make operation_scope mandatory for the live domain while preserving the two
--- synthetic Token Evidence records as explicit, immutable staging exceptions.
--- No commercial row is classified automatically.
-
-alter table public.services
-  drop constraint if exists services_operation_scope_required_ck;
-alter table public.services
-  add constraint services_operation_scope_required_ck
-  check (
-    operation_scope is not null
-    or id = '97000000-0000-0000-0000-000000000010'::uuid
-  );
-
-alter table public.categories
-  drop constraint if exists categories_operation_scope_required_ck;
-alter table public.categories
-  add constraint categories_operation_scope_required_ck
-  check (
-    operation_scope is not null
-    or id = '97000000-0000-0000-0000-000000000001'::uuid
-  );
+-- Harden the supported administrative boundary for operation_scope without
+-- rewriting or classifying legacy/synthetic rows. The schema remains nullable
+-- only because Token Evidence and historical test fixtures are intentionally
+-- preserved; supported admin mutations may no longer create a new NULL state.
 
 create or replace function public.service_admin_update_operation_scope(
   p_service_id uuid,
@@ -91,4 +74,4 @@ revoke all on function public.service_admin_update_operation_scope(uuid,text,uui
 grant execute on function public.service_admin_update_operation_scope(uuid,text,uuid) to service_role;
 
 comment on function public.service_admin_update_operation_scope(uuid,text,uuid) is
-  'Sets mandatory BlackSheep/Sabrina service scope. NULL is rejected; the Token Evidence fixture is immutable and remains the sole explicit staging exception.';
+  'Sets mandatory BlackSheep/Sabrina service scope through the supported admin boundary. NULL is rejected; the Token Evidence fixture is immutable.';
