@@ -67,6 +67,7 @@ jobs:
             && [[ -n "${PR_BASE_SHA:-}" ]] \
             && ! git diff --quiet "$PR_BASE_SHA" "$PR_HEAD_SHA" -- supabase/migrations; then
             echo "Schema-changing PR detected; structural drift will be checked against PR base $PR_BASE_SHA."
+            rm -rf supabase/migrations
             git checkout "$PR_BASE_SHA" -- supabase/migrations
             echo 'restore_head_migrations=true' >> "$GITHUB_OUTPUT"
             echo "AUDIT_SCHEMA_BASELINE=pr-base:$PR_BASE_SHA" >> "$GITHUB_ENV"
@@ -89,6 +90,7 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          rm -rf supabase/migrations
           git checkout "$PR_HEAD_SHA" -- supabase/migrations
 
       - name: Run consolidated audit
