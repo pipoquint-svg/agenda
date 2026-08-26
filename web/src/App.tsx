@@ -10,6 +10,7 @@ import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { EmployeeAdmin } from './EmployeeAdmin'
 import { ManageReservation } from './ManageReservation'
+import { OperationSettingsAdmin } from './OperationSettingsAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
@@ -44,7 +45,8 @@ export function App() {
   if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
   if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/configuracoes-avancadas')) return <ServiceSettingsAdmin />
-  if (path.startsWith('/admin/configuracoes') || path.startsWith('/admin/catalogo')) return <ServiceCatalogAdmin />
+  if (path.startsWith('/admin/configuracoes')) return <OperationSettingsAdmin />
+  if (path.startsWith('/admin/catalogo')) return <ServiceCatalogAdmin />
   if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
   if (path.startsWith('/admin/demand')) return <DemandCaptureAdmin />
   if (path === '/agendar/sabrina') return <PublicBookingRoute slug="sabrina" />
