@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
       const [templates, services, categories] = await Promise.all([
         client.rpc('service_admin_list_notification_templates'),
         client.rpc('service_admin_list_service_settings'),
-        client.from('categories').select('id,name,operation_code,is_active').order('operation_code').order('name'),
+        client.from('categories').select('id,name,operation_scope,is_active').order('operation_scope').order('name'),
       ])
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
