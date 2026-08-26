@@ -121,24 +121,7 @@ jobs:
         run: supabase db reset
 
       - name: Run pgTAP database tests
-        id: pgtap
-        shell: bash
-        run: |
-          set +e
-          set -o pipefail
-          supabase test db 2>&1 | tee /tmp/pgtap.log
-          status=${PIPESTATUS[0]}
-          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
-          exit "$status"
-
-      - name: Preserve pgTAP evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pgtap-evidence-${{ github.run_id }}
-          path: /tmp/pgtap.log
-          if-no-files-found: error
-          retention-days: 7
+        run: supabase test db
 
       - name: Run Gate A concurrency test
         run: bash scripts/test-concurrency.sh
