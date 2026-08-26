@@ -114,7 +114,7 @@ begin
             raise exception using errcode = 'P0001', message = 'BIRTHDAY_COUPON_OPERATION_HAS_NO_ACTIVE_SERVICES';
           end if;
 
-          v_coupon_code := upper(left(v_setting.coupon_code_prefix, 16))
+          v_coupon_code := upper(left(v_setting.coupon_prefix, 16))
             || '-' || extract(year from v_birthday_date)::integer::text
             || '-' || case when v_trigger_kind = 'BEFORE' then 'P' else 'D' end
             || '-' || upper(left(replace(v_customer.id::text, '-', ''), 8));
