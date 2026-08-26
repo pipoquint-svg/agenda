@@ -14,6 +14,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Historical secret scan
+        run: |
+          set -o pipefail
+          bash scripts/preprod-secret-history-scan.sh 2>&1 | tee secret-scan-report.txt
+
+      - name: Upload redacted secret scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprod-secret-scan-report
+          path: secret-scan-report.txt
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2
