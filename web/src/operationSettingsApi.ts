@@ -8,6 +8,7 @@ export type OperationSettingsKey =
   | 'default_slot_interval_minutes'
 
 export type OperationSettingsValues = Record<OperationSettingsKey, string | number | null>
+export type OperationSettingsPatch = Partial<OperationSettingsValues>
 export type OperationSettingsResolved = OperationSettingsValues & {
   operation_scope: OperationScope
   source?: { base?: string; override_present?: boolean }
@@ -34,7 +35,7 @@ export function loadOperationSettings(scope: OperationScope, accessToken: string
   return request<OperationSettingsBundle>(accessToken, `${functionsBaseUrl}/admin-operation-settings?operation_scope=${encodeURIComponent(scope)}&include_override=1`)
 }
 
-export function updateOperationSettings(scope: OperationScope, patch: OperationSettingsValues, accessToken: string) {
+export function updateOperationSettings(scope: OperationScope, patch: OperationSettingsPatch, accessToken: string) {
   return request<OperationSettingsBundle>(accessToken, `${functionsBaseUrl}/admin-operation-settings`, {
     method: 'PUT',
     body: JSON.stringify({ operation_scope: scope, patch }),
