@@ -5,6 +5,7 @@ import {
   type OperationScope,
   type OperationSettingsBundle,
   type OperationSettingsKey,
+  type OperationSettingsPatch,
   type OperationSettingsValues,
 } from './operationSettingsApi'
 import { supabase } from './supabase'
@@ -17,6 +18,7 @@ const numberKeys: OperationSettingsKey[] = [
   'checkout_hold_minutes', 'payment_hold_minutes', 'agency_hold_minutes', 'default_confirmation_percentage',
   'pix_discount_percent', 'default_slot_interval_minutes',
 ]
+const settingKeys = [...textKeys, ...numberKeys]
 const labels: Record<OperationSettingsKey, string> = {
   public_name: 'Nome exibido ao cliente',
   public_email: 'E-mail público',
@@ -54,8 +56,17 @@ function emptyValues(): OperationSettingsValues {
 function rawValues(bundle: OperationSettingsBundle): OperationSettingsValues {
   const values = emptyValues()
   const source = bundle.override ?? {}
-  for (const key of [...textKeys, ...numberKeys]) values[key] = source[key] ?? null
+  for (const key of settingKeys) values[key] = source[key] ?? null
   return values
+}
+
+function changedValues(bundle: OperationSettingsBundle, values: OperationSettingsValues): OperationSettingsPatch {
+  const baseline = rawValues(bundle)
+  const patch: OperationSettingsPatch = {}
+  for (const key of settingKeys) {
+    if (!Object.is(values[key], baseline[key])) patch[key] = values[key]
+  }
+  return patch
 }
 
 function errorMessage(error: unknown): string {
@@ -112,6 +123,7 @@ export function OperationSettingsAdmin() {
     () => Object.values(values).filter((value) => value === null).length,
     [values],
   )
+  const hasChanges = useMemo(() => bundle ? Object.keys(changedValues(bundle, values)).length > 0 : false, [bundle, values])
 
   function setText(key: OperationSettingsKey, value: string) {
     setValues((current) => ({ ...current, [key]: value.trim() === '' ? null : value }))
@@ -123,12 +135,17 @@ export function OperationSettingsAdmin() {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!accessToken) return
+    if (!accessToken || !bundle) return
+    const patch = changedValues(bundle, values)
+    if (Object.keys(patch).length === 0) {
+      setSuccess('Nenhuma alteração para salvar.')
+      return
+    }
     setSaving(true)
     setError('')
     setSuccess('')
     try {
-      const next = await updateOperationSettings(scope, values, accessToken)
+      const next = await updateOperationSettings(scope, patch, accessToken)
       setBundle(next)
       setValues(rawValues(next))
       setSuccess('Configurações salvas e auditadas.')
@@ -221,8 +238,8 @@ export function OperationSettingsAdmin() {
           </section>
 
           <div className="settings-actions">
-            <button className="secondary" type="button" disabled={saving} onClick={() => accessToken && load(accessToken, scope)}>Descartar alterações</button>
-            <button className="primary" type="submit" disabled={saving}>{saving ? 'Salvando…' : 'Salvar configurações'}</button>
+            <button className="secondary" type="button" disabled={saving || !hasChanges} onClick={() => accessToken && load(accessToken, scope)}>Descartar alterações</button>
+            <button className="primary" type="submit" disabled={saving || !hasChanges}>{saving ? 'Salvando…' : 'Salvar configurações'}</button>
           </div>
         </form>
       )}
