@@ -2,6 +2,7 @@ import {
   buildManagedGoogleEvent,
   deterministicAgendaGoogleEventId,
   managedEventNeedsRepair,
+  renderManagedNotificationTemplate,
   sameInstant,
   type ManagedAppointmentDesiredState,
 } from './managed-event.ts'
@@ -40,6 +41,25 @@ Deno.test('managed event payload contains operational metadata but no customer P
   assert(event.extendedProperties.private.bs_appointment_version === '7', 'version marker is required')
   const serialized = JSON.stringify(event)
   assert(!serialized.includes('email') && !serialized.includes('phone') && !serialized.includes('cpf'), 'payload must not contain customer PII fields')
+})
+
+Deno.test('managed notification template renders only variables authorized by template schema', () => {
+  const rendered = renderManagedNotificationTemplate(
+    '{{service.name}} • {{customer.name}}',
+    ['service.name', 'customer.name'],
+    { 'service.name': 'Ensaio Gestante', 'customer.name': 'Cliente Teste' },
+  )
+  assert(rendered === 'Ensaio Gestante • Cliente Teste', 'authorized variables must render deterministically')
+})
+
+Deno.test('managed notification template fails closed on undeclared variable', () => {
+  let rejected = false
+  try {
+    renderManagedNotificationTemplate('{{payment.total}}', ['service.name'], { 'payment.total': 'R$ 100,00' })
+  } catch (error) {
+    rejected = error instanceof Error && error.message === 'NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:payment.total'
+  }
+  assert(rejected, 'undeclared variables must be rejected instead of leaking values')
 })
 
 Deno.test('sameInstant compares RFC3339 instants independent of offset', () => {
