@@ -232,8 +232,12 @@ export function OperationSettingsAdmin() {
             <div>
               <a href="/admin/catalogo">Categorias, serviços, preços, extras e políticas</a>
               <a href="/admin/funcionarios">Horários, folgas e calendários de funcionários</a>
+              <a href="/admin/clientes">Clientes e condições comerciais</a>
               <a href="/admin/cupons">Cupons e regras promocionais</a>
-              <span>Notificações e mensagens: módulo próprio em implantação.</span>
+              <a href="/admin/notificacoes">Notificações e mensagens</a>
+              <a href="/admin/aniversarios">Automação de aniversários</a>
+              <a href="/admin/pagamentos">Cobranças e saldos</a>
+              <a href="/admin/saude">Saúde operacional</a>
             </div>
           </section>
 
