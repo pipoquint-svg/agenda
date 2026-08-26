@@ -15,9 +15,6 @@ report="$out_dir/report.md"
   echo
 } > "$report"
 
-# 1) Working-tree debt/test markers. This intentionally scans the checked-out
-# repository rather than GitHub code search so coverage is complete. Generated
-# Supabase state is excluded because it is not repository source.
 marker_file="$out_dir/tree-markers.txt"
 : > "$marker_file"
 while IFS= read -r -d '' file; do
@@ -47,9 +44,6 @@ done < <(find . -type f \
   echo
 } >> "$report"
 
-# 2) Full Edge Function static inventory. Type-checking is a separate CI gate;
-# here we prove every entrypoint was visited and expose error/status patterns for
-# review instead of silently assuming one framework shape.
 edge_file="$out_dir/edge-functions.tsv"
 printf 'function\tcatch_or_rejection\texplicit_status\tthrow_or_error\n' > "$edge_file"
 edge_count=0
@@ -78,16 +72,12 @@ done < <(find supabase/functions -mindepth 2 -maxdepth 2 -type f -name index.ts 
   echo
 } >> "$report"
 
-# 3) Structural schema comparison: declared/migrated local database vs sandbox.
-# Compare semantic catalog structure, not migration history or source formatting.
-# Constraint validation state is operational migration state, not structural
-# definition, and is covered by dedicated pgTAP where validation is required.
-# Function bodies are intentionally excluded here: pg_get_functiondef preserves
-# non-semantic source formatting/comments and produced false drift for equivalent
-# definitions. Function structure includes identity args, result, language,
-# volatility, security-definer, parallel mode, strictness, leakproof and config.
+# Structural comparison intentionally normalizes only the trailing NOT VALID
+# decoration emitted by pg_get_constraintdef. Validation state is operational
+# migration state and is asserted by dedicated pgTAP where required. All other
+# constraint semantics remain part of the diff.
 query_columns="copy (select n.nspname, c.relname, a.attnum, a.attname, format_type(a.atttypid,a.atttypmod), a.attnotnull, coalesce(pg_get_expr(d.adbin,d.adrelid),''), a.attidentity, a.attgenerated from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where n.nspname='public' and c.relkind in ('r','p','v','m') and a.attnum>0 and not a.attisdropped order by 1,2,3) to stdout with csv"
-query_constraints="copy (select c.relname, con.conname, con.contype, con.condeferrable, con.condeferred, pg_get_constraintdef(con.oid,true) from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' order by 1,2) to stdout with csv"
+query_constraints="copy (select c.relname, con.conname, con.contype, con.condeferrable, con.condeferred, regexp_replace(pg_get_constraintdef(con.oid,true), ' NOT VALID$', '') from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' order by 1,2) to stdout with csv"
 query_indexes="copy (select tablename,indexname,indexdef from pg_indexes where schemaname='public' order by 1,2) to stdout with csv"
 query_functions="copy (select p.proname, pg_get_function_identity_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, p.provolatile, p.prosecdef, p.proparallel, p.proisstrict, p.proleakproof, coalesce(array_to_string(p.proconfig,E'\\n'),'') from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_language l on l.oid=p.prolang where n.nspname='public' order by 1,2) to stdout with csv"
 
@@ -105,7 +95,7 @@ done
 {
   echo '## 3. Diff estrutural schema declarado × sandbox'
   echo
-  echo 'Cobertura: tabelas/views + colunas, definições de constraints, índices e estrutura de funções do schema `public`. Estado de validação de constraints é verificado por testes dedicados, não tratado como drift estrutural.'
+  echo 'Cobertura: tabelas/views + colunas, definições de constraints, índices e estrutura de funções do schema `public`. Somente o sufixo operacional `NOT VALID` é normalizado; o estado de validação é verificado por testes dedicados.'
   echo
   for object in columns constraints indexes functions; do
     if [[ -s "$out_dir/${object}.diff" ]]; then
