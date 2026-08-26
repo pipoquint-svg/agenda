@@ -20,13 +20,13 @@ select ok(
   'service role can call scope mutation after edge authorization'
 );
 
-insert into public.services(id,name,slug,base_duration_minutes,base_price)
-values ('11111111-1111-4111-8111-111111111111','Scope Test Service','scope-test-service',60,0);
+insert into public.services(id,name,slug,base_duration_minutes,base_price,operation_scope)
+values ('11111111-1111-4111-8111-111111111111','Scope Test Service','scope-test-service',60,0,'SABRINA');
 
 select is(
   (select operation_scope from public.services where id='11111111-1111-4111-8111-111111111111'),
-  null,
-  'new service remains unclassified unless explicitly configured'
+  'SABRINA',
+  'new normal service is explicitly classified'
 );
 
 select is(
@@ -63,12 +63,10 @@ select is(
   'idempotent replay does not create duplicate audit event'
 );
 
-select is(
-  public.service_admin_update_operation_scope(
-    '11111111-1111-4111-8111-111111111111',null,'22222222-2222-4222-8222-222222222222'
-  )->'operation_scope',
-  'null'::jsonb,
-  'scope can be explicitly cleared back to unclassified'
+select throws_ok(
+  $$ select public.service_admin_update_operation_scope('11111111-1111-4111-8111-111111111111',null,'22222222-2222-4222-8222-222222222222') $$,
+  'P0001','SERVICE_OPERATION_SCOPE_REQUIRED',
+  'scope cannot be cleared back to unclassified'
 );
 
 select throws_ok(
