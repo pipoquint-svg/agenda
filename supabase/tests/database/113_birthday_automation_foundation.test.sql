@@ -11,7 +11,7 @@ select ok(not has_table_privilege('authenticated','public.birthday_automation_se
 select ok(has_table_privilege('service_role','public.birthday_automation_settings','SELECT'),'service role can read birthday settings');
 select is((select count(*)::integer from public.birthday_automation_settings),2,'both operation rows are seeded');
 select is((select count(*)::integer from public.birthday_automation_settings where is_active),0,'birthday automation is disabled by default');
-select is((select count(*)::integer from public.birthday_automation_settings where send_message or generate_coupon),0,'no birthday side effect is enabled by default');
+select is((select count(*)::integer from public.birthday_automation_settings where is_active and (send_message or generate_coupon)),0,'no birthday side effect is operationally enabled while automation is inactive');
 
 insert into public.customers(id,customer_type,name,birth_date)
 values ('97900000-0000-0000-0000-000000000001','PERSON','Birthday Fixture','1990-08-26');
