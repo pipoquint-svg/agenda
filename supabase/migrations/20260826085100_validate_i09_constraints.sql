@@ -1,6 +1,5 @@
--- I-09 finalization, phase 2: reconcile the two known pre-marker staging
--- confirmations, then validate after the fixture-repair migration has committed
--- and all deferred trigger events on appointments are drained.
+-- I-09 finalization, phase 2a: reconcile the two known pre-marker staging
+-- confirmations in a transaction that commits before constraint validation.
 --
 -- These rows were confirmed before the marker column/trigger existed. Both
 -- already have confirmed_at and a real appointment_change_policy_snapshots row;
@@ -55,9 +54,3 @@ begin
   end if;
 end
 $$;
-
-alter table public.appointments
-  validate constraint appointments_confirmed_requires_policy_snapshot_ck;
-
-alter table public.appointments
-  validate constraint appointments_change_policy_snapshot_fk;
