@@ -32,6 +32,18 @@ function uuid(value: unknown, code: string): string {
   return text
 }
 
+function email(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) || text.length > 254) throw new Error('ADMIN_EMAIL_INVALID')
+  return text
+}
+
+function password(value: unknown): string {
+  const text = typeof value === 'string' ? value : ''
+  if (text.length < 12 || text.length > 128) throw new Error('ADMIN_TEMPORARY_PASSWORD_INVALID')
+  return text
+}
+
 function targetIdFromPath(pathname: string): string | null {
   const match = pathname.match(/\/admin-team-members\/([^/]+)\/permissions\/?$/)
   return match ? match[1] : null
@@ -55,12 +67,7 @@ async function listMembers(req: Request): Promise<Response> {
   for (const row of overrides ?? []) {
     const key = String(row.admin_user_id)
     const current = overridesByAdmin.get(key) ?? []
-    current.push({
-      permission: row.permission,
-      is_granted: row.is_granted,
-      updated_by_admin_id: row.updated_by_admin_id,
-      updated_at: row.updated_at,
-    })
+    current.push({ permission: row.permission, is_granted: row.is_granted, updated_by_admin_id: row.updated_by_admin_id, updated_at: row.updated_at })
     overridesByAdmin.set(key, current)
   }
 
@@ -90,37 +97,29 @@ async function listMembers(req: Request): Promise<Response> {
         permission_overrides: overridesByAdmin.get(String(admin.id)) ?? [],
       }
     }),
-    security: {
-      session_tokens_exposed: false,
-      password_data_exposed: false,
-    },
+    security: { session_tokens_exposed: false, password_data_exposed: false },
   })
 }
 
-async function createMember(req: Request): Promise<Response> {
+async function createMember(req: Request, body: Record<string, unknown>): Promise<Response> {
   const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
-  const body = await req.json().catch(() => ({})) as Record<string, unknown>
   const displayName = typeof body.display_name === 'string' ? body.display_name.trim() : ''
-  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
-  const password = typeof body.temporary_password === 'string' ? body.temporary_password : ''
+  const memberEmail = email(body.email)
+  const temporaryPassword = password(body.temporary_password)
   const role = typeof body.role === 'string' ? body.role.trim().toUpperCase() : ''
 
   if (displayName.length < 2 || displayName.length > 120) throw new Error('ADMIN_DISPLAY_NAME_INVALID')
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error('ADMIN_EMAIL_INVALID')
-  if (password.length < 12 || password.length > 128) throw new Error('ADMIN_TEMPORARY_PASSWORD_INVALID')
   if (!creatableRoles.has(role)) throw new Error('ADMIN_ROLE_INVALID')
 
   const client = adminClient()
   const { data: authData, error: authError } = await client.auth.admin.createUser({
-    email,
-    password,
+    email: memberEmail,
+    password: temporaryPassword,
     email_confirm: true,
   })
   if (authError || !authData.user) {
     const authMessage = authError?.message?.toLowerCase() ?? ''
-    if (authMessage.includes('already') || authMessage.includes('registered') || authMessage.includes('exists')) {
-      throw new Error('ADMIN_EMAIL_ALREADY_REGISTERED')
-    }
+    if (authMessage.includes('already') || authMessage.includes('registered') || authMessage.includes('exists')) throw new Error('ADMIN_EMAIL_ALREADY_REGISTERED')
     throw new Error('ADMIN_AUTH_USER_CREATE_FAILED')
   }
 
@@ -137,26 +136,83 @@ async function createMember(req: Request): Promise<Response> {
   }
 
   return json({
-    member: {
-      auth_user_id: authUserId,
-      display_name: displayName,
-      email,
-      role,
-      is_active: true,
-      permissions: (profile as Record<string, unknown> | null)?.permissions ?? {},
-    },
+    member: { auth_user_id: authUserId, display_name: displayName, email: memberEmail, role, is_active: true, permissions: (profile as Record<string, unknown> | null)?.permissions ?? {} },
     temporary_password_returned: false,
     invite_email_sent: false,
   }, 201)
+}
+
+async function transferOwner(req: Request, body: Record<string, unknown>): Promise<Response> {
+  const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
+  const targetEmail = email(body.email)
+  const temporaryPassword = password(body.temporary_password)
+  const displayName = typeof body.display_name === 'string' && body.display_name.trim() ? body.display_name.trim() : 'Pipo Quint'
+  const client = adminClient()
+
+  const { data: actorRow, error: actorError } = await client.from('admin_users').select('id,role,is_active').eq('id', actor.adminId).maybeSingle()
+  if (actorError || !actorRow) throw new Error('ADMIN_USER_NOT_FOUND')
+  if (!actorRow.is_active || actorRow.role !== 'OWNER') throw new Error('ADMIN_OWNER_REQUIRED')
+
+  const authUsersResult = await client.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (authUsersResult.error) throw new Error('ADMIN_TEAM_AUTH_QUERY_FAILED')
+  let authUser = (authUsersResult.data?.users ?? []).find((user) => user.email?.toLowerCase() === targetEmail) ?? null
+  let createdAuthUser = false
+
+  if (!authUser) {
+    const { data, error } = await client.auth.admin.createUser({ email: targetEmail, password: temporaryPassword, email_confirm: true })
+    if (error || !data.user) throw new Error('ADMIN_AUTH_USER_CREATE_FAILED')
+    authUser = data.user
+    createdAuthUser = true
+  }
+
+  try {
+    let { data: targetAdmin, error: targetError } = await client
+      .from('admin_users')
+      .select('id,auth_user_id,display_name,role,is_active')
+      .eq('auth_user_id', authUser.id)
+      .maybeSingle()
+
+    if (targetError) throw new Error('ADMIN_TARGET_QUERY_FAILED')
+    if (targetAdmin && !targetAdmin.is_active) throw new Error('ADMIN_TARGET_INACTIVE')
+
+    if (!targetAdmin) {
+      const { error: registerError } = await client.rpc('service_admin_register_admin_user', {
+        p_auth_user_id: authUser.id,
+        p_display_name: displayName,
+        p_role: 'ADMIN',
+        p_actor_admin_id: actor.adminId,
+      })
+      if (registerError) throw new Error(registerError.message || 'ADMIN_USER_REGISTER_FAILED')
+
+      const lookup = await client.from('admin_users').select('id,auth_user_id,display_name,role,is_active').eq('auth_user_id', authUser.id).maybeSingle()
+      if (lookup.error || !lookup.data) throw new Error('ADMIN_TARGET_QUERY_FAILED')
+      targetAdmin = lookup.data
+    }
+
+    const { data: transfer, error: transferError } = await client.rpc('service_admin_transfer_owner', {
+      p_target_admin_id: targetAdmin.id,
+      p_actor_admin_id: actor.adminId,
+    })
+    if (transferError) throw new Error(transferError.message || 'ADMIN_OWNER_TRANSFER_FAILED')
+
+    return json({
+      transferred: true,
+      email: targetEmail,
+      auth_user_created: createdAuthUser,
+      temporary_password_returned: false,
+      transfer,
+    })
+  } catch (error) {
+    if (createdAuthUser && authUser) await client.auth.admin.deleteUser(authUser.id).catch(() => undefined)
+    throw error
+  }
 }
 
 async function updatePermissions(req: Request, targetRaw: string): Promise<Response> {
   const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
   const targetAdminId = uuid(targetRaw, 'ADMIN_USER_ID_INVALID')
   const body = await req.json().catch(() => ({})) as Record<string, unknown>
-  if (!Array.isArray(body.permissions) || body.permissions.length < 1 || body.permissions.length > allowedPermissions.size) {
-    throw new Error('ADMIN_PERMISSIONS_REQUIRED')
-  }
+  if (!Array.isArray(body.permissions) || body.permissions.length < 1 || body.permissions.length > allowedPermissions.size) throw new Error('ADMIN_PERMISSIONS_REQUIRED')
 
   const normalized = body.permissions.map((item) => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -165,9 +221,7 @@ async function updatePermissions(req: Request, targetRaw: string): Promise<Respo
     if (typeof row.is_granted !== 'boolean') throw new Error('ADMIN_PERMISSION_VALUE_INVALID')
     return { permission, is_granted: row.is_granted }
   })
-
-  const unique = new Set(normalized.map((row) => row.permission))
-  if (unique.size !== normalized.length) throw new Error('ADMIN_PERMISSION_DUPLICATE')
+  if (new Set(normalized.map((row) => row.permission)).size !== normalized.length) throw new Error('ADMIN_PERMISSION_DUPLICATE')
 
   const client = adminClient()
   let profile: unknown = null
@@ -181,7 +235,6 @@ async function updatePermissions(req: Request, targetRaw: string): Promise<Respo
     if (error) throw new Error(error.message || 'ADMIN_PERMISSION_UPDATE_FAILED')
     profile = data
   }
-
   return json({ member_id: targetAdminId, profile })
 }
 
@@ -193,15 +246,21 @@ Deno.serve(async (req) => {
     const root = url.pathname.replace(/\/+$/, '').endsWith('/admin-team-members')
     const targetAdminId = targetIdFromPath(url.pathname)
     if (req.method === 'GET' && root) return await listMembers(req)
-    if (req.method === 'POST' && root) return await createMember(req)
+    if (req.method === 'POST' && root) {
+      const body = await req.json().catch(() => ({})) as Record<string, unknown>
+      const action = typeof body.action === 'string' ? body.action.trim().toUpperCase() : 'CREATE'
+      if (action === 'TRANSFER_OWNER') return await transferOwner(req, body)
+      if (action === 'CREATE') return await createMember(req, body)
+      throw new Error('ADMIN_TEAM_ACTION_INVALID')
+    }
     if (req.method === 'PUT' && targetAdminId) return await updatePermissions(req, targetAdminId)
     if (!['GET', 'POST', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
     return json({ error: { code: 'NOT_FOUND' } }, 404)
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_TEAM_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
-      : code === 'ADMIN_PERMISSION_DENIED' ? 403
-      : code === 'ADMIN_USER_NOT_FOUND' ? 404
+      : code === 'ADMIN_PERMISSION_DENIED' || code === 'ADMIN_OWNER_REQUIRED' ? 403
+      : code === 'ADMIN_USER_NOT_FOUND' || code === 'ADMIN_TARGET_NOT_FOUND' ? 404
       : code === 'ADMIN_EMAIL_ALREADY_REGISTERED' ? 409 : 400
     return json({ error: { code } }, status)
   }
