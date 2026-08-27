@@ -10,21 +10,26 @@ permissions:
 
 jobs:
   bundle:
-    if: ${{ !contains(github.event.head_commit.message, 'ops: generate rc migration bundles') }}
+    if: "github.actor != 'github-actions[bot]'"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ops/rc-8128699-prod-bundle
+          fetch-depth: 0
 
-      - name: Verify frozen RC ancestry
+      - name: Verify frozen RC source
         shell: bash
         run: |
-          test "$(git rev-parse HEAD^)" = "812869914521144a75a07c3edf4b486ec93eaad6"
+          set -euo pipefail
+          git merge-base --is-ancestor 812869914521144a75a07c3edf4b486ec93eaad6 HEAD
+          git diff --exit-code 812869914521144a75a07c3edf4b486ec93eaad6 HEAD -- supabase/migrations supabase/functions supabase/config.toml
 
       - name: Build exact ordered bundles
-        shell: python
+        shell: bash
         run: |
+          set -euo pipefail
+          python3 - <<'PY'
           from pathlib import Path
           import hashlib, json
 
@@ -75,10 +80,12 @@ jobs:
               for i, chunk in enumerate(chunks, 1)
           ], indent=2) + '\n')
           print(f'{len(files)} migrations -> {len(chunks)} bundles')
+          PY
 
       - name: Commit generated bundles
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ops/rc-prod-bundles
