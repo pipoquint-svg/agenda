@@ -180,3 +180,18 @@ verify_jwt = false
 
 [functions.admin-appointment-timeline]
 verify_jwt = false
+
+[functions.admin-finance]
+verify_jwt = false
+
+[functions.admin-hour-packages]
+verify_jwt = false
+
+[functions.admin-audit-log]
+verify_jwt = false
+
+[functions.admin-team-members]
+verify_jwt = false
+
+[functions.admin-integrations]
+verify_jwt = false
