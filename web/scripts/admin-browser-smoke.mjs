@@ -25,14 +25,18 @@ page.on('pageerror', (error) => pageErrors.push(error.message))
 
 try {
   for (const route of routes) {
+    pageErrors.length = 0
     const response = await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded', timeout: 15_000 })
     if (!response || response.status() >= 400) {
       throw new Error(`${route}: HTTP ${response?.status() ?? 'NO_RESPONSE'}`)
     }
-    await page.waitForTimeout(150)
-    const bodyText = (await page.locator('body').innerText()).trim()
-    if (bodyText.length < 10) throw new Error(`${route}: empty administrative surface`)
-    if (pageErrors.length) throw new Error(`${route}: pageerror: ${pageErrors.splice(0).join(' | ')}`)
+    try {
+      await page.waitForFunction(() => document.body.innerText.trim().length >= 10, undefined, { timeout: 5_000 })
+    } catch {
+      if (pageErrors.length) throw new Error(`${route}: pageerror: ${pageErrors.join(' | ')}`)
+      throw new Error(`${route}: empty administrative surface after render timeout`)
+    }
+    if (pageErrors.length) throw new Error(`${route}: pageerror: ${pageErrors.join(' | ')}`)
     console.log(`ok ${route}`)
   }
 } finally {
