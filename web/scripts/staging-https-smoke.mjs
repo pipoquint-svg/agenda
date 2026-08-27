@@ -23,6 +23,10 @@ const adminRoutes = [
   '/admin/pagamentos',
   '/admin/saude',
   '/admin/demand',
+  '/gestao',
+  '/gestao/dashboard',
+  '/gestao/profissionais',
+  '/gestao/recursos',
 ]
 
 const shaResponse = await fetch(`${baseUrl}/release-sha.txt`, { redirect: 'follow' })
