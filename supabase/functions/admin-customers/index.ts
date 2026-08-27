@@ -27,6 +27,15 @@ function integer(value: unknown, code: string, nullable = false): number | null 
   return parsed
 }
 
+function birthDate(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('CUSTOMER_BIRTH_DATE_INVALID')
+  const parsed = new Date(`${value}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) throw new Error('CUSTOMER_BIRTH_DATE_INVALID')
+  if (value > new Date().toISOString().slice(0, 10)) throw new Error('CUSTOMER_BIRTH_DATE_FUTURE')
+  return value
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -41,13 +50,18 @@ Deno.serve(async (req) => {
       const customerId = clean(url.searchParams.get('customer_id'))
       if (customerId) {
         const id = uuid(customerId)
-        const [{ data: profile, error }, { data: services, error: servicesError }] = await Promise.all([
+        const [{ data: profile, error }, { data: services, error: servicesError }, { data: identity, error: identityError }] = await Promise.all([
           client.rpc('service_admin_get_customer_commercial_profile', { p_customer_id: id }),
           client.from('services').select('id,name,slug,operation_scope').eq('is_active', true).not('operation_scope', 'is', null).order('sort_order').order('name'),
+          client.from('customers').select('birth_date').eq('id', id).maybeSingle(),
         ])
         if (error) throw new Error(error.message)
         if (servicesError) throw new Error('CUSTOMER_SERVICES_QUERY_FAILED')
-        return json({ profile, services: services ?? [] })
+        if (identityError) throw new Error('CUSTOMER_IDENTITY_QUERY_FAILED')
+        const enriched = profile && typeof profile === 'object' && !Array.isArray(profile)
+          ? { ...profile, customer: { ...((profile as Record<string, unknown>).customer as Record<string, unknown> ?? {}), birth_date: identity?.birth_date ?? null } }
+          : profile
+        return json({ profile: enriched, services: services ?? [] })
       }
 
       const search = clean(url.searchParams.get('search'))
@@ -62,6 +76,27 @@ Deno.serve(async (req) => {
     if (!(await hasAdminPermission(admin.adminId, 'CUSTOMERS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
     const customerId = uuid(body.customer_id)
+
+    if (body.action === 'birth_date') {
+      const nextBirthDate = birthDate(body.birth_date)
+      const { error } = await client.rpc('service_admin_set_customer_birth_date', {
+        p_customer_id: customerId,
+        p_birth_date: nextBirthDate,
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      const [{ data: profile, error: profileError }, { data: identity, error: identityError }] = await Promise.all([
+        client.rpc('service_admin_get_customer_commercial_profile', { p_customer_id: customerId }),
+        client.from('customers').select('birth_date').eq('id', customerId).maybeSingle(),
+      ])
+      if (profileError) throw new Error(profileError.message)
+      if (identityError) throw new Error('CUSTOMER_IDENTITY_QUERY_FAILED')
+      const enriched = profile && typeof profile === 'object' && !Array.isArray(profile)
+        ? { ...profile, customer: { ...((profile as Record<string, unknown>).customer as Record<string, unknown> ?? {}), birth_date: identity?.birth_date ?? null } }
+        : profile
+      return json({ profile: enriched })
+    }
+
     const billingMode = (clean(body.billing_mode) ?? '').toUpperCase()
     if (!['CHECKOUT', 'INVOICE'].includes(billingMode)) throw new Error('BILLING_MODE_INVALID')
     if (typeof body.can_prebook !== 'boolean' || typeof body.requires_manual_confirmation !== 'boolean' || typeof body.is_active !== 'boolean') {
