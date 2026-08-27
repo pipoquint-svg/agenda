@@ -3,7 +3,7 @@ import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
 const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
-  'access-control-allow-methods': 'GET, PUT, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
 }
 
 const allowedPermissions = new Set([
@@ -17,6 +17,7 @@ const allowedPermissions = new Set([
   'LEADS_VIEW','LEADS_MANAGE',
   'AUDIT_VIEW','TEAM_MANAGE',
 ])
+const creatableRoles = new Set(['ADMIN', 'OPERATION', 'FINANCE'])
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -96,6 +97,59 @@ async function listMembers(req: Request): Promise<Response> {
   })
 }
 
+async function createMember(req: Request): Promise<Response> {
+  const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>
+  const displayName = typeof body.display_name === 'string' ? body.display_name.trim() : ''
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+  const password = typeof body.temporary_password === 'string' ? body.temporary_password : ''
+  const role = typeof body.role === 'string' ? body.role.trim().toUpperCase() : ''
+
+  if (displayName.length < 2 || displayName.length > 120) throw new Error('ADMIN_DISPLAY_NAME_INVALID')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error('ADMIN_EMAIL_INVALID')
+  if (password.length < 12 || password.length > 128) throw new Error('ADMIN_TEMPORARY_PASSWORD_INVALID')
+  if (!creatableRoles.has(role)) throw new Error('ADMIN_ROLE_INVALID')
+
+  const client = adminClient()
+  const { data: authData, error: authError } = await client.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  })
+  if (authError || !authData.user) {
+    const authMessage = authError?.message?.toLowerCase() ?? ''
+    if (authMessage.includes('already') || authMessage.includes('registered') || authMessage.includes('exists')) {
+      throw new Error('ADMIN_EMAIL_ALREADY_REGISTERED')
+    }
+    throw new Error('ADMIN_AUTH_USER_CREATE_FAILED')
+  }
+
+  const authUserId = authData.user.id
+  const { data: profile, error: registerError } = await client.rpc('service_admin_register_admin_user', {
+    p_auth_user_id: authUserId,
+    p_display_name: displayName,
+    p_role: role,
+    p_actor_admin_id: actor.adminId,
+  })
+  if (registerError) {
+    await client.auth.admin.deleteUser(authUserId).catch(() => undefined)
+    throw new Error(registerError.message || 'ADMIN_USER_REGISTER_FAILED')
+  }
+
+  return json({
+    member: {
+      auth_user_id: authUserId,
+      display_name: displayName,
+      email,
+      role,
+      is_active: true,
+      permissions: (profile as Record<string, unknown> | null)?.permissions ?? {},
+    },
+    temporary_password_returned: false,
+    invite_email_sent: false,
+  }, 201)
+}
+
 async function updatePermissions(req: Request, targetRaw: string): Promise<Response> {
   const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
   const targetAdminId = uuid(targetRaw, 'ADMIN_USER_ID_INVALID')
@@ -136,16 +190,19 @@ Deno.serve(async (req) => {
 
   try {
     const url = new URL(req.url)
+    const root = url.pathname.replace(/\/+$/, '').endsWith('/admin-team-members')
     const targetAdminId = targetIdFromPath(url.pathname)
-    if (req.method === 'GET' && url.pathname.replace(/\/+$/, '').endsWith('/admin-team-members')) return await listMembers(req)
+    if (req.method === 'GET' && root) return await listMembers(req)
+    if (req.method === 'POST' && root) return await createMember(req)
     if (req.method === 'PUT' && targetAdminId) return await updatePermissions(req, targetAdminId)
-    if (!['GET', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
+    if (!['GET', 'POST', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
     return json({ error: { code: 'NOT_FOUND' } }, 404)
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_TEAM_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
-      : code === 'ADMIN_USER_NOT_FOUND' ? 404 : 400
+      : code === 'ADMIN_USER_NOT_FOUND' ? 404
+      : code === 'ADMIN_EMAIL_ALREADY_REGISTERED' ? 409 : 400
     return json({ error: { code } }, status)
   }
 })
