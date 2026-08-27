@@ -1,0 +1,86 @@
+name: Ops RC Production Bundle
+
+on:
+  push:
+    branches:
+      - ops/rc-8128699-prod-bundle
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    if: ${{ !contains(github.event.head_commit.message, 'ops: generate rc migration bundles') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/rc-8128699-prod-bundle
+
+      - name: Verify frozen RC ancestry
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = "812869914521144a75a07c3edf4b486ec93eaad6"
+
+      - name: Build exact ordered bundles
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, json
+
+          root = Path('supabase/migrations')
+          files = sorted(p for p in root.glob('*.sql') if p.name > '20260821205500_public_payment_access.sql')
+          out = Path('ops/rc-prod-bundles')
+          out.mkdir(parents=True, exist_ok=True)
+          for old in out.glob('*'):
+              old.unlink()
+
+          manifest = []
+          chunks = []
+          current = []
+          current_bytes = 0
+          max_bytes = 110_000
+
+          for p in files:
+              data = p.read_bytes()
+              if current and current_bytes + len(data) > max_bytes:
+                  chunks.append(current)
+                  current = []
+                  current_bytes = 0
+              current.append((p, data))
+              current_bytes += len(data)
+              manifest.append({
+                  'filename': p.name,
+                  'version': p.name.split('_', 1)[0],
+                  'name': p.stem,
+                  'sha256': hashlib.sha256(data).hexdigest(),
+                  'bytes': len(data),
+              })
+          if current:
+              chunks.append(current)
+
+          for i, chunk in enumerate(chunks, 1):
+              target = out / f'bundle_{i:02d}.sql'
+              with target.open('wb') as f:
+                  for p, data in chunk:
+                      f.write(f"\n-- BEGIN RC MIGRATION {p.name}\n".encode())
+                      f.write(data)
+                      if not data.endswith(b'\n'):
+                          f.write(b'\n')
+                      f.write(f"-- END RC MIGRATION {p.name}\n".encode())
+
+          (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          (out / 'bundle-index.json').write_text(json.dumps([
+              {'bundle': f'bundle_{i:02d}.sql', 'files': [p.name for p, _ in chunk]}
+              for i, chunk in enumerate(chunks, 1)
+          ], indent=2) + '\n')
+          print(f'{len(files)} migrations -> {len(chunks)} bundles')
+
+      - name: Commit generated bundles
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/rc-prod-bundles
+          git commit -m 'ops: generate rc migration bundles' --no-verify
+          git push origin HEAD:ops/rc-8128699-prod-bundle
