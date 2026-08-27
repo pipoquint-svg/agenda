@@ -44,6 +44,8 @@ function applicationPath(): string {
 
 export function App() {
   const path = applicationPath()
+  if (path.startsWith('/gestao/profissionais')) return <EmployeeAdmin />
+  if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
   if (path.startsWith('/admin/clientes')) return <CustomerAdmin />
