@@ -15,6 +15,7 @@ import { ManageReservation } from './ManageReservation'
 import { NotificationsAdmin } from './NotificationsAdmin'
 import { OperationSettingsAdmin } from './OperationSettingsAdmin'
 import { OpsHealthAdmin } from './OpsHealthAdmin'
+import { ResourceAdmin } from './ResourceAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
@@ -44,6 +45,7 @@ function applicationPath(): string {
 
 export function App() {
   const path = applicationPath()
+  if (path.startsWith('/gestao/recursos')) return <ResourceAdmin />
   if (path.startsWith('/gestao/profissionais')) return <EmployeeAdmin />
   if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return <AdminDashboard />
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
