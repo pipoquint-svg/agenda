@@ -16,6 +16,10 @@ const routes = [
   '/admin/pagamentos',
   '/admin/saude',
   '/admin/demand',
+  '/gestao',
+  '/gestao/dashboard',
+  '/gestao/profissionais',
+  '/gestao/recursos',
 ]
 
 const browser = await chromium.launch({ headless: true })
