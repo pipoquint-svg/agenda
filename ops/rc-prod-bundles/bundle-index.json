@@ -1,0 +1,189 @@
+[
+  {
+    "bundle": "bundle_01.sql",
+    "files": [
+      "20260821205600_mercado_pago_adapter_support.sql",
+      "20260821205800_conversion_attribution.sql",
+      "20260821206000_service_slot_interval_policy.sql",
+      "20260821206100_block_duration_booking.sql",
+      "20260821206101_public_block_duration_booking.sql",
+      "20260821206102_block_duration_hour_packages.sql",
+      "20260821209000_admin_agenda_read_model.sql",
+      "20260821210000_progressive_duration_pricing.sql",
+      "20260821211000_admin_service_settings.sql",
+      "20260821212000_admin_change_policies.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_02.sql",
+    "files": [
+      "20260821213000_admin_cancellation_workflow.sql",
+      "20260821214000_admin_reschedule_holds.sql",
+      "20260821214500_admin_reschedule_slots.sql",
+      "20260821215000_refund_finance_and_provider_plan.sql",
+      "20260821216000_payment_purpose_and_reschedule_penalty.sql",
+      "20260821217000_reschedule_package_reconciliation.sql",
+      "20260822110000_client_prebook_invoice_terms.sql",
+      "20260822113000_admin_customer_commercial_terms.sql",
+      "20260822114000_admin_rbac.sql",
+      "20260822133000_reschedule_paid_proposal_guard.sql",
+      "20260822134000_cancellation_financial_settlement_guard.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_03.sql",
+    "files": [
+      "20260822141000_admin_dashboard_read_model.sql",
+      "20260822142000_admin_service_operation_scope.sql",
+      "20260822143000_admin_operation_settings.sql",
+      "20260822151000_admin_service_audit_hardening.sql",
+      "20260822152000_admin_rbac_leads.sql",
+      "20260822153000_audit_logs_append_only.sql",
+      "20260822154000_distributed_public_rate_limit.sql",
+      "20260822154100_distributed_public_rate_limit_hardening.sql",
+      "20260822155000_authoritative_pre_reservations.sql",
+      "20260822155100_invoice_due_basis_integrity.sql",
+      "20260822155200_pre_reservation_public_surface.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_04.sql",
+    "files": [
+      "20260822160000_appointment_change_policy_snapshot.sql",
+      "20260822161000_consolidated_change_policy_v2.sql",
+      "20260822161100_v2_legacy_compatibility_gate.sql",
+      "20260822161200_admin_change_policy_v2_contract.sql",
+      "20260822162900_drop_legacy_change_calculator_overloads.sql",
+      "20260822163000_customer_balance_and_change_settlement.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_05.sql",
+    "files": [
+      "20260822163100_change_workflows_retained_settlement.sql",
+      "20260822163200_final_excess_and_balance_reporting.sql",
+      "20260822163300_refund_default_finance_guard.sql",
+      "20260822163400_customer_owned_cash_basis.sql",
+      "20260822163500_dashboard_change_pending_semantics.sql",
+      "20260822163600_reschedule_commitment_and_contract_coverage.sql",
+      "20260822163700_package_reschedule_cash_contract.sql",
+      "20260822163800_mercado_pago_mismatch_quarantine.sql",
+      "20260823043000_security_advisor_hardening.sql",
+      "20260823043100_rls_and_fk_performance_hardening.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_06.sql",
+    "files": [
+      "20260823044000_appointment_token_authorship_foundation.sql",
+      "20260823044100_token_verification_lockout_fix.sql",
+      "20260823044200_version_hosted_rls_guard.sql",
+      "20260823044300_change_workflow_audit_origin.sql",
+      "20260823044400_revoke_action_tokens_on_appointment_change.sql",
+      "20260823080000_kommo_crm_v1_foundation.sql",
+      "20260823091000_expired_hold_availability.sql",
+      "20260823092000_appointment_authorship_admin_evidence.sql",
+      "20260823093000_client_token_cancel_action.sql",
+      "20260823094000_client_token_reschedule_action.sql",
+      "20260823094100_token_verification_action_scopes.sql",
+      "20260823095000_action_token_public_summary.sql",
+      "20260823096000_revoke_authorship_trigger_execute.sql",
+      "20260823165000_kommo_blacksheep_pipeline_mapping.sql",
+      "20260823172000_kommo_card_projection.sql",
+      "20260823204500_integration_production_security_hardening.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_07.sql",
+    "files": [
+      "20260823221500_duration_guidance_ranges.sql",
+      "20260823235500_fix_duration_checkout_origin.sql",
+      "20260823235600_restore_duration_pricing_tiers_catalog.sql",
+      "20260824002000_payment_method_preview.sql",
+      "20260824110000_blacksheep_update_active_hold_selection.sql",
+      "20260824120000_autonomous_appointment_hold_expiry.sql",
+      "20260824143000_booking_policy_publication_guard.sql",
+      "20260824150000_commercial_configuration_authority.sql",
+      "20260824150100_fix_policy_snapshot_capture.sql",
+      "20260824162000_contracted_minutes_transport.sql",
+      "20260824163000_commercial_description.sql",
+      "20260824170000_rental_balance_collection.sql",
+      "20260824170100_balance_collection_delivery_channels.sql",
+      "20260824170150_prepare_balance_collection_views.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_08.sql",
+    "files": [
+      "20260824170200_balance_collection_hardening.sql",
+      "20260824170300_balance_payment_protection.sql",
+      "20260824170350_balance_payment_completed_appointment.sql",
+      "20260824170400_balance_expiry_provider_cleanup.sql",
+      "20260824170500_balance_collection_commercial_policy.sql",
+      "20260824170510_no_show_balance_payment.sql",
+      "20260824171045_hold_capacity_expiry_consistency.sql",
+      "20260824171124_hold_capacity_expiry_consistency_verification_marker.sql",
+      "20260824180000_customer_access_controls.sql",
+      "20260824180010_customer_access_rbac.sql",
+      "20260824180020_free_visit_confirmation.sql",
+      "20260824183000_fix_payment_preview_volatility.sql",
+      "20260824185024_harden_internal_trigger_rpcs.sql",
+      "20260824220039_blacksheep_closing_buffer.sql",
+      "20260825103000_first_owner_bootstrap.sql",
+      "20260825114500_cover_remaining_foreign_keys.sql",
+      "20260825135109_authenticated_first_owner_bootstrap_bridge.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_09.sql",
+    "files": [
+      "20260825154800_remove_kommo_guard_drift.sql",
+      "20260825180000_google_sync_fail_closed.sql",
+      "20260825183000_google_admin_mapping.sql",
+      "20260825205500_amelia_legacy_import_foundation.sql",
+      "20260825211500_service_crud_custom_fields.sql",
+      "20260825213000_catalog_categories_pricing_extras.sql",
+      "20260825213100_catalog_operation_legacy_bridge.sql",
+      "20260825213200_catalog_runtime_compatibility.sql",
+      "20260825220000_coupon_admin_limits.sql",
+      "20260825221000_checkout_coupon_confirmation.sql",
+      "20260825221100_admin_appointment_coupon_detail.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_10.sql",
+    "files": [
+      "20260825223000_employee_admin.sql",
+      "20260825223100_employee_calendar_write_admin.sql",
+      "20260825231000_preprod_legacy_fk_indexes.sql",
+      "20260825232000_preprod_service_type_structure.sql",
+      "20260825232100_preprod_feature_flags_structure.sql",
+      "20260825233000_active_service_policy_invariant.sql",
+      "20260826005000_policy_snapshot_fail_loud.sql",
+      "20260826005500_index_operation_service_type_fk.sql",
+      "20260826010000_preprod_confirmation_invariant.sql",
+      "20260826085000_reconcile_token_evidence_and_validate_i09.sql",
+      "20260826085100_validate_i09_constraints.sql",
+      "20260826085200_validate_i09_constraints.sql",
+      "20260826123000_operation_settings_scope_foundation.sql",
+      "20260826140000_operation_settings_audited_mutation.sql",
+      "20260826154500_notification_template_admin_foundation.sql",
+      "20260826160000_birthday_automation_foundation.sql",
+      "20260826173500_notification_runtime_resolution.sql",
+      "20260826190000_birthday_automation_admin_settings.sql",
+      "20260826201500_birthday_daily_runtime.sql",
+      "20260826214000_black_sheep_birthday_campaign.sql"
+    ]
+  },
+  {
+    "bundle": "bundle_11.sql",
+    "files": [
+      "20260826221000_birthday_email_delivery.sql",
+      "20260826222500_birthday_coupon_locacao_scope.sql",
+      "20260826223000_require_operation_scope_admin_boundary.sql",
+      "20260826224000_snapshot_contract_v2_read_model.sql",
+      "20260826225000_cover_birthday_notification_fks.sql",
+      "20260827001500_customer_birth_date_admin.sql"
+    ]
+  }
+]
