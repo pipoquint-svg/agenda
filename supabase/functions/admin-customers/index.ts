@@ -50,18 +50,29 @@ Deno.serve(async (req) => {
       const customerId = clean(url.searchParams.get('customer_id'))
       if (customerId) {
         const id = uuid(customerId)
-        const [{ data: profile, error }, { data: services, error: servicesError }, { data: identity, error: identityError }] = await Promise.all([
+        const [
+          { data: profile, error },
+          { data: services, error: servicesError },
+          { data: identity, error: identityError },
+          { data: birthDateReconciliation, error: reconciliationError },
+        ] = await Promise.all([
           client.rpc('service_admin_get_customer_commercial_profile', { p_customer_id: id }),
           client.from('services').select('id,name,slug,operation_scope').eq('is_active', true).not('operation_scope', 'is', null).order('sort_order').order('name'),
           client.from('customers').select('birth_date').eq('id', id).maybeSingle(),
+          client.rpc('service_admin_list_customer_birth_date_candidates', { p_customer_id: id, p_admin_id: admin.adminId }),
         ])
         if (error) throw new Error(error.message)
         if (servicesError) throw new Error('CUSTOMER_SERVICES_QUERY_FAILED')
         if (identityError) throw new Error('CUSTOMER_IDENTITY_QUERY_FAILED')
+        if (reconciliationError) throw new Error('CUSTOMER_BIRTH_DATE_RECONCILIATION_QUERY_FAILED')
         const enriched = profile && typeof profile === 'object' && !Array.isArray(profile)
           ? { ...profile, customer: { ...((profile as Record<string, unknown>).customer as Record<string, unknown> ?? {}), birth_date: identity?.birth_date ?? null } }
           : profile
-        return json({ profile: enriched, services: services ?? [] })
+        return json({
+          profile: enriched,
+          services: services ?? [],
+          birth_date_reconciliation: birthDateReconciliation ?? { canonical_birth_date: identity?.birth_date ?? null, candidates: [] },
+        })
       }
 
       const search = clean(url.searchParams.get('search'))
