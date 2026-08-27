@@ -180,3 +180,6 @@ verify_jwt = false
 
 [functions.admin-appointment-timeline]
 verify_jwt = false
+
+[functions.admin-finance]
+verify_jwt = false
