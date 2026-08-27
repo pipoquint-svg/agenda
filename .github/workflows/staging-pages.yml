@@ -61,6 +61,15 @@ jobs:
           path.write_text(text)
           Path('dist/404.html').write_text(text)
           PY
+          printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
+
+      - name: Preserve SHA-linked staging bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-bundle-${{ github.sha }}
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
