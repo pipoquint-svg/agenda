@@ -88,7 +88,37 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     timeout-minutes: 10
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy staging
         id: deployment
         uses: actions/deploy-pages@v4
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: deploy
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke published SHA and browser routes
+        working-directory: web
+        env:
+          STAGING_BASE_URL: ${{ needs.deploy.outputs.page_url }}
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/staging-https-smoke.mjs
