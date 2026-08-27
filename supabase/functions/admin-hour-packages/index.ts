@@ -3,7 +3,7 @@ import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
 const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
-  'access-control-allow-methods': 'GET, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
 
 const statuses = new Set(['ACTIVE', 'EXHAUSTED', 'EXPIRED', 'CANCELLED'])
@@ -139,21 +139,48 @@ async function packageLedger(req: Request, packageIdRaw: string): Promise<Respon
   })
 }
 
+async function rechargePackage(req: Request): Promise<Response> {
+  const admin = await requireAdminPermission(req, 'PACKAGES_MANAGE')
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>
+  const action = typeof body.action === 'string' ? body.action.trim().toUpperCase() : ''
+  if (action !== 'RECHARGE') throw new Error('PACKAGE_ACTION_INVALID')
+
+  const customerId = uuid(body.customer_id, 'CUSTOMER_ID_INVALID')
+  const hours = Number(body.hours)
+  const paidAmount = Number(body.paid_amount)
+  if (!Number.isFinite(hours) || hours <= 0 || Math.round(hours * 60) <= 0) throw new Error('PACKAGE_RECHARGE_HOURS_INVALID')
+  if (!Number.isFinite(paidAmount) || paidAmount <= 0) throw new Error('PACKAGE_RECHARGE_AMOUNT_INVALID')
+  const addedMinutes = Math.round(hours * 60)
+  const notes = typeof body.notes === 'string' ? body.notes.trim() || null : null
+
+  const client = adminClient()
+  const { data, error } = await client.rpc('service_admin_recharge_hour_package', {
+    p_customer_id: customerId,
+    p_added_minutes: addedMinutes,
+    p_paid_amount: paidAmount,
+    p_admin_id: admin.adminId,
+    p_notes: notes,
+  })
+  if (error) throw new Error(error.message || 'PACKAGE_RECHARGE_FAILED')
+  return json(data, 201)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
-  if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
     const url = new URL(req.url)
     const ledgerPackageId = packageIdFromLedgerPath(url.pathname)
-    if (ledgerPackageId) return await packageLedger(req, ledgerPackageId)
-    if (url.pathname.replace(/\/+$/, '').endsWith('/admin-hour-packages')) return await listPackages(req, url)
+    if (req.method === 'GET' && ledgerPackageId) return await packageLedger(req, ledgerPackageId)
+    if (req.method === 'GET' && url.pathname.replace(/\/+$/, '').endsWith('/admin-hour-packages')) return await listPackages(req, url)
+    if (req.method === 'POST' && url.pathname.replace(/\/+$/, '').endsWith('/admin-hour-packages')) return await rechargePackage(req)
+    if (!['GET', 'POST'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
     return json({ error: { code: 'NOT_FOUND' } }, 404)
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_PACKAGES_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
-      : code === 'PACKAGE_NOT_FOUND' ? 404 : 400
+      : code === 'PACKAGE_NOT_FOUND' || code === 'PACKAGE_CUSTOMER_NOT_FOUND' ? 404 : 400
     return json({ error: { code } }, status)
   }
 })
