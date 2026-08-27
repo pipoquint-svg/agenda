@@ -18,7 +18,7 @@ permissions:
 jobs:
   web:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -41,6 +41,22 @@ jobs:
       - name: Build production bundle
         env:
           VITE_SUPABASE_URL: https://example.supabase.co
-          VITE_SUPABASE_ANON_KEY: test-public-key
+          VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key
           VITE_MERCADO_PAGO_PUBLIC_KEY: TEST-public-key
         run: npm run build
+
+      - name: Install Chromium for admin smoke
+        run: npx playwright install --with-deps chromium
+
+      - name: Run admin browser smoke
+        run: |
+          set -euo pipefail
+          npx vite preview --host 127.0.0.1 --port 4173 > /tmp/agenda-vite-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/admin >/dev/null; then break; fi
+            if [ "$attempt" -eq 30 ]; then cat /tmp/agenda-vite-preview.log; exit 1; fi
+            sleep 1
+          done
+          npm run smoke:admin-browser

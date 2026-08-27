@@ -42,7 +42,7 @@ jobs:
         working-directory: web
         env:
           VITE_SUPABASE_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co
-          VITE_SUPABASE_ANON_KEY: sb_publishable_NqPTd8ErT6PUeqlwwgaDpQ_TNvu7hHh
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_NqPTd8ErT6PUeqlwwgaDpQ_TNvu7hHh
           VITE_MERCADO_PAGO_PUBLIC_KEY: APP_USR-1e45b5f7-95b1-4a44-b102-8cac95d3d6e8
         run: npm run build -- --base=/agenda/
 
