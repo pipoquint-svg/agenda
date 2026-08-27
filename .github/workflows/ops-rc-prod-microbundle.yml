@@ -1,0 +1,60 @@
+name: Ops RC Production Microbundle
+on:
+  push:
+    branches: [ops/rc-8128699-prod-bundle]
+    paths: ['.github/workflows/ops-rc-prod-microbundle.yml']
+permissions:
+  contents: write
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/rc-8128699-prod-bundle
+          fetch-depth: 0
+      - name: Verify frozen RC source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 812869914521144a75a07c3edf4b486ec93eaad6 HEAD
+          git diff --exit-code 812869914521144a75a07c3edf4b486ec93eaad6 HEAD -- supabase/migrations supabase/functions supabase/config.toml
+      - name: Build smaller exact bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root=Path('supabase/migrations')
+          files=sorted(p for p in root.glob('*.sql') if p.name > '20260823043100_rls_and_fk_performance_hardening.sql')
+          out=Path('ops/rc-prod-microbundles'); out.mkdir(parents=True,exist_ok=True)
+          for p in out.glob('*'): p.unlink()
+          chunks=[]; cur=[]; size=0; limit=45000
+          for p in files:
+              data=p.read_bytes()
+              if cur and size+len(data)>limit:
+                  chunks.append(cur); cur=[]; size=0
+              cur.append((p,data)); size+=len(data)
+          if cur: chunks.append(cur)
+          index=[]
+          for i,chunk in enumerate(chunks,1):
+              target=out/f'micro_{i:02d}.sql'
+              with target.open('wb') as f:
+                  for p,data in chunk:
+                      f.write(f'\n-- BEGIN RC MIGRATION {p.name}\n'.encode()); f.write(data)
+                      if not data.endswith(b'\n'): f.write(b'\n')
+                      f.write(f'-- END RC MIGRATION {p.name}\n'.encode())
+              index.append({'bundle':target.name,'bytes':target.stat().st_size,'files':[p.name for p,_ in chunk]})
+          (out/'index.json').write_text(json.dumps(index,indent=2)+'\n')
+          print(f'{len(files)} migrations -> {len(chunks)} microbundles')
+          PY
+      - name: Commit generated microbundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/rc-prod-microbundles
+          git commit -m 'ops: generate rc microbundles' --no-verify
+          git push origin HEAD:ops/rc-8128699-prod-bundle
