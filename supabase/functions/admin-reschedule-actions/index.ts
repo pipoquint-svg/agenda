@@ -32,12 +32,6 @@ function isoDateTime(value: unknown): string {
   return parsed.toISOString()
 }
 
-function changeOrigin(value: unknown): 'CLIENT' | 'OPERATION' {
-  const next = typeof value === 'string' ? value.trim().toUpperCase() : ''
-  if (next !== 'CLIENT' && next !== 'OPERATION') throw new Error('CHANGE_ORIGIN_REQUIRED')
-  return next
-}
-
 function authorshipEvidence(req: Request) {
   const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
   const userAgent = (req.headers.get('user-agent') ?? '').trim()
@@ -81,12 +75,13 @@ Deno.serve(async (req) => {
     if (action === 'CREATE_HOLD') {
       await requirePermission('AGENDA_MANAGE')
       const requestedStartAt = isoDateTime(body.requested_start_at)
-      const origin = changeOrigin(body.change_origin)
+      // This endpoint is administrative and already authenticated by requireAdmin().
+      // Derive the authorship domain here instead of trusting the browser to claim it.
       const { data, error } = await client.rpc('service_admin_create_reschedule_hold', {
         p_appointment_id: appointmentId,
         p_requested_start_at: requestedStartAt,
         p_requested_at: new Date().toISOString(),
-        p_change_origin: origin,
+        p_change_origin: 'OPERATION',
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
