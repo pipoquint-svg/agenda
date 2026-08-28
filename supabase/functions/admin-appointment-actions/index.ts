@@ -40,12 +40,6 @@ function uuid(value: unknown, code = 'APPOINTMENT_ID_INVALID'): string {
   return next
 }
 
-function changeOrigin(value: unknown): 'CLIENT' | 'OPERATION' {
-  const next = typeof value === 'string' ? value.trim().toUpperCase() : ''
-  if (next !== 'CLIENT' && next !== 'OPERATION') throw new Error('CHANGE_ORIGIN_REQUIRED')
-  return next
-}
-
 function authorshipEvidence(req: Request) {
   const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
   const userAgent = (req.headers.get('user-agent') ?? '').trim()
@@ -137,7 +131,6 @@ Deno.serve(async (req) => {
     if (action === 'CANCEL') {
       await requirePermission('AGENDA_MANAGE')
       const appointmentId = uuid(body.appointment_id)
-      const origin = changeOrigin(body.change_origin)
       const requestedChoice = body.settlement_choice === null || body.settlement_choice === undefined || body.settlement_choice === ''
         ? null
         : String(body.settlement_choice).trim().toUpperCase()
@@ -153,7 +146,7 @@ Deno.serve(async (req) => {
         p_settlement_choice: null,
         p_reason: reason || null,
         p_requested_at: new Date().toISOString(),
-        p_change_origin: origin,
+        p_change_origin: 'OPERATION',
         p_admin_id: admin.adminId,
         p_ip: authorship.ip,
         p_user_agent: authorship.userAgent,
