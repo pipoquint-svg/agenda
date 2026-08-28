@@ -123,6 +123,24 @@ jobs:
       - name: Rebuild database from migrations
         run: supabase db reset
 
+      - name: Validate Gestão critical E2E fixture
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -q <<'SQL'
+          begin;
+          \i supabase/tests/fixtures/gestao-critical.sql
+          do $$
+          declare
+            v_result jsonb;
+          begin
+            v_result := public.qa_create_gestao_appointment('2035-01-15 10:00:00-03'::timestamptz);
+            if coalesce(v_result->>'status', '') <> 'CONFIRMED' then
+              raise exception 'GESTAO_CRITICAL_FIXTURE_INVALID: %', v_result;
+            end if;
+          end
+          $$;
+          rollback;
+          SQL
+
       - name: Run pgTAP database tests
         run: supabase test db
 
