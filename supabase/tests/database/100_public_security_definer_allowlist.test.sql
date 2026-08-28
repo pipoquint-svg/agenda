@@ -87,10 +87,8 @@ select ok(
 );
 
 select ok(
-  not has_function_privilege('anon', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE')
-  and not has_function_privilege('authenticated', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE')
-  and has_function_privilege('service_role', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE'),
-  'first-owner bridge is service-role only after production hardening'
+  to_regprocedure('public.service_bootstrap_first_owner_authenticated(text)') is null,
+  'temporary first-owner bridge is retired after owner initialization'
 );
 
 select * from finish();
