@@ -105,23 +105,26 @@ Deno.serve(async (req) => {
     })
     deliveryLogId = delivery.id
     if (delivery.alreadySent) {
-      await client.from('appointment_balance_collections').update({ email_delivered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', collection.id)
+      const { error: retryEvidenceError } = await client.from('appointment_balance_collections').update({ email_delivered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', collection.id)
+      if (retryEvidenceError) throw new Error('BALANCE_EMAIL_DELIVERY_EVIDENCE_FAILED')
       return jsonResponse({ skipped: true, reason: 'NOTIFICATION_ALREADY_SENT', collection_id: collection.id, provider_message_id: delivery.providerMessageId })
     }
 
     const payload: EmailProviderPayload = { from: sender.from, to: [recipient], subject: message.subject, text: message.text, html: message.html }
     if (sender.replyTo) payload.reply_to = sender.replyTo
 
+    let providerMessageId: string
     try {
-      const providerMessageId = await sendEmailWithProvider(payload, providerIdempotencyKey)
+      providerMessageId = await sendEmailWithProvider(payload, providerIdempotencyKey)
       await markNotificationSent(client, deliveryLogId, providerMessageId)
-      const { error: deliveredError } = await client.from('appointment_balance_collections').update({ email_delivered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', collection.id)
-      if (deliveredError) throw new Error('BALANCE_EMAIL_DELIVERY_EVIDENCE_FAILED')
-      return jsonResponse({ skipped: false, collection_id: collection.id, recipient_masked: maskEmail(recipient), provider: 'RESEND', provider_message_id: providerMessageId, template_id: template.id })
     } catch (sendError) {
       if (deliveryLogId) await markNotificationFailed(client, deliveryLogId, sendError)
       throw sendError
     }
+
+    const { error: deliveredError } = await client.from('appointment_balance_collections').update({ email_delivered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', collection.id)
+    if (deliveredError) throw new Error('BALANCE_EMAIL_DELIVERY_EVIDENCE_FAILED')
+    return jsonResponse({ skipped: false, collection_id: collection.id, recipient_masked: maskEmail(recipient), provider: 'RESEND', provider_message_id: providerMessageId, template_id: template.id })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'BALANCE_EMAIL_FAILED'
     return errorResponse(error, code === 'INTERNAL_AUTH_REQUIRED' ? 401 : 500)
