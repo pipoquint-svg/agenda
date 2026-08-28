@@ -1,6 +1,10 @@
-name: Staging HTTPS
+name: PRE-LIVE HTTPS
 
 on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/staging-pages.yml'
   push:
     branches: [main]
     paths:
@@ -14,8 +18,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: agenda-staging-pages
+  group: agenda-prelive-pages-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  PRELIVE_SUPABASE_URL: https://sbexdggbwqvyhbkatucs.supabase.co
+  EXPECTED_PRELIVE_REF: sbexdggbwqvyhbkatucs
+  FORBIDDEN_SANDBOX_REF: jlyvlvmspfjwbcmhmhwz
 
 jobs:
   build:
@@ -24,6 +33,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Enforce PRE-LIVE configuration
+        shell: bash
+        env:
+          PRELIVE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRELIVE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$PRELIVE_SUPABASE_PUBLISHABLE_KEY" || {
+            echo 'PRELIVE_SUPABASE_PUBLISHABLE_KEY_REQUIRED'
+            exit 1
+          }
+          test "${PRELIVE_SUPABASE_URL#https://}" = "$EXPECTED_PRELIVE_REF.supabase.co"
+          test "$EXPECTED_PRELIVE_REF" != "$FORBIDDEN_SANDBOX_REF"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,19 +60,27 @@ jobs:
         working-directory: web
         run: npm run check
 
-      - name: Build staging bundle
+      - name: Build PRE-LIVE bundle
         working-directory: web
         env:
-          VITE_SUPABASE_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co
-          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_NqPTd8ErT6PUeqlwwgaDpQ_TNvu7hHh
+          VITE_SUPABASE_URL: https://sbexdggbwqvyhbkatucs.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRELIVE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_MERCADO_PAGO_PUBLIC_KEY: APP_USR-1e45b5f7-95b1-4a44-b102-8cac95d3d6e8
         run: npm run build -- --base=/agenda/
 
-      - name: Enforce staging noindex and SPA fallback
+      - name: Enforce PRE-LIVE noindex, target and SPA fallback
         working-directory: web
         shell: bash
         run: |
           set -euo pipefail
+          grep -R -Fq "$EXPECTED_PRELIVE_REF" dist || {
+            echo 'PRELIVE_TARGET_NOT_EMBEDDED'
+            exit 1
+          }
+          if grep -R -Fq "$FORBIDDEN_SANDBOX_REF" dist; then
+            echo 'SANDBOX_TARGET_LEAKED_INTO_PRELIVE_BUNDLE'
+            exit 1
+          fi
           python3 - <<'PY'
           from pathlib import Path
           path = Path('dist/index.html')
@@ -60,28 +90,32 @@ jobs:
               text = text.replace('<head>', '<head>' + marker, 1)
           path.write_text(text)
           Path('dist/404.html').write_text(text)
+          Path('dist/robots.txt').write_text('User-agent: *\nDisallow: /\n')
           PY
           printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
 
-      - name: Preserve SHA-linked staging bundle
+      - name: Preserve SHA-linked PRE-LIVE bundle
         uses: actions/upload-artifact@v4
         with:
-          name: staging-bundle-${{ github.sha }}
+          name: prelive-pages-bundle-${{ github.sha }}
           path: web/dist
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
       - name: Configure Pages
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/configure-pages@v5
         with:
           enablement: true
 
-      - name: Upload staging artifact
+      - name: Upload PRE-LIVE artifact
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-pages-artifact@v4
         with:
           path: web/dist
 
   deploy:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -91,11 +125,12 @@ jobs:
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy staging
+      - name: Deploy PRE-LIVE
         id: deployment
         uses: actions/deploy-pages@v4
 
   smoke:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: deploy
     timeout-minutes: 10
