@@ -23,8 +23,8 @@ with exposed as (
 )
 select is(
   (select count(*)::integer from exposed),
-  8,
-  'only the seven public booking RPCs plus the authenticated first-owner bridge are exposed'
+  7,
+  'only the seven public booking RPCs are exposed to anon/authenticated'
 );
 
 with exposed as (
@@ -40,7 +40,7 @@ with exposed as (
 )
 select is(
   (select string_agg(signature, E'\n' order by signature) from exposed),
-  E'public_get_booking_page(p_slug text)\npublic_list_available_slots(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_list_available_slots_duration(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_duration_blocks integer, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_list_available_slots_minutes(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_contracted_minutes integer, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_quote_booking(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_extra_selections jsonb, p_people_count integer)\npublic_quote_booking_duration(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_duration_blocks integer, p_extra_selections jsonb, p_people_count integer)\npublic_quote_booking_minutes(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_contracted_minutes integer, p_extra_selections jsonb, p_people_count integer)\nservice_bootstrap_first_owner_authenticated(p_display_name text)',
+  E'public_get_booking_page(p_slug text)\npublic_list_available_slots(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_list_available_slots_duration(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_duration_blocks integer, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_list_available_slots_minutes(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_contracted_minutes integer, p_extra_selections jsonb, p_people_count integer, p_local_date date)\npublic_quote_booking(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_extra_selections jsonb, p_people_count integer)\npublic_quote_booking_duration(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_duration_blocks integer, p_extra_selections jsonb, p_people_count integer)\npublic_quote_booking_minutes(p_booking_page_slug text, p_service_id uuid, p_service_employee_id uuid, p_contracted_minutes integer, p_extra_selections jsonb, p_people_count integer)',
   'SECURITY DEFINER exposure matches the explicit public/authenticated allowlist'
 );
 
@@ -88,9 +88,9 @@ select ok(
 
 select ok(
   not has_function_privilege('anon', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE')
-  and has_function_privilege('authenticated', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE')
   and has_function_privilege('service_role', 'public.service_bootstrap_first_owner_authenticated(text)', 'EXECUTE'),
-  'first-owner bridge is authenticated/service-role only and never executable by anon'
+  'first-owner bridge is service-role only after production hardening'
 );
 
 select * from finish();
