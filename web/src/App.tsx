@@ -11,6 +11,8 @@ import { CustomerAdmin } from './CustomerAdmin'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { EmployeeAdmin } from './EmployeeAdmin'
+import { GestaoEntry } from './GestaoEntry'
+import { GestaoSettingsPage } from './GestaoSettingsPage'
 import { ManageReservation } from './ManageReservation'
 import { NotificationsAdmin } from './NotificationsAdmin'
 import { OperationSettingsAdmin } from './OperationSettingsAdmin'
@@ -51,7 +53,8 @@ export function App() {
   if (path.startsWith('/gestao/recursos')) return <ResourceAdmin />
   if (path.startsWith('/gestao/profissionais')) return <EmployeeAdmin />
   if (path.startsWith('/gestao/configuracoes-avancadas')) return <ServiceSettingsAdmin />
-  if (path.startsWith('/gestao/configuracoes')) return <OperationSettingsAdmin />
+  if (path.startsWith('/gestao/configuracoes/operacao')) return <OperationSettingsAdmin />
+  if (path === '/gestao/configuracoes') return <GestaoSettingsPage />
   if (path.startsWith('/gestao/catalogo')) return <ServiceCatalogAdmin />
   if (path.startsWith('/gestao/agenda')) return <AgendaAdmin />
   if (path.startsWith('/gestao/clientes')) return <CustomerAdmin />
@@ -61,7 +64,7 @@ export function App() {
   if (path.startsWith('/gestao/aniversarios')) return <BirthdaySettingsAdmin />
   if (path.startsWith('/gestao/saude')) return <OpsHealthAdmin />
   if (path.startsWith('/gestao/demand')) return <DemandCaptureAdmin />
-  if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return <AdminDashboard />
+  if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return <GestaoEntry />
 
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
