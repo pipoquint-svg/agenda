@@ -36,6 +36,13 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#039;')
 }
 
+function maskRecipient(value: string): string {
+  const email = value.trim().toLowerCase()
+  const at = email.lastIndexOf('@')
+  if (at <= 0 || at === email.length - 1) return '***'
+  return `${email.slice(0, 1)}***@${email.slice(at + 1)}`
+}
+
 function linkify(line: string): string {
   const parts = line.split(/(https:\/\/[^\s]+)/g)
   return parts.map((part) => {
@@ -104,6 +111,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
     return { id: String(existing.id), alreadySent: true, providerMessageId: existing.provider_message_id ?? null }
   }
 
+  const recipientMasked = maskRecipient(input.recipient)
   if (existing) {
     const { error } = await client.from('notification_delivery_logs').update({
       template_id: input.templateId,
@@ -112,6 +120,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
       attempt_count: Number(existing.attempt_count ?? 0) + 1,
       last_error_code: null,
       is_test: input.isTest === true,
+      recipient_masked: recipientMasked,
       updated_at: new Date().toISOString(),
     }).eq('id', existing.id)
     if (error) throw new Error('NOTIFICATION_DELIVERY_LOG_UPDATE_FAILED')
@@ -128,6 +137,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
     customer_id: input.customerId ?? null,
     employee_id: input.employeeId ?? null,
     recipient_hash: recipientHash,
+    recipient_masked: recipientMasked,
     status: 'PENDING',
     attempt_count: 1,
     idempotency_key: input.idempotencyKey,
