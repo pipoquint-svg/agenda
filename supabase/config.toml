@@ -59,13 +59,18 @@ verify_jwt = false
 [functions.kommo-card-provider-gate]
 verify_jwt = false
 
-# Internal transactional-email adapters. They require x-internal-secret and read the
-# provider API key only from the Edge secret environment. Birthday delivery has an
-# additional BIRTHDAY_EMAIL_DELIVERY_ENABLED fail-closed gate.
+# Internal transactional-email adapters. They require x-internal-secret and all provider
+# calls are centralized in _shared/email-provider.ts. Birthday delivery has an additional
+# BIRTHDAY_EMAIL_DELIVERY_ENABLED fail-closed gate.
 [functions.email-send]
 verify_jwt = false
 
 [functions.birthday-email-worker]
+verify_jwt = false
+
+# Supabase Auth Send Email Hook. It authenticates the Standard Webhooks signature
+# using SEND_EMAIL_HOOK_SECRET and routes delivery through the same central provider.
+[functions.auth-send-email]
 verify_jwt = false
 
 # Historical email diagnostics are permanently retired. They stay publicly callable

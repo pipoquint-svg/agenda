@@ -1,7 +1,7 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, isScopeEnabled, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 
-const PROVIDER_TIMEOUT_MS = 15_000
 const MAX_BATCH = 20
 
 type ClaimedDelivery = {
@@ -37,44 +37,10 @@ function renderTemplate(source: string, allowed: Set<string>, values: Record<str
     return values[key] ?? ''
   })
 }
-function senderForScope(scope: string): { brandName: string; from: string; replyTo: string | null } | null {
-  if (scope === 'BLACKSHEEP') {
-    const from = Deno.env.get('EMAIL_FROM_BLACKSHEEP')?.trim() ?? ''
-    return from ? { brandName: 'BlackSheep Estúdio Criativo', from, replyTo: Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim() || null } : null
-  }
-  if (scope === 'SABRINA') {
-    const from = Deno.env.get('EMAIL_FROM_SABRINA')?.trim() ?? ''
-    return from ? { brandName: 'Sabrina Pierri', from, replyTo: Deno.env.get('EMAIL_REPLY_TO_SABRINA')?.trim() || null } : null
-  }
-  return null
-}
 function formattedDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) throw new Error('BIRTHDAY_COUPON_EXPIRY_INVALID')
   return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' }).format(date)
-}
-async function sendWithResend(apiKey: string, payload: Record<string, unknown>, idempotencyKey: string): Promise<string | null> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS)
-  let response: Response
-  try {
-    response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('EMAIL_PROVIDER_TIMEOUT')
-    throw new Error('EMAIL_PROVIDER_NETWORK_ERROR')
-  } finally { clearTimeout(timeout) }
-  const responseText = await response.text()
-  if (!response.ok) throw new Error(`EMAIL_PROVIDER_HTTP_${response.status}`)
-  if (!responseText) return null
-  try {
-    const parsed = JSON.parse(responseText)
-    return typeof parsed?.id === 'string' ? parsed.id : null
-  } catch { throw new Error('EMAIL_PROVIDER_INVALID_RESPONSE') }
 }
 function preserveDeliveryWindow(errorCode: string, providerSucceeded: boolean): boolean {
   if (providerSucceeded) return true
@@ -142,9 +108,7 @@ async function processDelivery(delivery: ClaimedDelivery): Promise<{ id: string;
     const subject = renderTemplate(String(template.title_template ?? ''), allowed, values)
     const text = renderTemplate(String(template.body_template ?? ''), allowed, values)
 
-    const apiKey = Deno.env.get('RESEND_API_KEY')?.trim() ?? ''
-    if (!apiKey) throw new Error('MISSING_ENV:RESEND_API_KEY')
-    const providerPayload: Record<string, unknown> = {
+    const providerPayload: EmailProviderPayload = {
       from: sender.from,
       to: [recipient],
       subject,
@@ -153,7 +117,7 @@ async function processDelivery(delivery: ClaimedDelivery): Promise<{ id: string;
     }
     if (sender.replyTo) providerPayload.reply_to = sender.replyTo
 
-    const providerMessageId = await sendWithResend(apiKey, providerPayload, delivery.idempotency_key)
+    const providerMessageId = await sendEmailWithProvider(providerPayload, delivery.idempotency_key)
     providerSucceeded = true
     const { error: finalizeError } = await client.rpc('finalize_birthday_notification_delivery', {
       p_log_id: delivery.id,
