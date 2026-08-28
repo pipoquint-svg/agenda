@@ -127,7 +127,7 @@ jobs:
         run: |
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -q <<'SQL'
           begin;
-          \i supabase/tests/fixtures/gestao-critical.sql
+          \i supabase/fixtures/gestao-critical.sql
           do $$
           declare
             v_result jsonb;
