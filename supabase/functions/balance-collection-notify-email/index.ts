@@ -1,7 +1,6 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
-
-const PROVIDER_TIMEOUT_MS = 15_000
 
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
@@ -27,25 +26,6 @@ function money(value: unknown): string {
 
 function dateTime(value: string): string {
   return new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Sao_Paulo'}).format(new Date(value))
-}
-
-async function sendResend(payload: Record<string, unknown>, key: string): Promise<string | null> {
-  const apiKey = Deno.env.get('RESEND_API_KEY')?.trim() ?? ''
-  if (!apiKey) throw new Error('MISSING_ENV:RESEND_API_KEY')
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS)
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method:'POST',
-      headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json','idempotency-key':key},
-      body:JSON.stringify(payload),signal:controller.signal,
-    })
-    const text = await response.text()
-    if (!response.ok) throw new Error(`EMAIL_PROVIDER_HTTP_${response.status}`)
-    if (!text) return null
-    const parsed = JSON.parse(text)
-    return typeof parsed?.id === 'string' ? parsed.id : null
-  } finally { clearTimeout(timeout) }
 }
 
 Deno.serve(async (req) => {
@@ -107,10 +87,10 @@ Deno.serve(async (req) => {
 
     const from = Deno.env.get('EMAIL_FROM_BLACKSHEEP')?.trim() ?? ''
     if (!from) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
-    const payload: Record<string,unknown> = {from,to:[recipient],subject,text,html}
+    const payload: EmailProviderPayload = {from,to:[recipient],subject,text,html}
     const replyTo = Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim()
     if (replyTo) payload.reply_to=replyTo
-    const providerMessageId = await sendResend(payload,`rental-balance-email:${collection.id}`)
+    const providerMessageId = await sendEmailWithProvider(payload,`rental-balance-email:${collection.id}`)
 
     await client.from('appointment_balance_collections').update({email_delivered_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',collection.id)
     return jsonResponse({skipped:false,collection_id:collection.id,recipient_masked:maskEmail(recipient),provider:'RESEND',provider_message_id:providerMessageId})
