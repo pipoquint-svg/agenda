@@ -13,6 +13,8 @@ insert into public.service_employees(id,service_id,employee_id) values ('9780000
 insert into public.service_resources(service_id,resource_id,is_required) values ('97800000-0000-0000-0000-000000000005','97800000-0000-0000-0000-000000000004',true);
 insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time,slot_interval_minutes,is_active)
 select '97800000-0000-0000-0000-000000000006',d,time '08:00',time '18:00',30,true from generate_series(0,6) d;
+insert into public.resource_availability_rules(resource_id,weekday,start_local_time,end_local_time,is_active)
+select '97800000-0000-0000-0000-000000000004',d,time '08:00',time '18:00',true from generate_series(0,6) d;
 
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,people_count,primary_customer_id,commercial_value)
 values ('97800000-0000-0000-0000-000000000010','SLOTS-1','97800000-0000-0000-0000-000000000005','97800000-0000-0000-0000-000000000006','CONFIRMED','NOT_STARTED',((current_date+10)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+10)+time '12:00') at time zone 'America/Sao_Paulo',((current_date+10)+time '10:00') at time zone 'America/Sao_Paulo',((current_date+10)+time '12:00') at time zone 'America/Sao_Paulo',120,120,1,'97800000-0000-0000-0000-000000000001',500);
