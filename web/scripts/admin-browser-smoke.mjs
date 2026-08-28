@@ -18,8 +18,21 @@ const routes = [
   '/admin/demand',
   '/gestao',
   '/gestao/dashboard',
+  '/gestao/agenda',
+  '/gestao/catalogo',
+  '/gestao/configuracoes',
+  '/gestao/configuracoes/operacao',
+  '/gestao/configuracoes-avancadas',
   '/gestao/profissionais',
   '/gestao/recursos',
+  '/gestao/clientes',
+  '/gestao/cupons',
+  '/gestao/notificacoes',
+  '/gestao/aniversarios',
+  '/gestao/pagamentos',
+  '/gestao/saude',
+  '/gestao/demand',
+  '/gestao/recuperar-senha',
 ]
 
 const browser = await chromium.launch({ headless: true })
