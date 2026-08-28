@@ -1,5 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
-import { sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 
 function requireInternal(req: Request): void {
@@ -85,11 +85,10 @@ Deno.serve(async (req) => {
 
     const html = `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#111"><div style="max-width:640px;margin:0 auto;padding:24px 14px"><div style="background:#fff;border:1px solid #d7d7d7;border-radius:12px;padding:28px"><div style="font-size:13px;font-weight:700;letter-spacing:.04em;margin-bottom:12px">BLACKSHEEP ESTÚDIO CRIATIVO</div><h1 style="font-size:24px;line-height:1.2;margin:0 0 16px">Saldo da sua locação</h1><p style="font-size:16px;line-height:1.55;margin:0 0 20px">Olá ${escapeHtml(customerName)}. Sua locação começou e o saldo restante já está disponível para pagamento.</p><div style="border:1px solid #cfcfcf;border-radius:10px;padding:18px;margin:0 0 22px"><div style="font-size:16px;font-weight:700;margin-bottom:12px">${escapeHtml(commercialDescription)}</div><div style="font-size:15px;line-height:1.7">Início: <strong>${escapeHtml(start)}</strong><br>Saldo a pagar: <strong>${escapeHtml(amount)}</strong><br>Link válido até: <strong>${escapeHtml(expires)}</strong></div></div><a href="${escapeHtml(payUrl)}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;font-weight:700;padding:14px 20px;border-radius:8px">Pagar saldo</a><p style="font-size:14px;line-height:1.55;margin:22px 0 0;color:#333">Se você já realizou o pagamento presencialmente, desconsidere esta mensagem.</p></div></div></body></html>`
 
-    const from = Deno.env.get('EMAIL_FROM_BLACKSHEEP')?.trim() ?? ''
-    if (!from) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
-    const payload: EmailProviderPayload = {from,to:[recipient],subject,text,html}
-    const replyTo = Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim()
-    if (replyTo) payload.reply_to=replyTo
+    const sender = senderForScope('BLACKSHEEP')
+    if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
+    const payload: EmailProviderPayload = {from:sender.from,to:[recipient],subject,text,html}
+    if (sender.replyTo) payload.reply_to=sender.replyTo
     const providerMessageId = await sendEmailWithProvider(payload,`rental-balance-email:${collection.id}`)
 
     await client.from('appointment_balance_collections').update({email_delivered_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',collection.id)
