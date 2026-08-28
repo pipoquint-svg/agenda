@@ -1,6 +1,6 @@
 -- Etapa 2 — email as a single platform.
--- Expand-only: adds the rental balance template event, test-send evidence and a
--- service-role-only admin read model. It does not change booking/payment rules.
+-- Expand-only: adds editable confirmation/balance templates, test-send evidence
+-- and a service-role-only admin read model. Booking/payment rules are unchanged.
 
 alter table public.notification_template_configs
   drop constraint if exists notification_template_configs_event_key_check;
@@ -22,6 +22,9 @@ alter table public.notification_template_configs
 
 alter table public.notification_delivery_logs
   add column if not exists is_test boolean not null default false;
+
+alter table public.notification_delivery_logs
+  add column if not exists recipient_masked text null;
 
 create index if not exists idx_notification_delivery_logs_event_created
   on public.notification_delivery_logs(event_key, created_at desc);
@@ -152,7 +155,7 @@ returns table (
   status text,
   is_test boolean,
   customer_name text,
-  recipient_email text,
+  recipient_display text,
   last_error_code text,
   provider_message_id text,
   created_at timestamptz,
@@ -172,7 +175,7 @@ as $$
     l.status,
     l.is_test,
     c.name as customer_name,
-    c.email as recipient_email,
+    coalesce(c.email, l.recipient_masked) as recipient_display,
     l.last_error_code,
     l.provider_message_id,
     l.created_at,
@@ -191,19 +194,41 @@ $$;
 revoke all on function public.service_admin_list_notification_delivery_logs(text,text,text,integer,integer) from public, anon, authenticated;
 grant execute on function public.service_admin_list_notification_delivery_logs(text,text,text,integer,integer) to service_role;
 
+-- Preserve the current reservation-confirmation copy, but move it into editable DB templates.
 insert into public.notification_template_configs (
-  event_key,
-  channel,
-  audience,
-  operation_scope,
-  category_id,
-  title_template,
-  body_template,
-  is_active,
-  variable_schema,
-  reminder_offset_minutes,
-  created_by_admin_id,
-  updated_by_admin_id
+  event_key, channel, audience, operation_scope, category_id,
+  title_template, body_template, is_active, variable_schema,
+  reminder_offset_minutes, created_by_admin_id, updated_by_admin_id
+)
+select
+  'APPOINTMENT_APPROVED',
+  'EMAIL',
+  'CUSTOMER',
+  seed.operation_scope,
+  null,
+  '{{operation.name}} | Reserva confirmada | {{appointment.public_code}}',
+  E'Olá, {{customer.name}}.\n\nSua reserva está confirmada.\n\nServiço: {{service.name}}\nData e horário: {{appointment.start_at}}\nDuração: {{appointment.duration}}\nCódigo da reserva: {{appointment.public_code}}\nValor da reserva: {{payment.total}}\nValor pago: {{payment.paid}}\nSaldo: {{payment.balance}}\n\nSe precisar de ajuda ou alteração, use os canais oficiais de atendimento.\n\nEquipe {{operation.name}}',
+  true,
+  '["appointment.public_code","appointment.start_at","appointment.duration","customer.name","service.name","operation.name","payment.total","payment.paid","payment.balance"]'::jsonb,
+  null,
+  null,
+  null
+from (values ('BLACKSHEEP'::text), ('SABRINA'::text)) seed(operation_scope)
+where not exists (
+  select 1
+  from public.notification_template_configs t
+  where t.event_key = 'APPOINTMENT_APPROVED'
+    and t.channel = 'EMAIL'
+    and t.audience = 'CUSTOMER'
+    and t.operation_scope = seed.operation_scope
+    and t.category_id is null
+    and not exists (select 1 from public.notification_template_services nts where nts.template_id = t.id)
+);
+
+insert into public.notification_template_configs (
+  event_key, channel, audience, operation_scope, category_id,
+  title_template, body_template, is_active, variable_schema,
+  reminder_offset_minutes, created_by_admin_id, updated_by_admin_id
 )
 select
   'RENTAL_BALANCE_DUE',
@@ -226,11 +251,10 @@ where not exists (
     and t.audience = 'CUSTOMER'
     and t.operation_scope = 'BLACKSHEEP'
     and t.category_id is null
-    and not exists (
-      select 1 from public.notification_template_services nts where nts.template_id = t.id
-    )
+    and not exists (select 1 from public.notification_template_services nts where nts.template_id = t.id)
 );
 
+-- Ensure every migrated/seeded operational email template has an initial version snapshot.
 insert into public.notification_template_versions(template_id, version_number, snapshot, changed_by_admin_id)
 select
   t.id,
@@ -238,10 +262,9 @@ select
   to_jsonb(t) || jsonb_build_object('service_ids', '[]'::jsonb),
   null
 from public.notification_template_configs t
-where t.event_key = 'RENTAL_BALANCE_DUE'
+where t.event_key in ('APPOINTMENT_APPROVED', 'RENTAL_BALANCE_DUE')
   and t.channel = 'EMAIL'
   and t.audience = 'CUSTOMER'
-  and t.operation_scope = 'BLACKSHEEP'
   and t.category_id is null
   and not exists (select 1 from public.notification_template_versions v where v.template_id = t.id);
 
