@@ -15,6 +15,7 @@ import { ManageReservation } from './ManageReservation'
 import { NotificationsAdmin } from './NotificationsAdmin'
 import { OperationSettingsAdmin } from './OperationSettingsAdmin'
 import { OpsHealthAdmin } from './OpsHealthAdmin'
+import { PasswordRecoveryPage } from './PasswordRecoveryPage'
 import { ResourceAdmin } from './ResourceAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
@@ -45,9 +46,23 @@ function applicationPath(): string {
 
 export function App() {
   const path = applicationPath()
+
+  if (path.startsWith('/gestao/recuperar-senha')) return <PasswordRecoveryPage />
   if (path.startsWith('/gestao/recursos')) return <ResourceAdmin />
   if (path.startsWith('/gestao/profissionais')) return <EmployeeAdmin />
+  if (path.startsWith('/gestao/configuracoes-avancadas')) return <ServiceSettingsAdmin />
+  if (path.startsWith('/gestao/configuracoes')) return <OperationSettingsAdmin />
+  if (path.startsWith('/gestao/catalogo')) return <ServiceCatalogAdmin />
+  if (path.startsWith('/gestao/agenda')) return <AgendaAdmin />
+  if (path.startsWith('/gestao/clientes')) return <CustomerAdmin />
+  if (path.startsWith('/gestao/pagamentos')) return <AdminBalancesPage />
+  if (path.startsWith('/gestao/cupons')) return <CouponAdmin />
+  if (path.startsWith('/gestao/notificacoes')) return <NotificationsAdmin />
+  if (path.startsWith('/gestao/aniversarios')) return <BirthdaySettingsAdmin />
+  if (path.startsWith('/gestao/saude')) return <OpsHealthAdmin />
+  if (path.startsWith('/gestao/demand')) return <DemandCaptureAdmin />
   if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return <AdminDashboard />
+
   if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
   if (path.startsWith('/admin/cupons')) return <CouponAdmin />
   if (path.startsWith('/admin/clientes')) return <CustomerAdmin />
