@@ -1,11 +1,12 @@
 begin;
 
-select plan(13);
+select plan(19);
 
 select has_table('public', 'admin_user_permissions', 'admin permission overrides table exists');
 select has_function('public', 'service_admin_has_permission', array['uuid','text'], 'permission resolver exists');
 select has_function('public', 'service_admin_get_access_profile', array['uuid'], 'access profile exists');
 select has_function('public', 'service_admin_set_permission', array['uuid','text','boolean','uuid'], 'permission mutation exists');
+select has_function('public', 'service_admin_resolve_auth_user', array['uuid'], 'auth user admin resolver exists');
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
 values
@@ -43,6 +44,38 @@ select is(
   (public.service_admin_get_access_profile('20000000-0000-4000-8000-000000000002')->>'role'),
   'OPERATION',
   'access profile exposes role'
+);
+
+select is(
+  public.service_admin_resolve_auth_user('10000000-0000-4000-8000-000000000002'::uuid),
+  '20000000-0000-4000-8000-000000000002'::uuid,
+  'resolver maps an active auth user to the authoritative admin id'
+);
+
+update public.admin_users
+set is_active = false
+where id = '20000000-0000-4000-8000-000000000002';
+
+select is(
+  public.service_admin_resolve_auth_user('10000000-0000-4000-8000-000000000002'::uuid),
+  null::uuid,
+  'resolver fails closed for inactive administrative users'
+);
+
+select is(
+  has_function_privilege('anon', 'public.service_admin_resolve_auth_user(uuid)', 'EXECUTE'),
+  false,
+  'anon cannot execute the administrative auth resolver'
+);
+select is(
+  has_function_privilege('authenticated', 'public.service_admin_resolve_auth_user(uuid)', 'EXECUTE'),
+  false,
+  'authenticated clients cannot execute the administrative auth resolver'
+);
+select is(
+  has_function_privilege('service_role', 'public.service_admin_resolve_auth_user(uuid)', 'EXECUTE'),
+  true,
+  'service_role can execute the administrative auth resolver'
 );
 
 select * from finish();
