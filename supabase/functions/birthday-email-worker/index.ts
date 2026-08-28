@@ -1,6 +1,7 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, isScopeEnabled, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
+import { renderNotificationMessage, type NotificationTemplate } from '../_shared/notification-email.ts'
 
 const MAX_BATCH = 20
 
@@ -27,16 +28,6 @@ function deliveryEnabled(): boolean {
     && envEnabled('NOTIFICATION_TEMPLATES_RUNTIME_ENABLED')
 }
 function allowRealRecipients(): boolean { return envEnabled('ALLOW_REAL_EMAIL_RECIPIENTS') }
-function htmlEscape(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
-}
-function renderTemplate(source: string, allowed: Set<string>, values: Record<string, string>): string {
-  return source.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey).trim()
-    if (!allowed.has(key)) throw new Error(`NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:${key}`)
-    return values[key] ?? ''
-  })
-}
 function formattedDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) throw new Error('BIRTHDAY_COUPON_EXPIRY_INVALID')
@@ -66,7 +57,7 @@ async function processDelivery(delivery: ClaimedDelivery): Promise<{ id: string;
 
     const [{ data: customer, error: customerError }, { data: template, error: templateError }, { data: operationSettings, error: operationError }] = await Promise.all([
       client.from('customers').select('id,name,email').eq('id', delivery.customer_id).maybeSingle(),
-      client.from('notification_template_configs').select('id,title_template,body_template,is_active,variable_schema').eq('id', delivery.template_id).maybeSingle(),
+      client.from('notification_template_configs').select('id,event_key,title_template,body_template,is_active,variable_schema,operation_scope').eq('id', delivery.template_id).maybeSingle(),
       client.rpc('service_admin_get_operation_settings_v2', { p_operation_scope: scope }),
     ])
     if (customerError || !customer) throw new Error('CUSTOMER_LOOKUP_FAILED')
@@ -104,16 +95,14 @@ async function processDelivery(delivery: ClaimedDelivery): Promise<{ id: string;
       'operation.address': String(operationSettings?.public_address ?? ''),
       'operation.site_url': siteUrl,
     }
-    const allowed = new Set<string>(Array.isArray(template.variable_schema) ? template.variable_schema.map((item: unknown) => String(item)) : [])
-    const subject = renderTemplate(String(template.title_template ?? ''), allowed, values)
-    const text = renderTemplate(String(template.body_template ?? ''), allowed, values)
+    const message = renderNotificationMessage(template as NotificationTemplate, values, sender.brandName)
 
     const providerPayload: EmailProviderPayload = {
       from: sender.from,
       to: [recipient],
-      subject,
-      text,
-      html: `<p>${htmlEscape(text).replaceAll('\n', '<br>')}</p>`,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
     }
     if (sender.replyTo) providerPayload.reply_to = sender.replyTo
 
