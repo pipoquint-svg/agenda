@@ -59,7 +59,7 @@ select ok(
     select 1
     from public.notification_template_configs
     where event_key = 'RENTAL_BALANCE_DUE'
-      and variable_schema @> '[{"key":"balance.payment_url"}]'::jsonb
+      and variable_schema @> '["balance.payment_url"]'::jsonb
   ),
   'balance template exposes the payment URL as an editable variable'
 );
