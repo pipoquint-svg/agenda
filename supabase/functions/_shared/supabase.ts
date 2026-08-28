@@ -33,15 +33,12 @@ export async function requireAdmin(req: Request): Promise<{ adminId: string; aut
   const { data: userData, error: userError } = await client.auth.getUser(match[1])
   if (userError || !userData.user) throw new Error('ADMIN_AUTH_INVALID')
 
-  const { data: admin, error: adminError } = await client
-    .from('admin_users')
-    .select('id, auth_user_id, is_active')
-    .eq('auth_user_id', userData.user.id)
-    .eq('is_active', true)
-    .maybeSingle()
+  const { data: adminId, error: adminError } = await client.rpc('service_admin_resolve_auth_user', {
+    p_auth_user_id: userData.user.id,
+  })
 
-  if (adminError || !admin) throw new Error('ADMIN_ACCESS_DENIED')
-  return { adminId: admin.id, authUserId: admin.auth_user_id }
+  if (adminError || typeof adminId !== 'string' || !adminId) throw new Error('ADMIN_ACCESS_DENIED')
+  return { adminId, authUserId: userData.user.id }
 }
 
 export async function hasAdminPermission(adminId: string, permission: string): Promise<boolean> {
