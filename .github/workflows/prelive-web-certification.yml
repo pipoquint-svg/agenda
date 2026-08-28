@@ -1,0 +1,161 @@
+name: PRE-LIVE Web Certification
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/prelive-web-certification.yml'
+      - 'web/scripts/prelive-browser-smoke.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agenda-prelive-web-certification
+  cancel-in-progress: false
+
+env:
+  PRELIVE_SUPABASE_URL: https://sbexdggbwqvyhbkatucs.supabase.co
+  EXPECTED_PRELIVE_REF: sbexdggbwqvyhbkatucs
+  FORBIDDEN_SANDBOX_REF: jlyvlvmspfjwbcmhmhwz
+  APP_ENV: prelive
+  ALLOW_REAL_CUSTOMER_DATA: 'false'
+  ALLOW_REAL_CHARGES: 'false'
+
+jobs:
+  validate-workflow:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check web
+        working-directory: web
+        run: npm run check
+
+      - name: Verify PRE-LIVE guardrails are explicit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APP_ENV" = 'prelive'
+          test "$ALLOW_REAL_CUSTOMER_DATA" = 'false'
+          test "$ALLOW_REAL_CHARGES" = 'false'
+          test "${PRELIVE_SUPABASE_URL#https://}" = "$EXPECTED_PRELIVE_REF.supabase.co"
+          test "$EXPECTED_PRELIVE_REF" != "$FORBIDDEN_SANDBOX_REF"
+
+  certify-bundle:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VITE_SUPABASE_URL: https://sbexdggbwqvyhbkatucs.supabase.co
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRELIVE_SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - name: Checkout exact release SHA
+        uses: actions/checkout@v4
+
+      - name: Enforce fail-closed PRE-LIVE contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APP_ENV" = 'prelive'
+          test "$ALLOW_REAL_CUSTOMER_DATA" = 'false'
+          test "$ALLOW_REAL_CHARGES" = 'false'
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY" || {
+            echo 'PRELIVE_SUPABASE_PUBLISHABLE_KEY_REQUIRED'
+            exit 1
+          }
+          test "${VITE_SUPABASE_URL#https://}" = "$EXPECTED_PRELIVE_REF.supabase.co"
+          test "$EXPECTED_PRELIVE_REF" != "$FORBIDDEN_SANDBOX_REF"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check
+        working-directory: web
+        run: npm run check
+
+      - name: Build PRE-LIVE bundle without live payment client
+        working-directory: web
+        run: npm run build -- --base=/agenda/
+
+      - name: Seal certification metadata and noindex
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('dist/index.html')
+          text = path.read_text()
+          marker = '<meta name="robots" content="noindex,nofollow,noarchive">'
+          if marker not in text:
+              text = text.replace('<head>', '<head>' + marker, 1)
+          path.write_text(text)
+          Path('dist/404.html').write_text(text)
+          PY
+          printf '%s\n' "$GITHUB_SHA" > dist/release-sha.txt
+
+      - name: Verify bundle targets PRE-LIVE only
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -R -Fq "$EXPECTED_PRELIVE_REF" dist || {
+            echo 'PRELIVE_TARGET_NOT_EMBEDDED'
+            exit 1
+          }
+          if grep -R -Fq "$FORBIDDEN_SANDBOX_REF" dist; then
+            echo 'SANDBOX_TARGET_LEAKED_INTO_PRELIVE_BUNDLE'
+            exit 1
+          fi
+
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Start certified bundle locally
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/prelive-preview.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/agenda/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/prelive-preview.log
+          exit 1
+
+      - name: Run non-mutating PRE-LIVE browser smoke
+        working-directory: web
+        env:
+          PRELIVE_LOCAL_BASE_URL: http://127.0.0.1:4173/agenda
+        run: node scripts/prelive-browser-smoke.mjs
+
+      - name: Preserve SHA-linked PRE-LIVE candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: prelive-web-${{ github.sha }}
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 30
