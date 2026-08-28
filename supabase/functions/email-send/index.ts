@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import {
   buildConfirmationEmail,
   isRecipientAllowed,
@@ -6,8 +7,6 @@ import {
   maskEmail,
   normalizedEmail,
 } from '../_shared/transactional-email.ts'
-
-const PROVIDER_TIMEOUT_MS = 15_000
 
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
@@ -43,45 +42,6 @@ async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value)
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-function senderForScope(scope: string): { brandName: string; from: string; replyTo: string | null } | null {
-  if (scope === 'BLACKSHEEP') {
-    const from = Deno.env.get('EMAIL_FROM_BLACKSHEEP')?.trim() ?? ''
-    if (!from) return null
-    return { brandName: 'BlackSheep Estúdio Criativo', from, replyTo: Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim() || null }
-  }
-  if (scope === 'SABRINA') {
-    const from = Deno.env.get('EMAIL_FROM_SABRINA')?.trim() ?? ''
-    if (!from) return null
-    return { brandName: 'Sabrina Pierri', from, replyTo: Deno.env.get('EMAIL_REPLY_TO_SABRINA')?.trim() || null }
-  }
-  return null
-}
-
-async function sendWithResend(apiKey: string, payload: Record<string, unknown>, idempotencyKey: string): Promise<string | null> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS)
-  let response: Response
-  try {
-    response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('EMAIL_PROVIDER_TIMEOUT')
-    throw new Error('EMAIL_PROVIDER_NETWORK_ERROR')
-  } finally { clearTimeout(timeout) }
-
-  const responseText = await response.text()
-  if (!response.ok) throw new Error(`EMAIL_PROVIDER_HTTP_${response.status}`)
-  if (!responseText) return null
-  try {
-    const parsed = JSON.parse(responseText)
-    return typeof parsed?.id === 'string' ? parsed.id : null
-  } catch { throw new Error('EMAIL_PROVIDER_INVALID_RESPONSE') }
 }
 
 Deno.serve(async (req) => {
@@ -204,13 +164,11 @@ Deno.serve(async (req) => {
       })
     }
 
-    const apiKey = Deno.env.get('RESEND_API_KEY')?.trim() ?? ''
-    if (!apiKey) throw new Error('MISSING_ENV:RESEND_API_KEY')
-    const providerPayload: Record<string, unknown> = { from: sender.from, to: [recipient], subject: message.subject, text: message.text, html: message.html }
+    const providerPayload: EmailProviderPayload = { from: sender.from, to: [recipient], subject: message.subject, text: message.text, html: message.html }
     if (sender.replyTo) providerPayload.reply_to = sender.replyTo
 
     try {
-      const providerMessageId = await sendWithResend(apiKey, providerPayload, providerIdempotencyKey)
+      const providerMessageId = await sendEmailWithProvider(providerPayload, providerIdempotencyKey)
       if (deliveryLogId) {
         const { error: sentLogError } = await client.from('notification_delivery_logs').update({ status: 'SENT', provider_message_id: providerMessageId, updated_at: new Date().toISOString() }).eq('id', deliveryLogId)
         if (sentLogError) throw new Error('NOTIFICATION_DELIVERY_LOG_SENT_FAILED')
