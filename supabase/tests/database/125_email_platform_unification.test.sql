@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(8);
+select plan(11);
 
 select ok(
   pg_get_constraintdef((
@@ -13,12 +13,8 @@ select ok(
   'notification templates accept the rental balance due event'
 );
 
-select has_column(
-  'public',
-  'notification_delivery_logs',
-  'is_test',
-  'delivery logs distinguish test sends from operational sends'
-);
+select has_column('public', 'notification_delivery_logs', 'is_test', 'delivery logs distinguish test sends from operational sends');
+select has_column('public', 'notification_delivery_logs', 'recipient_masked', 'delivery history retains a safe recipient hint');
 
 select has_function(
   'public',
@@ -44,24 +40,34 @@ select ok(
 
 select ok(
   exists (
-    select 1
-    from public.notification_template_configs
-    where event_key = 'RENTAL_BALANCE_DUE'
-      and channel = 'EMAIL'
-      and audience = 'CUSTOMER'
-      and operation_scope = 'BLACKSHEEP'
+    select 1 from public.notification_template_configs
+    where event_key = 'RENTAL_BALANCE_DUE' and channel = 'EMAIL' and audience = 'CUSTOMER' and operation_scope = 'BLACKSHEEP'
   ),
   'a BlackSheep balance email template is seeded'
 );
 
 select ok(
   exists (
-    select 1
-    from public.notification_template_configs
-    where event_key = 'RENTAL_BALANCE_DUE'
-      and variable_schema @> '["balance.payment_url"]'::jsonb
+    select 1 from public.notification_template_configs
+    where event_key = 'RENTAL_BALANCE_DUE' and variable_schema @> '["balance.payment_url"]'::jsonb
   ),
   'balance template exposes the payment URL as an editable variable'
+);
+
+select ok(
+  exists (
+    select 1 from public.notification_template_configs
+    where event_key = 'APPOINTMENT_APPROVED' and channel = 'EMAIL' and audience = 'CUSTOMER' and operation_scope = 'BLACKSHEEP'
+  ),
+  'BlackSheep reservation confirmation has an editable database template'
+);
+
+select ok(
+  exists (
+    select 1 from public.notification_template_configs
+    where event_key = 'APPOINTMENT_APPROVED' and channel = 'EMAIL' and audience = 'CUSTOMER' and operation_scope = 'SABRINA'
+  ),
+  'Sabrina reservation confirmation has an editable database template'
 );
 
 select * from finish();
