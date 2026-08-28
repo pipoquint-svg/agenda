@@ -65,6 +65,16 @@ insert into public.availability_rules (
   30
 );
 
+insert into public.resource_availability_rules (
+  resource_id, weekday, start_local_time, end_local_time, is_active
+) values (
+  '29000000-0000-0000-0000-000000000001',
+  1,
+  '08:00',
+  '18:00',
+  true
+);
+
 insert into public.booking_pages (
   id, slug, display_name, title, brand_key, require_tax_id
 ) values (

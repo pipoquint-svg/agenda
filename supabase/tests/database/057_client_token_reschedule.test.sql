@@ -13,6 +13,8 @@ insert into public.service_employees(id,service_id,employee_id) values ('9540000
 insert into public.service_resources(service_id,resource_id,is_required) values ('95400000-0000-0000-0000-000000000005','95400000-0000-0000-0000-000000000004',true);
 insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time,slot_interval_minutes,is_active)
 select '95400000-0000-0000-0000-000000000006',d,time '08:00',time '18:00',30,true from generate_series(0,6) d;
+insert into public.resource_availability_rules(resource_id,weekday,start_local_time,end_local_time,is_active)
+select '95400000-0000-0000-0000-000000000004',d,time '08:00',time '18:00',true from generate_series(0,6) d;
 insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
 values ('95400000-0000-0000-0000-000000000005',48,0,20,30,30);
 
