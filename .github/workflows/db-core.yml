@@ -48,6 +48,9 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Gate central email provider
+        run: bash scripts/test-central-email-provider.sh
+
       - name: Gate autonomous expiry wiring
         run: |
           grep -Fq "client.rpc('expire_due_appointment_holds')" supabase/functions/integration-worker/index.ts
