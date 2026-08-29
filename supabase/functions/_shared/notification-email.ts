@@ -148,7 +148,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
   return { id: String(inserted.id), alreadySent: false, providerMessageId: null }
 }
 
-export async function markNotificationSent(client: any, logId: string, providerMessageId: string): Promise<void> {
+export async function markNotificationSent(client: any, logId: string, providerMessageId: string | null): Promise<void> {
   const { error } = await client.from('notification_delivery_logs').update({
     status: 'SENT',
     provider_message_id: providerMessageId,
