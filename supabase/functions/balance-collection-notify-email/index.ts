@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
     const payload: EmailProviderPayload = { from: sender.from, to: [recipient], subject: message.subject, text: message.text, html: message.html }
     if (sender.replyTo) payload.reply_to = sender.replyTo
 
-    let providerMessageId: string
+    let providerMessageId: string | null
     try {
       providerMessageId = await sendEmailWithProvider(payload, providerIdempotencyKey)
       await markNotificationSent(client, deliveryLogId, providerMessageId)
