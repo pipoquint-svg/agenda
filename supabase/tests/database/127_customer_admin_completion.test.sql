@@ -40,8 +40,8 @@ select ok(
   and not has_function_privilege('authenticated','public.service_admin_create_customer(text,text,text,text,text,text,date,uuid)','EXECUTE')
   and not has_function_privilege('anon','public.service_admin_update_customer_identity(uuid,text,text,text,text,date,uuid)','EXECUTE')
   and not has_function_privilege('authenticated','public.service_admin_update_customer_identity(uuid,text,text,text,text,date,uuid)','EXECUTE')
-  and not has_function_privilege('anon','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,text,date,uuid)','EXECUTE')
-  and not has_function_privilege('authenticated','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,text,date,uuid)','EXECUTE')
+  and not has_function_privilege('anon','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,date,uuid)','EXECUTE')
+  and not has_function_privilege('authenticated','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,date,uuid)','EXECUTE')
   and not has_function_privilege('anon','public.service_admin_anonymize_customer(uuid,uuid)','EXECUTE')
   and not has_function_privilege('authenticated','public.service_admin_anonymize_customer(uuid,uuid)','EXECUTE'),
   'anon/authenticated cannot mutate customers directly'
@@ -52,7 +52,7 @@ select ok(
   and has_function_privilege('service_role','public.service_admin_create_customer(text,text,text,text,text,date,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_create_customer(text,text,text,text,text,text,date,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,date,uuid)','EXECUTE')
-  and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,text,date,uuid)','EXECUTE')
+  and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,date,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_anonymize_customer(uuid,uuid)','EXECUTE'),
   'service_role can execute customer administration boundaries'
 );
