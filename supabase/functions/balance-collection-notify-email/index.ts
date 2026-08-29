@@ -1,5 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
-import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import {
   beginNotificationDelivery,
@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     const template = (Array.isArray(rows) ? rows[0] : null) as NotificationTemplate | null
     if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
 
-    const sender = senderForScope('BLACKSHEEP')
+    const sender = notificationSenderForScope('BLACKSHEEP')
     if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
     const values: Record<string, string> = {
       'customer.name': String(customer.name ?? 'Cliente').trim() || 'Cliente',
