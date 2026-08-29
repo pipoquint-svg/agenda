@@ -1,5 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
-import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, isScopeEnabled, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import {
   beginNotificationDelivery,
@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
     const scope = String(service.operation_scope ?? '').trim().toUpperCase()
     if (!isScopeEnabled(scope, Deno.env.get('TRANSACTIONAL_EMAIL_SCOPES'))) return jsonResponse({ stale: false, skipped: true, reason: 'EMAIL_SCOPE_DISABLED', operation_scope: scope })
 
-    const sender = senderForScope(scope)
+    const sender = notificationSenderForScope(scope)
     if (!sender) return jsonResponse({ stale: false, skipped: true, reason: 'EMAIL_SCOPE_SENDER_NOT_CONFIGURED', operation_scope: scope })
     if (!appointment.primary_customer_id) return jsonResponse({ stale: false, skipped: true, reason: 'EMAIL_CUSTOMER_MISSING' })
 
