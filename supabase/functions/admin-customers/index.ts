@@ -142,6 +142,7 @@ Deno.serve(async (req) => {
       const { data, error } = await client.rpc('service_admin_create_customer', {
         p_customer_type: customerType,
         p_name: clean(body.name),
+        p_cpf_cnpj: clean(body.cpf_cnpj),
         p_email: clean(body.email),
         p_phone: clean(body.phone),
         p_address: clean(body.address),
@@ -168,6 +169,7 @@ Deno.serve(async (req) => {
       const { data, error } = await client.rpc('service_admin_update_customer_identity', {
         p_customer_id: customerId,
         p_name: clean(body.name),
+        p_cpf_cnpj: clean(body.cpf_cnpj),
         p_email: clean(body.email),
         p_phone: clean(body.phone),
         p_address: clean(body.address),
