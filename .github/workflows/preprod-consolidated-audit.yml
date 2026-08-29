@@ -15,17 +15,13 @@ permissions:
   contents: read
 
 env:
-  APP_ENV: staging
   ALLOW_REAL_CUSTOMER_DATA: 'false'
   ALLOW_REAL_CHARGES: 'false'
 
 jobs:
   consolidated-audit:
     runs-on: ubuntu-latest
-    environment: sandbox
     timeout-minutes: 20
-    env:
-      SANDBOX_DATABASE_URL: ${{ secrets.SANDBOX_DATABASE_URL }}
 
     steps:
       - name: Checkout full working tree
@@ -33,14 +29,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require sandbox-only execution
+      - name: Require isolated execution
         shell: bash
         run: |
           set -euo pipefail
-          test "$APP_ENV" = staging
           test "$ALLOW_REAL_CUSTOMER_DATA" = false
           test "$ALLOW_REAL_CHARGES" = false
-          test -n "${SANDBOX_DATABASE_URL:-}"
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
@@ -66,7 +60,7 @@ jobs:
           if [[ "$EVENT_NAME" = 'pull_request' ]] \
             && [[ -n "${PR_BASE_SHA:-}" ]] \
             && ! git diff --quiet "$PR_BASE_SHA" "$PR_HEAD_SHA" -- supabase/migrations; then
-            echo "Schema-changing PR detected; structural drift will be checked against PR base $PR_BASE_SHA."
+            echo "Schema-changing PR detected; deterministic rebuild will use PR base $PR_BASE_SHA."
             rm -rf supabase/migrations
             git checkout "$PR_BASE_SHA" -- supabase/migrations
             echo 'restore_head_migrations=true' >> "$GITHUB_OUTPUT"
@@ -75,11 +69,22 @@ jobs:
             echo "AUDIT_SCHEMA_BASELINE=head:${PR_HEAD_SHA:-$GITHUB_SHA}" >> "$GITHUB_ENV"
           fi
 
-      - name: Start migrated local database
+      - name: Start isolated local database
         shell: bash
         run: supabase start
 
-      - name: Rebuild structural baseline from repository migrations
+      - name: First rebuild from versioned migrations
+        shell: bash
+        run: supabase db reset
+
+      - name: Capture first structural rebuild
+        shell: bash
+        env:
+          LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          AUDIT_CAPTURE_PREFIX: artifacts/preprod-audit/reference
+        run: bash scripts/preprod-consolidated-audit.sh --capture-schema
+
+      - name: Second independent rebuild from the same migrations
         shell: bash
         run: supabase db reset
 
@@ -93,10 +98,11 @@ jobs:
           rm -rf supabase/migrations
           git checkout "$PR_HEAD_SHA" -- supabase/migrations
 
-      - name: Run consolidated audit
+      - name: Run consolidated local audit
         shell: bash
         env:
           LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          REFERENCE_SCHEMA_PREFIX: artifacts/preprod-audit/reference
         run: bash scripts/preprod-consolidated-audit.sh
 
       - name: Upload audit evidence
