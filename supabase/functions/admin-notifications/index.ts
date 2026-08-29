@@ -62,6 +62,9 @@ function positiveInteger(value: string | null, fallback: number): number {
   const next = Number(value ?? fallback)
   return Number.isInteger(next) && next > 0 ? next : fallback
 }
+function records(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value as Record<string, unknown>[] : []
+}
 
 function testValues(recipient: string, brandName: string): Record<string, string> {
   return {
@@ -141,17 +144,19 @@ Deno.serve(async (req) => {
       const [templates, services, categories] = await Promise.all([
         client.rpc('service_admin_list_notification_templates'),
         client.rpc('service_admin_list_service_settings'),
-        client.from('categories').select('id,name,operation_scope,is_active').order('operation_scope').order('name'),
+        client.rpc('service_admin_list_categories'),
       ])
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
       return json({
         templates: templates.data ?? [],
-        services: (services.data ?? []).map((service: Record<string, unknown>) => ({
+        services: records(services.data).map((service) => ({
           id: service.id, name: service.name, operation_scope: service.operation_scope, category_id: service.category_id, is_active: service.is_active,
         })),
-        categories: categories.data ?? [],
+        categories: records(categories.data).map((category) => ({
+          id: category.id, name: category.name, operation_scope: category.operation_scope, is_active: category.is_active,
+        })),
         options: {
           events,
           channels,
@@ -181,13 +186,17 @@ Deno.serve(async (req) => {
 
       let scope = String(template.operation_scope ?? '').trim().toUpperCase()
       if (!scope && template.category_id) {
-        const { data: category } = await client.from('categories').select('operation_scope').eq('id', template.category_id).maybeSingle()
+        const { data: categoryRows, error: categoryError } = await client.rpc('service_admin_list_categories')
+        if (categoryError) throw new Error(categoryError.message)
+        const category = records(categoryRows).find((item) => String(item.id ?? '') === String(template.category_id))
         scope = String(category?.operation_scope ?? '').trim().toUpperCase()
       }
       if (!scope) {
         const { data: binding } = await client.from('notification_template_services').select('service_id').eq('template_id', templateId).limit(1).maybeSingle()
         if (binding?.service_id) {
-          const { data: service } = await client.from('services').select('operation_scope').eq('id', binding.service_id).maybeSingle()
+          const { data: serviceRows, error: serviceError } = await client.rpc('service_admin_list_service_settings')
+          if (serviceError) throw new Error(serviceError.message)
+          const service = records(serviceRows).find((item) => String(item.id ?? '') === String(binding.service_id))
           scope = String(service?.operation_scope ?? '').trim().toUpperCase()
         }
       }
