@@ -100,6 +100,31 @@ request() {
     "$FUNCTION_URL"
 }
 
+# Kong may briefly return upstream 502/503 after a local database reset even after
+# OPTIONS succeeds. Retry only those transport/startup statuses (or curl 000).
+# Any application status, including 4xx/500, is returned immediately and remains a
+# real gate failure. This keeps the assertion strict while removing runner startup noise.
+request_after_transport_ready() {
+  local token="$1"
+  local output="$2"
+  local meta status
+  for _ in $(seq 1 10); do
+    meta="$(request "$token" "$output" || true)"
+    status="${meta%% *}"
+    if [[ "$status" != "502" && "$status" != "503" && "$status" != "000" && -n "$status" ]]; then
+      printf '%s' "$meta"
+      return 0
+    fi
+    if ! kill -0 "$SERVE_PID" >/dev/null 2>&1; then
+      echo 'Edge Function serve process exited during transport recovery.' >&2
+      cat "$SERVE_LOG" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  printf '%s' "$meta"
+}
+
 # After `supabase db reset`, Kong can answer OPTIONS before the Edge runtime has
 # re-established its upstream connection. Require one functional application-level
 # response before measuring the gate. Retry only startup/transport 5xx; any other
@@ -133,7 +158,7 @@ if [[ "$functional_ready" != "true" ]]; then
   exit 1
 fi
 
-valid_meta="$(request "$valid_token" "$WORK_DIR/valid.json" || true)"
+valid_meta="$(request_after_transport_ready "$valid_token" "$WORK_DIR/valid.json")"
 valid_status="${valid_meta%% *}"
 if [[ "$valid_status" != "200" ]]; then
   echo "Valid token resolve failed: HTTP ${valid_status:-transport-error}" >&2
@@ -156,7 +181,7 @@ printf '%s\n' '{"error":{"code":"LINK_INVALID_OR_EXPIRED"}}' > "$WORK_DIR/expect
 for case_name in missing wrong_scope expired consumed; do
   : > "$WORK_DIR/$case_name.times"
   for attempt in 1 2 3; do
-    meta="$(request "${TOKENS[$case_name]}" "$WORK_DIR/$case_name.$attempt.json" || true)"
+    meta="$(request_after_transport_ready "${TOKENS[$case_name]}" "$WORK_DIR/$case_name.$attempt.json")"
     status="${meta%% *}"
     elapsed="${meta##* }"
     if [[ "$status" != "400" ]]; then
