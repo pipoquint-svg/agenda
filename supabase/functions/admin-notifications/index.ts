@@ -18,13 +18,13 @@ const corsHeaders = {
 const events = [
   'APPOINTMENT_APPROVED', 'APPOINTMENT_PENDING', 'APPOINTMENT_REJECTED', 'APPOINTMENT_CANCELLED',
   'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'BIRTHDAY',
-  'RENTAL_BALANCE_DUE', 'MANUAL',
+  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'MANUAL',
 ]
 const channels = ['EMAIL', 'GOOGLE_CALENDAR']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
-  'customer.name', 'customer.email', 'employee.name', 'service.name', 'service.description',
+  'customer.name', 'customer.email', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'extras.summary',
   'coupon.code', 'coupon.discount', 'coupon.expires_at',
@@ -75,6 +75,7 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'customer.name': 'Teste BlackSheep',
     'customer.email': recipient,
     'employee.name': 'Equipe BlackSheep',
+    'auth.invite_url': 'https://www.blacksheepestudiocriativo.com.br/gestao/primeiro-acesso',
     'service.name': 'Serviço de teste',
     'service.description': 'Descrição de exemplo para conferir a apresentação do e-mail.',
     'operation.name': brandName,

@@ -1,4 +1,13 @@
 import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import { maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
+import {
+  beginNotificationDelivery,
+  markNotificationFailed,
+  markNotificationSent,
+  renderNotificationMessage,
+  type NotificationTemplate,
+} from '../_shared/notification-email.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -18,6 +27,7 @@ const allowedPermissions = new Set([
   'AUDIT_VIEW','TEAM_MANAGE',
 ])
 const creatableRoles = new Set(['ADMIN', 'OPERATION', 'FINANCE'])
+const INVITE_EVENT = 'ADMIN_USER_INVITE'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -33,7 +43,7 @@ function uuid(value: unknown, code: string): string {
 }
 
 function email(value: unknown): string {
-  const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  const text = normalizedEmail(typeof value === 'string' ? value : '')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) || text.length > 254) throw new Error('ADMIN_EMAIL_INVALID')
   return text
 }
@@ -44,9 +54,24 @@ function password(value: unknown): string {
   return text
 }
 
-function targetIdFromPath(pathname: string): string | null {
+function permissionTargetFromPath(pathname: string): string | null {
   const match = pathname.match(/\/admin-team-members\/([^/]+)\/permissions\/?$/)
   return match ? match[1] : null
+}
+
+function statusTargetFromPath(pathname: string): string | null {
+  const match = pathname.match(/\/admin-team-members\/([^/]+)\/status\/?$/)
+  return match ? match[1] : null
+}
+
+function firstAccessUrl(siteUrl: unknown): string {
+  const raw = typeof siteUrl === 'string' ? siteUrl.trim() : ''
+  if (!/^https:\/\//i.test(raw)) throw new Error('ADMIN_INVITE_SITE_URL_INVALID')
+  const url = new URL(raw)
+  url.pathname = '/gestao/primeiro-acesso'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
 }
 
 async function listMembers(req: Request): Promise<Response> {
@@ -101,45 +126,131 @@ async function listMembers(req: Request): Promise<Response> {
   })
 }
 
+async function removeUnusedInviteUser(client: ReturnType<typeof adminClient>, authUserId: string, adminUserId: string | null): Promise<void> {
+  if (adminUserId) await client.from('admin_users').delete().eq('id', adminUserId)
+  await client.auth.admin.deleteUser(authUserId).catch(() => undefined)
+}
+
 async function createMember(req: Request, body: Record<string, unknown>): Promise<Response> {
   const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
   const displayName = typeof body.display_name === 'string' ? body.display_name.trim() : ''
   const memberEmail = email(body.email)
-  const temporaryPassword = password(body.temporary_password)
   const role = typeof body.role === 'string' ? body.role.trim().toUpperCase() : ''
 
   if (displayName.length < 2 || displayName.length > 120) throw new Error('ADMIN_DISPLAY_NAME_INVALID')
   if (!creatableRoles.has(role)) throw new Error('ADMIN_ROLE_INVALID')
 
   const client = adminClient()
-  const { data: authData, error: authError } = await client.auth.admin.createUser({
+  const [{ data: template, error: templateError }, { data: operationSettings, error: operationError }] = await Promise.all([
+    client.from('notification_template_configs')
+      .select('id,event_key,title_template,body_template,variable_schema,operation_scope,is_active')
+      .eq('event_key', INVITE_EVENT)
+      .eq('channel', 'EMAIL')
+      .eq('audience', 'EMPLOYEE')
+      .eq('operation_scope', 'BLACKSHEEP')
+      .eq('is_active', true)
+      .is('category_id', null)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    client.rpc('service_admin_get_operation_settings_v2', { p_operation_scope: 'BLACKSHEEP' }),
+  ])
+  if (templateError || !template) throw new Error('ADMIN_INVITE_TEMPLATE_NOT_FOUND')
+  if (operationError) throw new Error('ADMIN_INVITE_OPERATION_SETTINGS_FAILED')
+
+  const redirectTo = firstAccessUrl(operationSettings?.public_site_url)
+  const sender = notificationSenderForScope('BLACKSHEEP')
+  if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
+
+  const { data: linkData, error: linkError } = await client.auth.admin.generateLink({
+    type: 'invite',
     email: memberEmail,
-    password: temporaryPassword,
-    email_confirm: true,
+    options: {
+      redirectTo,
+      data: { display_name: displayName },
+    },
   })
-  if (authError || !authData.user) {
-    const authMessage = authError?.message?.toLowerCase() ?? ''
+  if (linkError || !linkData?.user || !linkData?.properties?.action_link) {
+    const authMessage = linkError?.message?.toLowerCase() ?? ''
     if (authMessage.includes('already') || authMessage.includes('registered') || authMessage.includes('exists')) throw new Error('ADMIN_EMAIL_ALREADY_REGISTERED')
-    throw new Error('ADMIN_AUTH_USER_CREATE_FAILED')
+    throw new Error('ADMIN_INVITE_LINK_CREATE_FAILED')
   }
 
-  const authUserId = authData.user.id
-  const { data: profile, error: registerError } = await client.rpc('service_admin_register_admin_user', {
-    p_auth_user_id: authUserId,
-    p_display_name: displayName,
-    p_role: role,
-    p_actor_admin_id: actor.adminId,
-  })
-  if (registerError) {
-    await client.auth.admin.deleteUser(authUserId).catch(() => undefined)
-    throw new Error(registerError.message || 'ADMIN_USER_REGISTER_FAILED')
-  }
+  const authUserId = linkData.user.id
+  let adminUserId: string | null = null
+  let deliveryLogId: string | null = null
+  let providerSucceeded = false
 
-  return json({
-    member: { auth_user_id: authUserId, display_name: displayName, email: memberEmail, role, is_active: true, permissions: (profile as Record<string, unknown> | null)?.permissions ?? {} },
-    temporary_password_returned: false,
-    invite_email_sent: false,
-  }, 201)
+  try {
+    const { data: profile, error: registerError } = await client.rpc('service_admin_register_admin_user', {
+      p_auth_user_id: authUserId,
+      p_display_name: displayName,
+      p_role: role,
+      p_actor_admin_id: actor.adminId,
+    })
+    if (registerError) throw new Error(registerError.message || 'ADMIN_USER_REGISTER_FAILED')
+
+    const { data: adminRow, error: adminLookupError } = await client.from('admin_users').select('id').eq('auth_user_id', authUserId).maybeSingle()
+    if (adminLookupError || !adminRow) throw new Error('ADMIN_USER_REGISTER_LOOKUP_FAILED')
+    adminUserId = String(adminRow.id)
+
+    const values: Record<string, string> = {
+      'employee.name': displayName,
+      'auth.invite_url': linkData.properties.action_link,
+      'operation.name': String(operationSettings?.public_name ?? sender.brandName),
+      'operation.site_url': String(operationSettings?.public_site_url ?? ''),
+    }
+    const message = renderNotificationMessage(template as NotificationTemplate, values, sender.brandName)
+    const idempotencyKey = `admin-user-invite:${authUserId}`
+    const delivery = await beginNotificationDelivery(client, {
+      templateId: String(template.id),
+      eventKey: INVITE_EVENT,
+      audience: 'EMPLOYEE',
+      recipient: memberEmail,
+      idempotencyKey,
+      payloadSnapshot: { admin_user_id: adminUserId, role, operation_scope: 'BLACKSHEEP' },
+    })
+    deliveryLogId = delivery.id
+
+    const providerPayload: EmailProviderPayload = {
+      from: sender.from,
+      to: [memberEmail],
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+    }
+    if (sender.replyTo) providerPayload.reply_to = sender.replyTo
+
+    const providerMessageId = await sendEmailWithProvider(providerPayload, idempotencyKey)
+    providerSucceeded = true
+    try {
+      await markNotificationSent(client, deliveryLogId, providerMessageId)
+    } catch (logError) {
+      console.error('Admin invite was sent but delivery finalization failed', {
+        admin_user_id: adminUserId,
+        code: logError instanceof Error ? logError.message : 'NOTIFICATION_DELIVERY_LOG_SENT_FAILED',
+      })
+    }
+
+    return json({
+      member: {
+        id: adminUserId,
+        auth_user_id: authUserId,
+        display_name: displayName,
+        email: memberEmail,
+        role,
+        is_active: true,
+        permissions: (profile as Record<string, unknown> | null)?.permissions ?? {},
+      },
+      invite_email_sent: true,
+      recipient_masked: maskEmail(memberEmail),
+      password_returned: false,
+    }, 201)
+  } catch (error) {
+    if (deliveryLogId && !providerSucceeded) await markNotificationFailed(client, deliveryLogId, error)
+    if (!providerSucceeded) await removeUnusedInviteUser(client, authUserId, adminUserId)
+    throw error
+  }
 }
 
 async function transferOwner(req: Request, body: Record<string, unknown>): Promise<Response> {
@@ -238,13 +349,37 @@ async function updatePermissions(req: Request, targetRaw: string): Promise<Respo
   return json({ member_id: targetAdminId, profile })
 }
 
+async function updateStatus(req: Request, targetRaw: string): Promise<Response> {
+  const actor = await requireAdminPermission(req, 'TEAM_MANAGE')
+  const targetAdminId = uuid(targetRaw, 'ADMIN_USER_ID_INVALID')
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>
+  if (body.is_active !== false) throw new Error('ADMIN_STATUS_VALUE_INVALID')
+
+  const client = adminClient()
+  const { data, error } = await client.rpc('service_admin_deactivate_admin_user', {
+    p_target_admin_id: targetAdminId,
+    p_actor_admin_id: actor.adminId,
+  })
+  if (error) throw new Error(error.message || 'ADMIN_USER_DEACTIVATE_FAILED')
+
+  const result = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const authUserId = typeof result.auth_user_id === 'string' ? result.auth_user_id : ''
+  if (!authUserId) throw new Error('ADMIN_USER_AUTH_ID_MISSING')
+
+  const { error: banError } = await client.auth.admin.updateUserById(authUserId, { ban_duration: '876000h' })
+  if (banError) throw new Error('ADMIN_AUTH_BAN_FAILED')
+
+  return json({ member_id: targetAdminId, is_active: false, access_revoked: true })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
 
   try {
     const url = new URL(req.url)
     const root = url.pathname.replace(/\/+$/, '').endsWith('/admin-team-members')
-    const targetAdminId = targetIdFromPath(url.pathname)
+    const permissionTarget = permissionTargetFromPath(url.pathname)
+    const statusTarget = statusTargetFromPath(url.pathname)
     if (req.method === 'GET' && root) return await listMembers(req)
     if (req.method === 'POST' && root) {
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
@@ -253,7 +388,8 @@ Deno.serve(async (req) => {
       if (action === 'CREATE') return await createMember(req, body)
       throw new Error('ADMIN_TEAM_ACTION_INVALID')
     }
-    if (req.method === 'PUT' && targetAdminId) return await updatePermissions(req, targetAdminId)
+    if (req.method === 'PUT' && permissionTarget) return await updatePermissions(req, permissionTarget)
+    if (req.method === 'PUT' && statusTarget) return await updateStatus(req, statusTarget)
     if (!['GET', 'POST', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
     return json({ error: { code: 'NOT_FOUND' } }, 404)
   } catch (error) {
@@ -261,7 +397,11 @@ Deno.serve(async (req) => {
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' || code === 'ADMIN_OWNER_REQUIRED' ? 403
       : code === 'ADMIN_USER_NOT_FOUND' || code === 'ADMIN_TARGET_NOT_FOUND' ? 404
-      : code === 'ADMIN_EMAIL_ALREADY_REGISTERED' ? 409 : 400
+      : code === 'ADMIN_EMAIL_ALREADY_REGISTERED' ? 409
+      : code === 'ADMIN_SELF_DEACTIVATION_FORBIDDEN' || code === 'ADMIN_OWNER_DEACTIVATION_FORBIDDEN' ? 409
+      : code.includes('EMAIL_PROVIDER_') || code === 'EMAIL_SCOPE_SENDER_NOT_CONFIGURED' ? 502
+      : code === 'ADMIN_AUTH_BAN_FAILED' ? 502
+      : 400
     return json({ error: { code } }, status)
   }
 })
