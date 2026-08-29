@@ -2,6 +2,59 @@ alter table public.customers
   add column if not exists address text,
   add column if not exists anonymized_at timestamptz;
 
+-- Privacy hardening for the append-only identity history. The fraud/access-control
+-- model still compares stable equality, but identifiers are no longer stored in
+-- plaintext. There is no runtime bypass for the append-only trigger.
+create or replace function public.capture_customer_identity_keys(p_customer_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  c public.customers%rowtype;
+  v_normalized text;
+begin
+  select * into c from public.customers where id=p_customer_id;
+  if not found then return; end if;
+
+  v_normalized := nullif(regexp_replace(coalesce(c.cpf_cnpj,''),'\D','','g'),'');
+  if v_normalized is not null then
+    insert into public.customer_identity_keys(customer_id,key_type,normalized_value)
+    values(c.id,'TAX_ID','sha256:'||encode(extensions.digest('TAX_ID:'||v_normalized,'sha256'),'hex'))
+    on conflict do nothing;
+  end if;
+
+  v_normalized := nullif(regexp_replace(coalesce(c.phone,''),'\D','','g'),'');
+  if v_normalized is not null then
+    insert into public.customer_identity_keys(customer_id,key_type,normalized_value)
+    values(c.id,'PHONE','sha256:'||encode(extensions.digest('PHONE:'||v_normalized,'sha256'),'hex'))
+    on conflict do nothing;
+  end if;
+
+  v_normalized := nullif(lower(btrim(coalesce(c.email,''))),'');
+  if v_normalized is not null then
+    insert into public.customer_identity_keys(customer_id,key_type,normalized_value)
+    values(c.id,'EMAIL','sha256:'||encode(extensions.digest('EMAIL:'||v_normalized,'sha256'),'hex'))
+    on conflict do nothing;
+  end if;
+end;
+$$;
+
+-- One-time migration of the existing append-only keys. The guard is removed only
+-- inside this migration transaction, all existing values are irreversibly
+-- fingerprinted, and the append-only guard is restored immediately. No deployed
+-- runtime function can update or delete this history.
+drop trigger if exists customer_identity_keys_append_only on public.customer_identity_keys;
+update public.customer_identity_keys
+set normalized_value = case
+  when normalized_value ~ '^sha256:[0-9a-f]{64}$' then normalized_value
+  else 'sha256:'||encode(extensions.digest(key_type||':'||normalized_value,'sha256'),'hex')
+end;
+create trigger customer_identity_keys_append_only
+before update or delete on public.customer_identity_keys
+for each statement execute function public.guard_customer_access_append_only();
+
 create or replace function public.service_admin_get_customer_commercial_profile(p_customer_id uuid)
 returns jsonb
 language plpgsql
@@ -274,6 +327,9 @@ begin
     return public.service_admin_get_customer_commercial_profile(p_customer_id);
   end if;
 
+  -- Identity history is intentionally retained as irreversible SHA-256
+  -- fingerprints for the existing anti-evasion/access-control policy. The
+  -- append-only table is not updated or deleted by this runtime boundary.
   v_placeholder := 'Cliente anonimizado '||left(replace(p_customer_id::text,'-',''),8);
 
   update public.customers set
@@ -289,7 +345,6 @@ begin
     updated_at=now()
   where id=p_customer_id;
 
-  delete from public.customer_identity_keys where customer_id=p_customer_id;
   delete from public.kommo_customer_links where customer_id=p_customer_id;
   delete from public.customer_prebook_authorized_services where customer_id=p_customer_id;
   update public.customer_commercial_terms set is_active=false,updated_at=now() where customer_id=p_customer_id;
@@ -303,7 +358,7 @@ begin
   where customer_id=p_customer_id;
 
   update public.notification_delivery_logs set
-    recipient_hash=md5(p_customer_id::text)||md5('lgpd:'||p_customer_id::text),
+    recipient_hash=encode(extensions.digest('notification-lgpd:'||p_customer_id::text,'sha256'),'hex'),
     recipient_masked='***',
     payload_snapshot='{}'::jsonb,
     updated_at=now()
@@ -311,7 +366,11 @@ begin
 
   insert into public.audit_logs(admin_user_id,entity_type,entity_id,action,before_json,after_json,origin)
   values(p_admin_id,'CUSTOMER',p_customer_id,'CUSTOMER_ANONYMIZED',null,
-    jsonb_build_object('pii_removed',true,'financial_history_preserved',true),'ADMIN_UI');
+    jsonb_build_object(
+      'pii_removed',true,
+      'financial_history_preserved',true,
+      'identity_fingerprints_retained',true
+    ),'ADMIN_UI');
 
   return public.service_admin_get_customer_commercial_profile(p_customer_id);
 end;
