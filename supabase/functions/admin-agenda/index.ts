@@ -345,13 +345,14 @@ Deno.serve(async (req) => {
       const durationRaw = clean(url.searchParams.get('duration_blocks'))
       const durationBlocks = durationRaw === null ? null : Number(durationRaw)
       if (durationBlocks !== null && (!Number.isInteger(durationBlocks) || durationBlocks < 1)) throw new Error('INVALID_DURATION_BLOCKS')
-      const { data, error } = await client.rpc('list_available_slots', {
+      const { data, error } = await client.rpc('list_available_slots_for_duration', {
         p_service_id: uuid(url.searchParams.get('service_id'), 'SERVICE_ID_INVALID'),
         p_service_employee_id: uuid(url.searchParams.get('service_employee_id'), 'SERVICE_EMPLOYEE_ID_INVALID'),
+        p_duration_blocks: durationBlocks,
         p_extra_selections: [],
         p_people_count: peopleRaw,
         p_local_date: localDate,
-        p_duration_blocks: durationBlocks,
+        p_exclude_appointment_id: null,
       })
       if (error) throw new Error(error.message)
       return json({ slots: data ?? [], timezone: 'America/Sao_Paulo' })
