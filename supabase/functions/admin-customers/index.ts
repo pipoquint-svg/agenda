@@ -104,6 +104,7 @@ Deno.serve(async (req) => {
 
       const search = clean(url.searchParams.get('search'))
       if (url.searchParams.get('export') === 'csv') {
+        if (!(await hasAdminPermission(admin.adminId, 'CUSTOMERS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')
         const rows: Array<Record<string, unknown>> = []
         const pageSize = 200
         let offset = 0
