@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(34);
+select plan(38);
 
 select has_column('public','customers','address','customers stores the administrative address');
 select has_column('public','customers','anonymized_at','customers records LGPD anonymization time');
@@ -11,6 +11,7 @@ select has_function('public','service_admin_list_customers_page',array['text','i
 select has_function('public','service_admin_create_customer',array['text','text','text','text','text','date','uuid'],'admin customer creation boundary exists');
 select has_function('public','service_admin_update_customer_identity',array['uuid','text','text','text','text','date','uuid'],'admin customer identity update boundary exists');
 select has_function('public','service_admin_anonymize_customer',array['uuid','uuid'],'LGPD anonymization boundary exists');
+select has_function('public','service_admin_list_customer_service_options',array[]::text[],'customer service options read model exists');
 
 select is(
   (select count(*)::integer from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -48,6 +49,27 @@ select ok(
   and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,date,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_anonymize_customer(uuid,uuid)','EXECUTE'),
   'service_role can execute customer administration boundaries'
+);
+
+select ok(
+  (select p.prosecdef from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public' and p.proname='service_admin_list_customer_service_options'),
+  'customer service options boundary is SECURITY DEFINER'
+);
+select is(
+  (select p.proconfig::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public' and p.proname='service_admin_list_customer_service_options'),
+  '{"search_path=public, pg_temp"}',
+  'customer service options boundary pins search_path'
+);
+select ok(
+  not has_function_privilege('anon','public.service_admin_list_customer_service_options()','EXECUTE')
+  and not has_function_privilege('authenticated','public.service_admin_list_customer_service_options()','EXECUTE'),
+  'anon/authenticated cannot read customer service options directly'
+);
+select ok(
+  has_function_privilege('service_role','public.service_admin_list_customer_service_options()','EXECUTE'),
+  'service_role can read customer service options for the admin Edge Function'
 );
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at)
