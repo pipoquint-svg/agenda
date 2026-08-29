@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
           { data: birthDateReconciliation, error: reconciliationError },
         ] = await Promise.all([
           client.rpc('service_admin_get_customer_commercial_profile', { p_customer_id: id }),
-          client.from('services').select('id,name,slug,operation_scope').eq('is_active', true).not('operation_scope', 'is', null).order('sort_order').order('name'),
+          client.rpc('service_admin_list_customer_service_options'),
           client.rpc('service_admin_list_customer_birth_date_candidates', { p_customer_id: id, p_admin_id: admin.adminId }),
         ])
         if (error) throw new Error(error.message)
@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
           : undefined
         return json({
           profile,
-          services: services ?? [],
+          services: Array.isArray(services) ? services : [],
           birth_date_reconciliation: birthDateReconciliation ?? { canonical_birth_date: customer?.birth_date ?? null, candidates: [] },
         })
       }
