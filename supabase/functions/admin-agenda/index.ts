@@ -135,8 +135,8 @@ Deno.serve(async (req) => {
           .maybeSingle()
         if (currentTermsError) throw new Error(currentTermsError.message)
 
-        const hasBillingMode = Object.prototype.hasOwnProperty.call(body, 'billing_mode')
-        const hasInvoiceDueDays = Object.prototype.hasOwnProperty.call(body, 'invoice_due_days')
+        const hasBillingMode = Object.prototype.hasOwnProperty.call(body,'billing_mode')
+        const hasInvoiceDueDays = Object.prototype.hasOwnProperty.call(body,'invoice_due_days')
         const requestedBillingMode = hasBillingMode && typeof body.billing_mode === 'string'
           ? body.billing_mode.toUpperCase()
           : null
@@ -199,10 +199,10 @@ Deno.serve(async (req) => {
         await requirePermission('AGENDA_MANAGE')
         await requirePermission('AUDIT_VIEW')
         const evidence = requestEvidence(req)
-        const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : ''
+        const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0,500) : ''
         if (!reason) throw new Error('UNLOCK_REASON_REQUIRED')
         const { data, error } = await client.rpc('service_admin_unlock_appointment_token_verification', {
-          p_appointment_id: uuid(body.appointment_id, 'APPOINTMENT_ID_INVALID'),
+          p_appointment_id: uuid(body.appointment_id,'APPOINTMENT_ID_INVALID'),
           p_admin_id: admin.adminId,
           p_reason: reason,
           p_ip: evidence.ip,
@@ -277,8 +277,8 @@ Deno.serve(async (req) => {
 
     if (action === 'amelia') {
       await requirePermission('AGENDA_VIEW')
-      const startAt = requiredIso(url, 'start_at')
-      const endAt = requiredIso(url, 'end_at')
+      const startAt = requiredIso(url,'start_at')
+      const endAt = requiredIso(url,'end_at')
       const { data, error } = await client.rpc('service_admin_list_amelia_history', {
         p_start_at: startAt,
         p_end_at: endAt,
@@ -291,7 +291,7 @@ Deno.serve(async (req) => {
     if (action === 'customers') {
       await requirePermission('CUSTOMERS_VIEW')
       const limitRaw = Number(url.searchParams.get('limit') ?? '50')
-      const limit = Number.isInteger(limitRaw) ? Math.max(1, Math.min(limitRaw, 100)) : 50
+      const limit = Number.isInteger(limitRaw) ? Math.max(1,Math.min(limitRaw,100)) : 50
       const { data, error } = await client.rpc('service_admin_list_customers', {
         p_search: clean(url.searchParams.get('search')),
         p_limit: limit,
@@ -315,9 +315,9 @@ Deno.serve(async (req) => {
       const { data, error } = await client
         .from('services')
         .select('id,name,slug,duration_mode,is_active,sort_order')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true })
+        .eq('is_active',true)
+        .order('sort_order',{ascending:true})
+        .order('name',{ascending:true})
       if (error) throw new Error(error.message)
       return json({ services: data ?? [] })
     }
@@ -326,11 +326,11 @@ Deno.serve(async (req) => {
       await requirePermission('AGENDA_MANAGE')
       const [{ data: services, error: servicesError }, { data: assignments, error: assignmentsError }] = await Promise.all([
         client.from('services')
-          .select('id,name,slug,duration_mode,base_duration_minutes,minimum_people,maximum_people,sort_order')
-          .eq('is_active', true).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+          .select('id,name,slug,duration_mode,base_duration_minutes,booking_block_minutes,minimum_booking_blocks,maximum_booking_blocks,minimum_people,maximum_people,sort_order')
+          .eq('is_active',true).order('sort_order',{ascending:true}).order('name',{ascending:true}),
         client.from('service_employees')
           .select('id,service_id,employee_id,employees!inner(id,name,is_active)')
-          .eq('is_active', true).eq('employees.is_active', true),
+          .eq('is_active',true).eq('employees.is_active',true),
       ])
       if (servicesError || assignmentsError) throw new Error('MANUAL_BOOKING_OPTIONS_FAILED')
       return json({ services: services ?? [], service_employees: assignments ?? [] })
@@ -346,8 +346,8 @@ Deno.serve(async (req) => {
       const durationBlocks = durationRaw === null ? null : Number(durationRaw)
       if (durationBlocks !== null && (!Number.isInteger(durationBlocks) || durationBlocks < 1)) throw new Error('INVALID_DURATION_BLOCKS')
       const { data, error } = await client.rpc('list_available_slots_for_duration', {
-        p_service_id: uuid(url.searchParams.get('service_id'), 'SERVICE_ID_INVALID'),
-        p_service_employee_id: uuid(url.searchParams.get('service_employee_id'), 'SERVICE_EMPLOYEE_ID_INVALID'),
+        p_service_id: uuid(url.searchParams.get('service_id'),'SERVICE_ID_INVALID'),
+        p_service_employee_id: uuid(url.searchParams.get('service_employee_id'),'SERVICE_EMPLOYEE_ID_INVALID'),
         p_duration_blocks: durationBlocks,
         p_extra_selections: [],
         p_people_count: peopleRaw,
@@ -361,8 +361,8 @@ Deno.serve(async (req) => {
     if (action !== 'agenda') throw new Error('ADMIN_ACTION_INVALID')
 
     await requirePermission('AGENDA_VIEW')
-    const startAt = requiredIso(url, 'start_at')
-    const endAt = requiredIso(url, 'end_at')
+    const startAt = requiredIso(url,'start_at')
+    const endAt = requiredIso(url,'end_at')
     const { data, error } = await client.rpc('service_admin_list_agenda', {
       p_start_at: startAt,
       p_end_at: endAt,
