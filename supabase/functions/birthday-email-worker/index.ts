@@ -1,5 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
-import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, isScopeEnabled, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import { renderNotificationMessage, type NotificationTemplate } from '../_shared/notification-email.ts'
 
@@ -52,7 +52,7 @@ async function processDelivery(delivery: ClaimedDelivery): Promise<{ id: string;
     if (!delivery.template_id) throw new Error('BIRTHDAY_DELIVERY_TEMPLATE_MISSING')
     if (!isScopeEnabled(scope, Deno.env.get('TRANSACTIONAL_EMAIL_SCOPES'))) throw new Error('EMAIL_SCOPE_DISABLED')
 
-    const sender = senderForScope(scope)
+    const sender = notificationSenderForScope(scope)
     if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
 
     const [{ data: customer, error: customerError }, { data: template, error: templateError }, { data: operationSettings, error: operationError }] = await Promise.all([
