@@ -34,6 +34,25 @@ function iso(value: unknown, code: string): string {
   return parsed.toISOString()
 }
 
+async function sendAppointmentConfirmation(appointmentId: string, entityVersion: number): Promise<Record<string, unknown>> {
+  const baseUrl = (Deno.env.get('SUPABASE_URL') ?? '').trim().replace(/\/$/, '')
+  const internalSecret = (Deno.env.get('INTEGRATION_INTERNAL_SECRET') ?? '').trim()
+  if (!baseUrl || !internalSecret) throw new Error('CONFIRMATION_EMAIL_NOT_CONFIGURED')
+  const response = await fetch(`${baseUrl}/functions/v1/email-send`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-internal-secret': internalSecret },
+    body: JSON.stringify({ appointment_id: appointmentId, entity_version: entityVersion, reason: 'ADMIN_MANUAL_BOOKING' }),
+  })
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+  if (!response.ok) {
+    const nested = payload.error && typeof payload.error === 'object'
+      ? (payload.error as Record<string, unknown>).code
+      : null
+    throw new Error(`CONFIRMATION_EMAIL_FAILED:${typeof nested === 'string' ? nested : response.status}`)
+  }
+  return payload
+}
+
 function redactFinance(value: unknown): unknown {
   const blocked = new Set([
     'commercial_value', 'billing_mode', 'invoice_due_days', 'invoice_due_basis',
@@ -105,7 +124,15 @@ Deno.serve(async (req) => {
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json({ data: canViewFinance ? data : redactFinance(data) })
+      const appointmentId = data && typeof data === 'object'
+        ? clean((data as Record<string, unknown>).appointment_id)
+        : null
+      if (!appointmentId) throw new Error('CONFIRMED_APPOINTMENT_ID_MISSING')
+      const { data: appointment, error: appointmentError } = await client
+        .from('appointments').select('version').eq('id', appointmentId).maybeSingle()
+      if (appointmentError || !appointment) throw new Error('CONFIRMED_APPOINTMENT_LOOKUP_FAILED')
+      const confirmation = await sendAppointmentConfirmation(appointmentId, Number(appointment.version))
+      return json({ data: canViewFinance ? data : redactFinance(data), confirmation })
     }
 
     if (action === 'CANCEL') {
@@ -128,6 +155,8 @@ Deno.serve(async (req) => {
       ? 403
       : code === 'SLOT_NO_LONGER_AVAILABLE' || code === 'MAX_ACTIVE_PREBOOKS_REACHED'
       ? 409
+      : code === 'CONFIRMATION_EMAIL_FAILED' || code === 'CONFIRMATION_EMAIL_NOT_CONFIGURED'
+      ? 502
       : 400
     return json({ error: { code } }, status)
   }
