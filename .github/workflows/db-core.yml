@@ -33,6 +33,7 @@ jobs:
           deno test supabase/functions/_shared/mercado-pago-runtime_test.ts
           deno test supabase/functions/_shared/public-rate-limit_test.ts
           deno test supabase/functions/_shared/transactional-email_test.ts
+          deno test supabase/functions/_shared/notification-email_test.ts
 
       - name: Type-check every Edge Function
         run: |
