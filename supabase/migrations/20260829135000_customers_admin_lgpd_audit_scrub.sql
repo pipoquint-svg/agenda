@@ -1,3 +1,24 @@
+-- Audit logs are intentionally append-only. Etapa 4 must never create a
+-- runtime bypass to rewrite audit evidence. Fail the migration closed if a
+-- deployment unexpectedly contains customer audit snapshots with direct PII;
+-- the official production preflight has none, and all new customer audit
+-- events created by this stage store only changed/present flags.
+do $$
+begin
+  if exists (
+    select 1
+    from public.audit_logs
+    where entity_type='CUSTOMER'
+      and (
+        coalesce(before_json,'{}'::jsonb) ?| array['name','legal_name','cpf_cnpj','email','phone','address','birth_date','notes']
+        or coalesce(after_json,'{}'::jsonb) ?| array['name','legal_name','cpf_cnpj','email','phone','address','birth_date','notes']
+      )
+  ) then
+    raise exception 'CUSTOMER_AUDIT_PII_REQUIRES_EXPLICIT_MIGRATION_REDACTION';
+  end if;
+end;
+$$;
+
 create or replace function public.service_admin_anonymize_customer(
   p_customer_id uuid,
   p_admin_id uuid
@@ -55,13 +76,8 @@ begin
     updated_at=now()
   where customer_id=p_customer_id;
 
-  -- Customer audit metadata (who/when/action) is retained, but any old snapshot
-  -- that may have copied name, email, phone, address or birth date is scrubbed.
-  update public.audit_logs set
-    before_json=jsonb_build_object('lgpd_anonymized',true),
-    after_json=jsonb_build_object('lgpd_anonymized',true)
-  where entity_type='CUSTOMER' and entity_id=p_customer_id;
-
+  -- Append-only audit evidence is never rewritten. This event intentionally
+  -- stores no name/email/phone/address/birth date; only outcome metadata.
   insert into public.audit_logs(admin_user_id,entity_type,entity_id,action,before_json,after_json,origin)
   values(p_admin_id,'CUSTOMER',p_customer_id,'CUSTOMER_ANONYMIZED',null,
     jsonb_build_object(
