@@ -322,6 +322,42 @@ Deno.serve(async (req) => {
       return json({ services: data ?? [] })
     }
 
+    if (action === 'manual_booking_options') {
+      await requirePermission('AGENDA_MANAGE')
+      const [{ data: services, error: servicesError }, { data: assignments, error: assignmentsError }] = await Promise.all([
+        client.from('services')
+          .select('id,name,slug,duration_mode,base_duration_minutes,minimum_people,maximum_people,sort_order')
+          .eq('is_active', true).order('sort_order', { ascending: true }).order('name', { ascending: true }),
+        client.from('service_employees')
+          .select('id,service_id,employee_id,employees!inner(id,name,is_active)')
+          .eq('is_active', true).eq('employees.is_active', true),
+      ])
+      if (servicesError || assignmentsError) throw new Error('MANUAL_BOOKING_OPTIONS_FAILED')
+      return json({ services: services ?? [], service_employees: assignments ?? [] })
+    }
+
+    if (action === 'manual_booking_slots') {
+      await requirePermission('AGENDA_MANAGE')
+      const localDate = clean(url.searchParams.get('local_date'))
+      if (!localDate || !/^\d{4}-\d{2}-\d{2}$/.test(localDate)) throw new Error('LOCAL_DATE_INVALID')
+      const peopleRaw = Number(url.searchParams.get('people_count') ?? '1')
+      if (!Number.isInteger(peopleRaw) || peopleRaw < 1) throw new Error('INVALID_PEOPLE_COUNT')
+      const durationRaw = clean(url.searchParams.get('duration_blocks'))
+      const durationBlocks = durationRaw === null ? null : Number(durationRaw)
+      if (durationBlocks !== null && (!Number.isInteger(durationBlocks) || durationBlocks < 1)) throw new Error('INVALID_DURATION_BLOCKS')
+      const { data, error } = await client.rpc('list_available_slots_for_duration', {
+        p_service_id: uuid(url.searchParams.get('service_id'), 'SERVICE_ID_INVALID'),
+        p_service_employee_id: uuid(url.searchParams.get('service_employee_id'), 'SERVICE_EMPLOYEE_ID_INVALID'),
+        p_duration_blocks: durationBlocks,
+        p_extra_selections: [],
+        p_people_count: peopleRaw,
+        p_local_date: localDate,
+        p_exclude_appointment_id: null,
+      })
+      if (error) throw new Error(error.message)
+      return json({ slots: data ?? [], timezone: 'America/Sao_Paulo' })
+    }
+
     if (action !== 'agenda') throw new Error('ADMIN_ACTION_INVALID')
 
     await requirePermission('AGENDA_VIEW')
