@@ -6,7 +6,9 @@ const corsHeaders = {
   'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
 
+const TZ = 'America/Sao_Paulo'
 type Row = Record<string, unknown>
+type Scope = 'BLACKSHEEP' | 'SABRINA' | null
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -33,7 +35,28 @@ function month(value: unknown): string {
   return raw
 }
 
-function scope(value: unknown): 'BLACKSHEEP' | 'SABRINA' | null {
+function monthFromInstant(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) throw new Error('FINANCE_PERIOD_INVALID')
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: TZ, year: 'numeric', month: '2-digit' }).formatToParts(parsed)
+  const year = parts.find((part) => part.type === 'year')?.value
+  const mon = parts.find((part) => part.type === 'month')?.value
+  if (!year || !mon) throw new Error('FINANCE_PERIOD_INVALID')
+  return `${year}-${mon}`
+}
+
+function selectedMonth(url: URL): string {
+  const direct = clean(url.searchParams.get('month'))
+  if (direct) return month(direct)
+  const from = clean(url.searchParams.get('from')) ?? clean(url.searchParams.get('start_at'))
+  const to = clean(url.searchParams.get('to')) ?? clean(url.searchParams.get('end_at'))
+  if (!from || !to || !Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) || Date.parse(to) <= Date.parse(from)) {
+    throw new Error('FINANCE_PERIOD_INVALID')
+  }
+  return monthFromInstant(from)
+}
+
+function scope(value: unknown): Scope {
   const raw = clean(value)
   if (!raw || raw.toUpperCase() === 'ALL') return null
   const normalized = raw.toUpperCase()
@@ -95,6 +118,22 @@ async function readRpc(name: string, args: Row) {
   return data
 }
 
+async function monthClose(adminId: string, selected: string, operationScope: Scope) {
+  return await readRpc('service_admin_finance_month_close', {
+    p_month: `${selected}-01`,
+    p_operation_scope: operationScope,
+    p_admin_id: adminId,
+  }) as Row
+}
+
+async function manualReceipts(adminId: string, selected: string, operationScope: Scope) {
+  return await readRpc('service_admin_list_manual_receipts', {
+    p_month: `${selected}-01`,
+    p_operation_scope: operationScope,
+    p_admin_id: adminId,
+  }) as { month?: string; operation_scope?: string | null; timezone?: string; receipts?: Row[] }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'POST'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -104,17 +143,14 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET') {
       const admin = await requirePermission(req, 'FINANCE_VIEW')
-      const action = clean(url.searchParams.get('action'))
+      const action = clean(url.searchParams.get('action'))?.toLowerCase()
       if (!action) throw new Error('FINANCE_ACTION_REQUIRED')
+      const operationScope = scope(url.searchParams.get('operation_scope'))
 
-      if (action === 'month_close') {
-        const selectedMonth = month(url.searchParams.get('month'))
-        const operationScope = scope(url.searchParams.get('operation_scope'))
-        const data = await readRpc('service_admin_finance_month_close', {
-          p_month: `${selectedMonth}-01`,
-          p_operation_scope: operationScope,
-          p_admin_id: admin.adminId,
-        })
+      if (action === 'month_close' || action === 'closing') {
+        const selected = selectedMonth(url)
+        const data = await monthClose(admin.adminId, selected, operationScope)
+        if (action === 'closing') return json({ ...data, services: [] })
         return json(data)
       }
 
@@ -126,26 +162,53 @@ Deno.serve(async (req) => {
           p_search: search,
           p_limit: limit,
           p_admin_id: admin.adminId,
+        }) as { appointments?: Row[] }
+        if (url.searchParams.has('month') || url.searchParams.has('limit')) return json(data)
+        const receivables = (Array.isArray(data?.appointments) ? data.appointments : []).flatMap((row) => {
+          if (operationScope && row.operation_scope !== operationScope) return []
+          return [{
+            appointment_id: row.appointment_id,
+            public_code: row.public_code,
+            customer_id: row.customer_id,
+            customer_name: row.customer_name,
+            service: row.service_name,
+            start_at: row.start_at,
+            operation_scope: row.operation_scope,
+            commercial_value: row.commercial_value,
+            balance: row.remaining_due,
+          }]
         })
-        return json(data)
+        return json({ operation_scope: operationScope, search, receivables })
       }
 
-      if (action === 'manual_receipts') {
-        const selectedMonth = month(url.searchParams.get('month'))
-        const operationScope = scope(url.searchParams.get('operation_scope'))
-        const data = await readRpc('service_admin_list_manual_receipts', {
-          p_month: `${selectedMonth}-01`,
-          p_operation_scope: operationScope,
-          p_admin_id: admin.adminId,
-        })
-        return json(data)
+      if (action === 'manual_receipts' || action === 'receipts') {
+        const selected = selectedMonth(url)
+        const data = await manualReceipts(admin.adminId, selected, operationScope)
+        if (action === 'manual_receipts') return json(data)
+        const receipts = (Array.isArray(data?.receipts) ? data.receipts : []).map((row) => ({
+          id: row.transaction_id,
+          appointment_id: row.appointment_id,
+          public_code: row.public_code,
+          customer_id: row.customer_id,
+          customer_name: row.customer_name,
+          service: row.service_name,
+          operation_scope: row.operation_scope,
+          amount: row.amount,
+          method: row.method,
+          method_label: row.method === 'PIX' ? 'Pix' : row.method === 'CASH' ? 'Dinheiro' : row.method,
+          registered_at: row.paid_at,
+          registered_by_admin_id: row.created_by_admin_id,
+          registered_by: row.registered_by,
+          updated_at: row.paid_at,
+          reversed: row.editable === false || row.status === 'REFUNDED',
+        }))
+        return json({ month: data.month, operation_scope: data.operation_scope, timezone: data.timezone, receipts })
       }
 
-      if (action === 'nfse_export') {
-        const selectedMonth = month(url.searchParams.get('month'))
-        const operationScope = scope(url.searchParams.get('operation_scope'))
+      if (action === 'nfse_export' || action === 'export') {
+        const selected = selectedMonth(url)
         const data = await readRpc('service_admin_finance_nfse_export', {
-          p_month: `${selectedMonth}-01`,
+          p_month: `${selected}-01`,
           p_operation_scope: operationScope,
           p_admin_id: admin.adminId,
         }) as { rows?: Row[] } | null
@@ -156,7 +219,7 @@ Deno.serve(async (req) => {
           headers: {
             ...corsHeaders,
             'content-type': 'text/csv; charset=utf-8',
-            'content-disposition': `attachment; filename="nfse-${selectedMonth}-${suffix}.csv"`,
+            'content-disposition': `attachment; filename="nfse-${selected}-${suffix}.csv"`,
             'cache-control': 'no-store',
           },
         })
@@ -167,7 +230,14 @@ Deno.serve(async (req) => {
 
     const admin = await requirePermission(req, 'FINANCE_MANAGE')
     const body = await req.json().catch(() => ({})) as Row
-    const action = clean(body.action)
+    const rawAction = clean(body.action) ?? ''
+    const oldFacade = clean(url.searchParams.get('action'))?.toLowerCase() === 'manual_receipt'
+    const action = oldFacade
+      ? rawAction.toUpperCase() === 'CREATE' ? 'record_manual_receipt'
+        : rawAction.toUpperCase() === 'EDIT' ? 'edit_manual_receipt'
+          : rawAction.toUpperCase() === 'REVERSE' ? 'reverse_manual_receipt'
+            : rawAction
+      : rawAction
     const client = adminClient()
 
     if (action === 'record_manual_receipt') {
@@ -180,12 +250,13 @@ Deno.serve(async (req) => {
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(data, 201)
+      return json(oldFacade ? { result: data } : data, 201)
     }
 
     if (action === 'edit_manual_receipt') {
+      const transactionId = body.transaction_id ?? body.payment_transaction_id
       const { data, error } = await client.rpc('service_admin_edit_manual_receipt', {
-        p_transaction_id: uuid(body.transaction_id, 'MANUAL_RECEIPT_ID_INVALID'),
+        p_transaction_id: uuid(transactionId, 'MANUAL_RECEIPT_ID_INVALID'),
         p_method: clean(body.method),
         p_amount: amount(body.amount),
         p_paid_at: paidAt(body.paid_at),
@@ -193,17 +264,19 @@ Deno.serve(async (req) => {
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(oldFacade ? { result: data } : data)
     }
 
     if (action === 'reverse_manual_receipt') {
+      const transactionId = body.transaction_id ?? body.payment_transaction_id
+      const reason = clean(body.reason) ?? (oldFacade ? 'Estorno manual confirmado na Gestão' : null)
       const { data, error } = await client.rpc('service_admin_reverse_manual_receipt', {
-        p_transaction_id: uuid(body.transaction_id, 'MANUAL_RECEIPT_ID_INVALID'),
-        p_reason: clean(body.reason),
+        p_transaction_id: uuid(transactionId, 'MANUAL_RECEIPT_ID_INVALID'),
+        p_reason: reason,
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(data)
+      return json(oldFacade ? { result: data } : data)
     }
 
     return json({ error: { code: 'NOT_FOUND' } }, 404)
