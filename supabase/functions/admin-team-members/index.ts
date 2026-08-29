@@ -28,6 +28,7 @@ const allowedPermissions = new Set([
 ])
 const creatableRoles = new Set(['ADMIN', 'OPERATION', 'FINANCE'])
 const INVITE_EVENT = 'ADMIN_USER_INVITE'
+const OFFICIAL_SITE_URL = 'https://www.blacksheepestudiocriativo.com.br'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -64,10 +65,8 @@ function statusTargetFromPath(pathname: string): string | null {
   return match ? match[1] : null
 }
 
-function firstAccessUrl(siteUrl: unknown): string {
-  const raw = typeof siteUrl === 'string' ? siteUrl.trim() : ''
-  if (!/^https:\/\//i.test(raw)) throw new Error('ADMIN_INVITE_SITE_URL_INVALID')
-  const url = new URL(raw)
+function firstAccessUrl(): string {
+  const url = new URL(OFFICIAL_SITE_URL)
   url.pathname = '/gestao/primeiro-acesso'
   url.search = ''
   url.hash = ''
@@ -158,7 +157,7 @@ async function createMember(req: Request, body: Record<string, unknown>): Promis
   if (templateError || !template) throw new Error('ADMIN_INVITE_TEMPLATE_NOT_FOUND')
   if (operationError) throw new Error('ADMIN_INVITE_OPERATION_SETTINGS_FAILED')
 
-  const redirectTo = firstAccessUrl(operationSettings?.public_site_url)
+  const redirectTo = firstAccessUrl()
   const sender = notificationSenderForScope('BLACKSHEEP')
   if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
 
@@ -198,7 +197,7 @@ async function createMember(req: Request, body: Record<string, unknown>): Promis
       'employee.name': displayName,
       'auth.invite_url': linkData.properties.action_link,
       'operation.name': String(operationSettings?.public_name ?? sender.brandName),
-      'operation.site_url': String(operationSettings?.public_site_url ?? ''),
+      'operation.site_url': OFFICIAL_SITE_URL,
     }
     const message = renderNotificationMessage(template as NotificationTemplate, values, sender.brandName)
     const idempotencyKey = `admin-user-invite:${authUserId}`
