@@ -61,6 +61,28 @@ begin
   delete from public.customer_prebook_authorized_services where customer_id=p_customer_id;
   update public.customer_commercial_terms set is_active=false,updated_at=now() where customer_id=p_customer_id;
 
+  -- Historical booking/financial relationships remain linked by customer UUID,
+  -- but customer snapshots that duplicate direct PII are removed.
+  update public.appointment_participants set
+    name_snapshot=v_placeholder,
+    email_snapshot=null,
+    phone_snapshot=null,
+    cpf_cnpj_snapshot=null
+  where customer_id=p_customer_id;
+
+  update public.checkout_holds set recovery_phone=null
+  where primary_customer_id=p_customer_id;
+
+  update public.legacy_amelia_bookings set
+    customer_name=v_placeholder,
+    customer_email=null,
+    customer_phone=null,
+    cpf_cnpj=null,
+    custom_fields_json='{}'::jsonb,
+    notes=null,
+    last_imported_at=now()
+  where matched_customer_id=p_customer_id;
+
   update public.legacy_customer_sources set
     raw_snapshot=jsonb_build_object('lgpd_anonymized',true),
     match_method='UNMATCHED',
