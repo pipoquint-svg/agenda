@@ -1,62 +1,17 @@
-name: Mercado Pago Staging Browser Gate
+name: Retired Mercado Pago Staging Browser Gate
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/mercado-pago-staging-browser-gate.yml
-      - scripts/mercado-pago-staging-browser-gate.mjs
 
 permissions:
   contents: read
 
-env:
-  STAGING_URL: https://blacksheep-agenda-staging.lovable.app/agenda-e-valores
-  ARTIFACT_DIR: /tmp/mp-browser
-
 jobs:
-  browser-card-gate:
-    name: Browser HTTPS — APRO e OTHE
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Playwright
-        shell: bash
+      - name: Parallel staging retired
         run: |
-          set -euo pipefail
-          npm install --no-save playwright@1.55.0 >/dev/null
-          npx playwright install --with-deps chromium >/dev/null
-          mkdir -p "$ARTIFACT_DIR"
-
-      - name: Run HTTPS browser scenarios
-        shell: bash
-        run: |
-          set -euo pipefail
-          xvfb-run -a node scripts/mercado-pago-staging-browser-gate.mjs
-
-      - name: Summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo '## Mercado Pago STAGING_BROWSER — HTTPS'
-            echo
-            echo '- URL: `https://blacksheep-agenda-staging.lovable.app/agenda-e-valores`'
-            echo '- Environment: sandbox only'
-            echo '- Browser: Chromium headed under Xvfb'
-            echo '- Harness: `scripts/mercado-pago-staging-browser-gate.mjs`'
-            echo '- Real card/customer/charge: NO'
-            echo '- Scenarios: APRO + OTHE'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mercado-pago-staging-browser
-          path: /tmp/mp-browser/*.png
-          if-no-files-found: ignore
+          echo "This workflow is intentionally retired."
+          echo "BlackSheep Agenda uses only the official operational environment."
+          echo "Provider sandbox validation remains isolated to Mercado Pago provider-only gates."
