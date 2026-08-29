@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(38);
+select plan(39);
 
 select has_column('public','customers','address','customers stores the administrative address');
 select has_column('public','customers','anonymized_at','customers records LGPD anonymization time');
