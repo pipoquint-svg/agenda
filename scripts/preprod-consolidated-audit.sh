@@ -2,14 +2,42 @@
 set -euo pipefail
 
 : "${LOCAL_DATABASE_URL:?LOCAL_DATABASE_URL required}"
-: "${SANDBOX_DATABASE_URL:?SANDBOX_DATABASE_URL required}"
 
 out_dir="${AUDIT_OUT_DIR:-artifacts/preprod-audit}"
 mkdir -p "$out_dir"
+
+# Structural comparison intentionally normalizes only the trailing NOT VALID
+# decoration emitted by pg_get_constraintdef. Validation state is operational
+# migration state and is asserted by dedicated pgTAP where required. All other
+# constraint semantics remain part of the diff.
+query_columns="copy (select n.nspname, c.relname, a.attnum, a.attname, format_type(a.atttypid,a.atttypmod), a.attnotnull, coalesce(pg_get_expr(d.adbin,d.adrelid),''), a.attidentity, a.attgenerated from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where n.nspname='public' and c.relkind in ('r','p','v','m') and a.attnum>0 and not a.attisdropped order by 1,2,3) to stdout with csv"
+query_constraints="copy (select c.relname, con.conname, con.contype, con.condeferrable, con.condeferred, regexp_replace(pg_get_constraintdef(con.oid,true), ' NOT VALID$', '') from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' order by 1,2) to stdout with csv"
+query_indexes="copy (select tablename,indexname,indexdef from pg_indexes where schemaname='public' order by 1,2) to stdout with csv"
+query_functions="copy (select p.proname, pg_get_function_identity_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, p.provolatile, p.prosecdef, p.proparallel, p.proisstrict, p.proleakproof, coalesce(array_to_string(p.proconfig,E'\\n'),'') from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_language l on l.oid=p.prolang where n.nspname='public' order by 1,2) to stdout with csv"
+
+capture_schema() {
+  local database_url="$1"
+  local prefix="$2"
+  mkdir -p "$(dirname "$prefix")"
+  local object qvar q
+  for object in columns constraints indexes functions; do
+    qvar="query_${object}"
+    q="${!qvar}"
+    PGPASSWORD='' psql "$database_url" -X -qAtc "$q" > "${prefix}-${object}.csv"
+  done
+}
+
+if [[ "${1:-}" == '--capture-schema' ]]; then
+  : "${AUDIT_CAPTURE_PREFIX:?AUDIT_CAPTURE_PREFIX required in capture mode}"
+  capture_schema "$LOCAL_DATABASE_URL" "$AUDIT_CAPTURE_PREFIX"
+  exit 0
+fi
+
+: "${REFERENCE_SCHEMA_PREFIX:?REFERENCE_SCHEMA_PREFIX required}"
 report="$out_dir/report.md"
 
 {
-  echo '# Auditoria consolidada V1 pré-produção'
+  echo '# Auditoria consolidada V1 — reconstrução isolada'
   echo
   echo "Commit: \`${GITHUB_SHA:-local}\`"
   echo "Baseline estrutural: \`${AUDIT_SCHEMA_BASELINE:-head}\`"
@@ -73,37 +101,32 @@ done < <(find supabase/functions -mindepth 2 -maxdepth 2 -type f -name index.ts 
   echo
 } >> "$report"
 
-# Structural comparison intentionally normalizes only the trailing NOT VALID
-# decoration emitted by pg_get_constraintdef. Validation state is operational
-# migration state and is asserted by dedicated pgTAP where required. All other
-# constraint semantics remain part of the diff.
-query_columns="copy (select n.nspname, c.relname, a.attnum, a.attname, format_type(a.atttypid,a.atttypmod), a.attnotnull, coalesce(pg_get_expr(d.adbin,d.adrelid),''), a.attidentity, a.attgenerated from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where n.nspname='public' and c.relkind in ('r','p','v','m') and a.attnum>0 and not a.attisdropped order by 1,2,3) to stdout with csv"
-query_constraints="copy (select c.relname, con.conname, con.contype, con.condeferrable, con.condeferred, regexp_replace(pg_get_constraintdef(con.oid,true), ' NOT VALID$', '') from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' order by 1,2) to stdout with csv"
-query_indexes="copy (select tablename,indexname,indexdef from pg_indexes where schemaname='public' order by 1,2) to stdout with csv"
-query_functions="copy (select p.proname, pg_get_function_identity_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, p.provolatile, p.prosecdef, p.proparallel, p.proisstrict, p.proleakproof, coalesce(array_to_string(p.proconfig,E'\\n'),'') from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_language l on l.oid=p.prolang where n.nspname='public' order by 1,2) to stdout with csv"
+capture_schema "$LOCAL_DATABASE_URL" "$out_dir/local"
 
 schema_failed=0
 for object in columns constraints indexes functions; do
-  qvar="query_${object}"
-  q="${!qvar}"
-  PGPASSWORD='' psql "$LOCAL_DATABASE_URL" -X -qAtc "$q" > "$out_dir/local-${object}.csv"
-  PGPASSWORD='' psql "$SANDBOX_DATABASE_URL" -X -qAtc "$q" > "$out_dir/sandbox-${object}.csv"
-  if ! diff -u "$out_dir/local-${object}.csv" "$out_dir/sandbox-${object}.csv" > "$out_dir/${object}.diff"; then
+  reference_file="${REFERENCE_SCHEMA_PREFIX}-${object}.csv"
+  local_file="$out_dir/local-${object}.csv"
+  if [[ ! -f "$reference_file" ]]; then
+    echo "Missing structural reference: $reference_file" >&2
+    exit 1
+  fi
+  if ! diff -u "$reference_file" "$local_file" > "$out_dir/${object}.diff"; then
     schema_failed=1
   fi
 done
 
 {
-  echo '## 3. Diff estrutural schema declarado × sandbox'
+  echo '## 3. Determinismo estrutural das migrations'
   echo
   echo "Baseline usada: \`${AUDIT_SCHEMA_BASELINE:-head}\`."
-  echo 'Cobertura: tabelas/views + colunas, definições de constraints, índices e estrutura de funções do schema `public`. Somente o sufixo operacional `NOT VALID` é normalizado; o estado de validação é verificado por testes dedicados.'
+  echo 'Cobertura: duas reconstruções locais independentes, feitas somente a partir das migrations versionadas. Comparamos tabelas/views + colunas, definições de constraints, índices e estrutura de funções do schema `public`.'
   echo
   for object in columns constraints indexes functions; do
     if [[ -s "$out_dir/${object}.diff" ]]; then
-      echo "- **$object:** DIFERENÇA ENCONTRADA (ver artifact)"
+      echo "- **$object:** NÃO DETERMINÍSTICO (ver artifact)"
     else
-      echo "- **$object:** idêntico"
+      echo "- **$object:** idêntico nas duas reconstruções"
     fi
   done
   echo
@@ -116,6 +139,6 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 
 if (( schema_failed != 0 )); then
-  echo 'Structural schema drift detected between selected repository baseline and sandbox.' >&2
+  echo 'Structural schema is non-deterministic across independent local rebuilds.' >&2
   exit 1
 fi
