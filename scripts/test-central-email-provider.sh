@@ -3,14 +3,18 @@ set -euo pipefail
 
 root='supabase/functions'
 provider_file="$root/_shared/email-provider.ts"
+provider_test_file="$root/_shared/email-provider_test.ts"
 
 fail_matches() {
   local pattern="$1"
   local label="$2"
   local matches
-  matches="$(grep -R -n -F --include='*.ts' "$pattern" "$root" 2>/dev/null | grep -v -F "$provider_file" || true)"
+  matches="$(grep -R -n -F --include='*.ts' "$pattern" "$root" 2>/dev/null \
+    | grep -v -F "$provider_file" \
+    | grep -v -F "$provider_test_file" \
+    || true)"
   if [[ -n "$matches" ]]; then
-    echo "EMAIL_PROVIDER_INVARIANT_FAILED: $label must exist only in $provider_file" >&2
+    echo "EMAIL_PROVIDER_INVARIANT_FAILED: $label must exist only in $provider_file (tests may assert the contract in $provider_test_file)" >&2
     echo "$matches" >&2
     exit 1
   fi

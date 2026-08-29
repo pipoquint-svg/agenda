@@ -51,6 +51,28 @@ export function senderForScope(scope: string): EmailSender | null {
   return null
 }
 
+/**
+ * Canonical sender for the unified notification platform.
+ *
+ * Customer-facing reservation, balance and birthday notifications intentionally
+ * share one From/Reply-To identity. The operation scope still controls the brand
+ * name rendered inside the common visual shell. Supabase Auth keeps using
+ * senderForScope() until the separate Auth convergence work is explicitly done.
+ */
+export function notificationSenderForScope(scope: string): EmailSender | null {
+  const normalized = scope.trim().toUpperCase() as EmailOperationScope
+  if (!['BLACKSHEEP', 'SABRINA'].includes(normalized)) return null
+
+  const canonical = senderForScope('BLACKSHEEP')
+  if (!canonical) return null
+
+  return {
+    brandName: normalized === 'SABRINA' ? 'Sabrina Pierri' : 'BlackSheep Estúdio Criativo',
+    from: canonical.from,
+    replyTo: canonical.replyTo,
+  }
+}
+
 export async function sendEmailWithProvider(
   payload: EmailProviderPayload,
   idempotencyKey: string,
