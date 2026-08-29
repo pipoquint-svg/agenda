@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(30);
+select plan(32);
 
 select has_column('public','customers','address','customers stores the administrative address');
 select has_column('public','customers','anonymized_at','customers records LGPD anonymization time');
@@ -45,7 +45,7 @@ select ok(
 select ok(
   has_function_privilege('service_role','public.service_admin_list_customers_page(text,integer,integer)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_create_customer(text,text,text,text,text,date,uuid)','EXECUTE')
-  and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,date,uuid)','EXECUTE')
+  and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,date,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_anonymize_customer(uuid,uuid)','EXECUTE'),
   'service_role can execute customer administration boundaries'
 );
@@ -68,6 +68,11 @@ select is((select email from public.customers where name='Cliente Etapa 4'),'cli
 select is((select address from public.customers where name='Cliente Etapa 4'),'Rua do Estúdio, 100','creation persists address');
 select is((select birth_date from public.customers where name='Cliente Etapa 4'),'1990-05-10'::date,'creation persists birth date');
 select is((select count(*)::integer from public.audit_logs where entity_type='CUSTOMER' and action='CUSTOMER_CREATED' and entity_id=(select id from public.customers where name='Cliente Etapa 4')),1,'customer creation is audited');
+select ok(
+  exists(select 1 from public.customer_identity_keys k join public.customers c on c.id=k.customer_id where c.name='Cliente Etapa 4')
+  and not exists(select 1 from public.customer_identity_keys k join public.customers c on c.id=k.customer_id where c.name='Cliente Etapa 4' and k.normalized_value !~ '^sha256:[0-9a-f]{64}$'),
+  'new customer identity keys are irreversible fingerprints, not plaintext PII'
+);
 
 select throws_ok(
   $$select public.service_admin_create_customer(
@@ -129,7 +134,7 @@ select lives_ok(
     (select id from public.customers where name='Cliente Etapa 4 Editado'),
     '24000000-0000-4000-8000-000000000001'::uuid
   )$$,
-  'LGPD anonymization succeeds without deleting the customer identity key'
+  'LGPD anonymization succeeds without bypassing append-only identity history'
 );
 
 select ok(
@@ -141,13 +146,22 @@ select ok(
   exists(select 1 from public.customer_balance_movements m join public.customers c on c.id=m.customer_id where m.idempotency_key='etapa4-finance-idempotency' and c.anonymized_at is not null),
   'LGPD anonymization preserves the financial customer_id relationship'
 );
-select is((select count(*)::integer from public.customer_identity_keys k join public.customers c on c.id=k.customer_id where c.anonymized_at is not null and c.name like 'Cliente anonimizado %'),0,'LGPD anonymization removes customer identity keys');
+select ok(
+  exists(select 1 from public.customer_identity_keys k join public.customers c on c.id=k.customer_id where c.anonymized_at is not null and c.name like 'Cliente anonimizado %')
+  and not exists(select 1 from public.customer_identity_keys k join public.customers c on c.id=k.customer_id where c.anonymized_at is not null and c.name like 'Cliente anonimizado %' and k.normalized_value !~ '^sha256:[0-9a-f]{64}$'),
+  'LGPD anonymization retains only irreversible append-only identity fingerprints for access-control history'
+);
 select is((select raw_snapshot from public.legacy_customer_sources where source='ETAPA4_TEST' and source_key='customer-row-1'),'{"lgpd_anonymized": true}'::jsonb,'LGPD anonymization scrubs linked legacy PII snapshot');
 select ok(
   exists(select 1 from public.notification_delivery_logs where idempotency_key='etapa4-lgpd-notification' and recipient_masked='***' and payload_snapshot='{}'::jsonb and recipient_hash<>repeat('a',64)),
   'LGPD anonymization scrubs notification recipient evidence while keeping delivery history'
 );
 select is((select count(*)::integer from public.audit_logs where entity_type='CUSTOMER' and action='CUSTOMER_ANONYMIZED' and entity_id=(select customer_id from public.customer_balance_movements where idempotency_key='etapa4-finance-idempotency')),1,'LGPD anonymization is audited once');
+select is(
+  (select count(*)::integer from public.customer_identity_keys where normalized_value !~ '^sha256:[0-9a-f]{64}$'),
+  0,
+  'migration leaves no plaintext identity keys in the append-only identity table'
+);
 
 select * from finish();
 rollback;
