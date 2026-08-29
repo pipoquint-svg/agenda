@@ -5,6 +5,7 @@ root='supabase/functions'
 confirmation="$root/email-send/index.ts"
 balance="$root/balance-collection-notify-email/index.ts"
 birthday="$root/birthday-email-worker/index.ts"
+admin_notifications="$root/admin-notifications/index.ts"
 auth="$root/auth-send-email/index.ts"
 
 fail() {
@@ -12,7 +13,7 @@ fail() {
   exit 1
 }
 
-for flow in "$confirmation" "$balance" "$birthday"; do
+for flow in "$confirmation" "$balance" "$birthday" "$admin_notifications"; do
   grep -Fq 'notificationSenderForScope' "$flow" || fail "$flow bypasses the canonical notification sender"
   grep -Fq 'sendEmailWithProvider' "$flow" || fail "$flow bypasses the canonical provider"
   grep -Fq 'renderNotificationMessage' "$flow" || fail "$flow bypasses the shared renderer"
@@ -38,6 +39,11 @@ done
 grep -Fq 'claim_birthday_notification_deliveries' "$birthday" || fail 'birthday worker does not claim central delivery logs'
 grep -Fq 'finalize_birthday_notification_delivery' "$birthday" || fail 'birthday worker does not finalize central delivery logs'
 grep -Fq 'fail_birthday_notification_delivery' "$birthday" || fail 'birthday worker does not persist central delivery failures'
+
+grep -Fq 'beginNotificationDelivery' "$admin_notifications" || fail 'admin test-send does not create a central delivery log'
+grep -Fq 'isTest: true' "$admin_notifications" || fail 'admin test-send is not marked as test evidence'
+grep -Fq 'markNotificationSent' "$admin_notifications" || fail 'admin test-send does not mark successful delivery'
+grep -Fq 'markNotificationFailed' "$admin_notifications" || fail 'admin test-send does not persist provider failure'
 
 # Auth convergence is intentionally deferred. Lock the boundary so this Etapa 2
 # cannot silently change Supabase Auth sender/template behavior.
