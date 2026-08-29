@@ -1,5 +1,5 @@
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
-import { senderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import {
   beginNotificationDelivery,
@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
         }
       }
       if (!['BLACKSHEEP', 'SABRINA'].includes(scope)) scope = 'BLACKSHEEP'
-      const sender = senderForScope(scope)
+      const sender = notificationSenderForScope(scope)
       if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
 
       const { data: authUser, error: authUserError } = await client.auth.admin.getUserById(admin.authUserId)
