@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(32);
+select plan(34);
 
 select has_column('public','customers','address','customers stores the administrative address');
 select has_column('public','customers','anonymized_at','customers records LGPD anonymization time');
@@ -45,7 +45,7 @@ select ok(
 select ok(
   has_function_privilege('service_role','public.service_admin_list_customers_page(text,integer,integer)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_create_customer(text,text,text,text,text,date,uuid)','EXECUTE')
-  and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,text,date,uuid)','EXECUTE')
+  and has_function_privilege('service_role','public.service_admin_update_customer_identity(uuid,text,text,text,text,date,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_anonymize_customer(uuid,uuid)','EXECUTE'),
   'service_role can execute customer administration boundaries'
 );
