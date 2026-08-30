@@ -1,4 +1,4 @@
-export type MercadoPagoEnvironment = 'sandbox' | 'production'
+export type MercadoPagoEnvironment = 'production'
 
 export type MercadoPagoRuntime = {
   environment: MercadoPagoEnvironment
@@ -23,50 +23,33 @@ function optionalEnv(name: string): string {
   }
 }
 
+/**
+ * Mercado Pago production runtime.
+ *
+ * BlackSheep no longer supports sandbox or generic provider credentials in the
+ * operational backend. Every provider read and financial mutation uses the official
+ * production-scoped Access Token. Financial mutations additionally require the
+ * explicit ALLOW_REAL_CHARGES gate.
+ */
 export function mercadoPagoRuntime(input: {
   environment?: string | null
-  accessToken?: string | null
-  sandboxAccessToken?: string | null
   productionAccessToken?: string | null
   allowRealCharges?: string | null
   creatingCharge?: boolean
 }): MercadoPagoRuntime {
   const environment = clean(input.environment).toLowerCase()
-  if (environment !== 'sandbox' && environment !== 'production') {
-    throw new Error('MERCADO_PAGO_ENV_INVALID')
-  }
+  if (environment !== 'production') throw new Error('MERCADO_PAGO_ENV_INVALID')
 
-  // Orders API credentials cannot be classified safely by prefix: Mercado Pago
-  // documents APP_USR credentials for both test and production in this solution.
-  // Charge creation therefore requires an environment-scoped secret. The generic
-  // token remains only as a compatibility fallback for read/reconciliation calls.
-  const genericAccessToken = clean(input.accessToken)
-  let scopedAccessToken = ''
+  const accessToken = input.productionAccessToken !== undefined
+    ? clean(input.productionAccessToken)
+    : optionalEnv('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
+  if (!accessToken) throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
 
-  if (environment === 'sandbox') {
-    scopedAccessToken = input.sandboxAccessToken !== undefined
-      ? clean(input.sandboxAccessToken)
-      : optionalEnv('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')
-    if (input.creatingCharge && !scopedAccessToken) {
-      throw new Error('MISSING_ENV:MERCADO_PAGO_SANDBOX_ACCESS_TOKEN')
-    }
-  } else {
-    scopedAccessToken = input.productionAccessToken !== undefined
-      ? clean(input.productionAccessToken)
-      : optionalEnv('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
-    if (input.creatingCharge && !scopedAccessToken) {
-      throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
-    }
-  }
-
-  const accessToken = scopedAccessToken || genericAccessToken
-  if (!accessToken) throw new Error('MISSING_ENV:MERCADO_PAGO_ACCESS_TOKEN')
-
-  // Creating a real charge requires a second explicit production gate. Read/reconcile
-  // calls stay available so production can recover provider state during incidents.
-  if (environment === 'production' && input.creatingCharge && !enabled(input.allowRealCharges)) {
+  // Charge creation, provider cancellation and refunds mutate real money. Reads and
+  // reconciliation remain available while the mutation gate is closed.
+  if (input.creatingCharge && !enabled(input.allowRealCharges)) {
     throw new Error('REAL_CHARGES_DISABLED')
   }
 
-  return { environment, accessToken }
+  return { environment: 'production', accessToken }
 }
