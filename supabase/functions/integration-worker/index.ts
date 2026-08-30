@@ -169,7 +169,8 @@ Deno.serve(async (req) => {
       try {
         if (job.job_type === 'GOOGLE_CALENDAR_SYNC') {
           if (!googleIntegrationEnabled) throw new Error('GOOGLE_INTEGRATION_DISABLED')
-          await invokeFunction('google-sync', secret, { google_calendar_id: job.entity_id, force_full: false })
+          const forceFull = job.payload_json?.force_full === true
+          await invokeFunction('google-sync', secret, { google_calendar_id: job.entity_id, force_full: forceFull })
         } else if (job.job_type === 'GOOGLE_APPOINTMENT_SYNC') {
           if (!googleIntegrationEnabled) throw new Error('GOOGLE_INTEGRATION_DISABLED')
           if (!Number.isInteger(job.entity_version) || job.entity_version < 1) throw new Error('GOOGLE_APPOINTMENT_SYNC_VERSION_REQUIRED')
