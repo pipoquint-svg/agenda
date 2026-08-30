@@ -91,14 +91,22 @@ Deno.serve(async (req) => {
         ])
         if (error) throw new Error(error.message)
         if (servicesError) throw new Error('CUSTOMER_SERVICES_QUERY_FAILED')
-        if (reconciliationError) throw new Error('CUSTOMER_BIRTH_DATE_RECONCILIATION_QUERY_FAILED')
         const customer = profile && typeof profile === 'object' && !Array.isArray(profile)
           ? ((profile as Record<string, unknown>).customer as Record<string, unknown> | undefined)
           : undefined
+        const reconciliationFallback = {
+          canonical_birth_date: customer?.birth_date ?? null,
+          birth_date_locked: false,
+          has_conflict: false,
+          candidates: [],
+        }
+        if (reconciliationError) {
+          console.warn('CUSTOMER_BIRTH_DATE_RECONCILIATION_UNAVAILABLE', { customer_id: id, message: reconciliationError.message })
+        }
         return json({
           profile,
           services: Array.isArray(services) ? services : [],
-          birth_date_reconciliation: birthDateReconciliation ?? { canonical_birth_date: customer?.birth_date ?? null, candidates: [] },
+          birth_date_reconciliation: reconciliationError ? reconciliationFallback : (birthDateReconciliation ?? reconciliationFallback),
         })
       }
 
