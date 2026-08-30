@@ -29,7 +29,7 @@ function paymentBaseUrl(): string {
     if (parsed.protocol !== 'https:') throw new Error('PREBOOK_PUBLIC_BASE_URL_INVALID')
     return parsed.toString().replace(/\/+$/, '')
   }
-  return 'https://www.blacksheepestudiocriativo.com.br'
+  return 'https://agenda.blacksheepestudiocriativo.com.br'
 }
 
 export async function sendPreReservationCreatedEmail(
