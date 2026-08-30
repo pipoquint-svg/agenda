@@ -1,0 +1,38 @@
+name: Mercado Pago readiness probe temp
+
+on:
+  push:
+    branches:
+      - mp-readiness-probe-temp
+    paths:
+      - .github/workflows/mp-readiness-probe-temp.yml
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Probe sanitized Mercado Pago readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://sbexdggbwqvyhbkatucs.supabase.co/functions/v1/mercado-pago-readiness-probe-temp'
+          BODY="$(curl --fail --silent --show-error --max-time 15 "$URL")"
+          echo "readiness=$BODY"
+          python3 - "$BODY" <<'PY'
+          import json, sys
+          row = json.loads(sys.argv[1])
+          expected = {
+              'environment_ok': True,
+              'production_token_present': True,
+              'provider_authenticated': True,
+              'webhook_secret_present': True,
+              'allow_real_charges': False,
+          }
+          bad = {k: (row.get(k), v) for k, v in expected.items() if row.get(k) != v}
+          if bad:
+              raise SystemExit(f'readiness mismatch: {bad}')
+          PY
