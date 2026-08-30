@@ -17,6 +17,7 @@ export type EmailProviderPayload = {
 
 const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails'
 const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000
+const DEFAULT_NOTIFICATION_FROM_BLACKSHEEP = 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>'
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim() ?? ''
@@ -58,18 +59,21 @@ export function senderForScope(scope: string): EmailSender | null {
  * share one From/Reply-To identity. The operation scope still controls the brand
  * name rendered inside the common visual shell. Supabase Auth keeps using
  * senderForScope() until the separate Auth convergence work is explicitly done.
+ *
+ * The canonical From address is public configuration, not a credential. Keeping
+ * the documented BlackSheep address as a fallback prevents notification delivery
+ * from being disabled when the optional EMAIL_FROM_BLACKSHEEP override is absent.
  */
 export function notificationSenderForScope(scope: string): EmailSender | null {
   const normalized = scope.trim().toUpperCase() as EmailOperationScope
   if (!['BLACKSHEEP', 'SABRINA'].includes(normalized)) return null
 
   const canonical = senderForScope('BLACKSHEEP')
-  if (!canonical) return null
 
   return {
     brandName: normalized === 'SABRINA' ? 'Sabrina Pierri' : 'BlackSheep Estúdio Criativo',
-    from: canonical.from,
-    replyTo: canonical.replyTo,
+    from: canonical?.from ?? DEFAULT_NOTIFICATION_FROM_BLACKSHEEP,
+    replyTo: canonical?.replyTo ?? null,
   }
 }
 
