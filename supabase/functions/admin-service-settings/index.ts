@@ -95,21 +95,24 @@ Deno.serve(async (req) => {
     if (req.method === 'GET') {
       await requirePermission('SERVICES_VIEW')
       const canSeeFinance = await can('FINANCE_VIEW')
-      const [servicesResult, categoriesResult, extrasResult, slotIntervalsResult] = await Promise.all([
+      const [servicesResult, categoriesResult, extrasResult, slotIntervalsResult, employeesResult] = await Promise.all([
         client.rpc('service_admin_list_service_settings_v2'),
         client.rpc('service_admin_list_categories'),
         client.rpc('service_admin_list_extras'),
         client.from('services').select('id,slot_interval_minutes'),
+        client.from('employees').select('id,name,is_active').eq('is_active', true).order('name'),
       ])
       if (servicesResult.error) throw new Error(servicesResult.error.message)
       if (categoriesResult.error) throw new Error(categoriesResult.error.message)
       if (extrasResult.error) throw new Error(extrasResult.error.message)
       if (slotIntervalsResult.error) throw new Error(slotIntervalsResult.error.message)
+      if (employeesResult.error) throw new Error(employeesResult.error.message)
       const services = mergeServiceSlotIntervals(servicesResult.data, slotIntervalsResult.data)
       return json({
         services: canSeeFinance ? services : redactCommercial(services),
         categories: categoriesResult.data ?? [],
         extras: canSeeFinance ? extrasResult.data : redactCommercial(extrasResult.data),
+        employees: employeesResult.data ?? [],
       })
     }
 
@@ -172,7 +175,8 @@ Deno.serve(async (req) => {
       const requestedBasePrice = numeric(body?.base_price ?? 0, 'base_price') ?? 0
       const requestedExtraPersonPrice = numeric(body?.price_per_extra_person ?? 0, 'price_per_extra_person') ?? 0
       if (requestedBasePrice !== 0 || requestedExtraPersonPrice !== 0) await requirePermission('FINANCE_MANAGE')
-      const { data, error } = await client.rpc('service_admin_create_service_catalog_audited', {
+      const employeeId = body?.employee_id ? uuid(body.employee_id, 'EMPLOYEE_ID_INVALID') : null
+      const createArguments = {
         p_category_id: uuid(body?.category_id, 'CATEGORY_ID_INVALID'),
         p_name: text(body?.name), p_slug: text(body?.slug), p_operation_scope: operationScope(body?.operation_scope),
         p_short_description: text(body?.short_description) || null, p_full_description: text(body?.full_description) || null,
@@ -182,7 +186,13 @@ Deno.serve(async (req) => {
         p_buffer_after_minutes: integer(body?.buffer_after_minutes ?? 0, 'buffer_after_minutes'),
         p_minimum_people: integer(body?.minimum_people ?? 1, 'minimum_people'), p_maximum_people: integer(body?.maximum_people ?? 1, 'maximum_people'),
         p_price_per_extra_person: requestedExtraPersonPrice, p_admin_id: admin.adminId,
-      })
+      }
+      const { data, error } = employeeId
+        ? await client.rpc('service_admin_create_service_catalog_with_employee_audited', {
+            ...createArguments,
+            p_employee_id: employeeId,
+          })
+        : await client.rpc('service_admin_create_service_catalog_audited', createArguments)
       if (error) throw new Error(error.message)
       return json(data, 201)
     }
