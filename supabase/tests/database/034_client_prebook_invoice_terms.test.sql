@@ -19,25 +19,25 @@ insert into public.customer_commercial_terms (
   customer_id, can_prebook, prebook_hold_minutes, max_active_prebooks,
   requires_manual_confirmation, billing_mode, invoice_due_days
 ) values (
-  '11111111-1111-1111-1111-111111111111', true, 720, 2, true, 'INVOICE', 15
+  '11111111-1111-1111-1111-111111111111', true, 720, 2, true, 'CHECKOUT', null
 );
 
 select is(
-  (select invoice_due_days from public.customer_commercial_terms where customer_id = '11111111-1111-1111-1111-111111111111'),
-  15,
-  'invoice due days are configurable per customer'
+  (select prebook_hold_minutes from public.customer_commercial_terms where customer_id = '11111111-1111-1111-1111-111111111111'),
+  2880,
+  'pre booking hold is normalized to the global 48 hour contract'
 );
 
 select is(
-  (select can_prebook from public.customer_commercial_terms where customer_id = '11111111-1111-1111-1111-111111111111'),
-  true,
-  'pre booking can be enabled per customer'
+  (select requires_manual_confirmation from public.customer_commercial_terms where customer_id = '11111111-1111-1111-1111-111111111111'),
+  false,
+  'pre booking manual confirmation is disabled by contract'
 );
 
 select is(
   (select max_active_prebooks from public.customer_commercial_terms where customer_id = '11111111-1111-1111-1111-111111111111'),
   2,
-  'pre booking concurrency limit is configurable per customer'
+  'pre booking concurrency limit remains configurable per customer'
 );
 
 select * from finish();
