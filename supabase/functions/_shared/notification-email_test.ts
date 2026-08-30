@@ -1,8 +1,10 @@
 import {
+  assertSafeCustomHtml,
   beginNotificationDelivery,
   brandedEmailHtml,
   markNotificationFailed,
   markNotificationSent,
+  renderCustomEmailHtml,
   renderNotificationMessage,
   renderTemplate,
   templateVariableKeys,
@@ -27,6 +29,58 @@ Deno.test('notification renderer replaces only declared variables', () => {
   assert(message.text.includes('https://example.test/pagar'), 'body variable was not rendered')
   assert(message.html.includes('BLACKSHEEP ESTÚDIO CRIATIVO'), 'shared brand wrapper was not applied')
   assert(message.html.includes('href="https://example.test/pagar"'), 'https links should be clickable in shared HTML')
+})
+
+Deno.test('notification renderer uses custom HTML while keeping text alternative', () => {
+  const template = {
+    id: 'template-id',
+    title_template: 'Olá {{customer.name}}',
+    body_template: 'Versão texto para {{customer.name}}',
+    html_template: '<main><h1>Olá {{customer.name}}</h1><a href="{{operation.site_url}}">Abrir site</a></main>',
+    variable_schema: ['customer.name', 'operation.site_url'],
+  }
+  const message = renderNotificationMessage(template, {
+    'customer.name': 'Sabrina & Pipo',
+    'operation.site_url': 'https://example.test/?a=1&b=2',
+  }, 'BlackSheep')
+  assert(message.text === 'Versão texto para Sabrina & Pipo', 'plain-text alternative must remain available')
+  assert(message.html.includes('Sabrina &amp; Pipo'), 'custom HTML variables must be escaped')
+  assert(message.html.includes('https://example.test/?a=1&amp;b=2'), 'custom HTML URL variable must be attribute-safe')
+  assert(!message.html.includes('BLACKSHEEP</div>'), 'custom HTML should not be replaced by legacy wrapper')
+})
+
+Deno.test('custom HTML fragments receive a minimal email document wrapper', () => {
+  const html = renderCustomEmailHtml('<strong>{{customer.name}}</strong>', ['customer.name'], { 'customer.name': 'Sabrina' })
+  assert(html.startsWith('<!doctype html><html lang="pt-BR"><body>'), 'HTML fragment should receive a document wrapper')
+  assert(html.includes('<strong>Sabrina</strong>'), 'custom HTML content was not preserved')
+})
+
+Deno.test('custom HTML rejects executable or active content', () => {
+  const unsafe = [
+    '<script>alert(1)</script>',
+    '<img src="x" onerror="alert(1)">',
+    '<a href="javascript:alert(1)">x</a>',
+    '<iframe src="https://example.test"></iframe>',
+  ]
+  for (const source of unsafe) {
+    let failed = false
+    try {
+      assertSafeCustomHtml(source)
+    } catch (error) {
+      failed = error instanceof Error && error.message === 'NOTIFICATION_HTML_UNSAFE'
+    }
+    assert(failed, `unsafe custom HTML should fail closed: ${source}`)
+  }
+})
+
+Deno.test('custom HTML enforces an email-size guard', () => {
+  let failed = false
+  try {
+    assertSafeCustomHtml(`<div>${'a'.repeat(90_100)}</div>`)
+  } catch (error) {
+    failed = error instanceof Error && error.message === 'NOTIFICATION_HTML_TOO_LARGE'
+  }
+  assert(failed, 'oversized HTML should fail before provider delivery')
 })
 
 Deno.test('notification renderer refuses variables outside template schema', () => {
