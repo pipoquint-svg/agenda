@@ -34,19 +34,19 @@ select lives_ok($$select public.service_credit_customer_balance_from_return(
   (select id from public.appointment_policy_actions where appointment_id='60000000-0000-0000-0000-000000000020' and action_type='CANCEL'),
   'CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-balance-one',null
 )$$,'explicit client choice can move refundable cancellation amount to customer balance');
-select is(public.customer_balance_available('60000000-0000-0000-0000-000000000001'),590::numeric,'customer balance is R$590 and has no expiry deduction');
-select ok(not exists(select 1 from information_schema.columns where table_schema='public' and table_name='customer_balance_movements' and column_name='valid_until'),'customer balance has no validity/expiry field');
+select is(public.customer_balance_available('60000000-0000-0000-0000-000000000001'),590::numeric,'customer balance is R$590 while its credit lot is valid');
+select ok((select expires_at between now()+interval '11 months 29 days' and now()+interval '12 months 1 day' from public.customer_balance_movements where customer_id='60000000-0000-0000-0000-000000000001' and direction='CREDIT'),'customer balance credit expires approximately 12 months after creation');
 
--- Integral application: all R$590 moves, even though only R$250 is due; R$340 becomes excess.
+-- Partial application: only what the reservation still owes moves; the rest stays in balance.
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
-values ('60000000-0000-0000-0000-000000000021','BAL-APPLY-INTEGRAL','60000000-0000-0000-0000-000000000012','60000000-0000-0000-0000-000000000013','CONFIRMED','PARTIALLY_PAID','2035-06-10 10:00:00-03','2035-06-10 11:00:00-03',60,1,'60000000-0000-0000-0000-000000000001',500,now());
+values ('60000000-0000-0000-0000-000000000021','BAL-APPLY-PARTIAL','60000000-0000-0000-0000-000000000012','60000000-0000-0000-0000-000000000013','CONFIRMED','PARTIALLY_PAID','2035-06-10 10:00:00-03','2035-06-10 11:00:00-03',60,1,'60000000-0000-0000-0000-000000000001',500,now());
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
 values ('60000000-0000-0000-0000-000000000021','CHARGE','PIX','MERCADO_PAGO','bal-pay-250','APPROVED',250,250,now(),'CONTRACT');
-select is((public.service_apply_customer_balance_to_appointment('60000000-0000-0000-0000-000000000021',null,'CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-apply-integral',null)->>'amount_applied')::numeric,590::numeric,'balance application consumes the full available balance');
-select is(public.customer_balance_available('60000000-0000-0000-0000-000000000001'),0::numeric,'no partial balance remains after integral application');
-select is(public.appointment_returnable_excess('60000000-0000-0000-0000-000000000021'),340::numeric,'integral application creates R$340 customer-owned excess');
+select is((public.service_apply_customer_balance_to_appointment('60000000-0000-0000-0000-000000000021',null,'CLIENT_TOKEN',null,'127.0.0.1'::inet,'pgTAP','req-apply-partial',null)->>'amount_applied')::numeric,250::numeric,'balance application consumes only the R$250 still due');
+select is(public.customer_balance_available('60000000-0000-0000-0000-000000000001'),340::numeric,'R$340 remains available after partial balance application');
+select is(public.appointment_returnable_excess('60000000-0000-0000-0000-000000000021'),0::numeric,'partial application does not create synthetic excess');
 update public.appointments set status='COMPLETED' where id='60000000-0000-0000-0000-000000000021';
-select is((public.service_finalize_appointment_excess('60000000-0000-0000-0000-000000000021',null,null,null,null,null,null,null)->>'settlement_choice'),'REFUND','final excess defaults to refund when customer does not choose balance');
+select throws_ok($$select public.service_finalize_appointment_excess('60000000-0000-0000-0000-000000000021',null,null,null,null,null,null,null)$$,'P0001','NO_FINAL_EXCESS_TO_SETTLE','there is no final excess to refund after applying only the amount due');
 
 -- Authorship is mandatory for choosing balance instead of refund.
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
