@@ -57,7 +57,7 @@ async function processDelivery(delivery: ClaimedDelivery): Promise<{ id: string;
 
     const [{ data: customer, error: customerError }, { data: template, error: templateError }, { data: operationSettings, error: operationError }] = await Promise.all([
       client.from('customers').select('id,name,email').eq('id', delivery.customer_id).maybeSingle(),
-      client.from('notification_template_configs').select('id,event_key,title_template,body_template,is_active,variable_schema,operation_scope').eq('id', delivery.template_id).maybeSingle(),
+      client.from('notification_template_configs').select('id,event_key,title_template,body_template,html_template,is_active,variable_schema,operation_scope').eq('id', delivery.template_id).maybeSingle(),
       client.rpc('service_admin_get_operation_settings_v2', { p_operation_scope: scope }),
     ])
     if (customerError || !customer) throw new Error('CUSTOMER_LOOKUP_FAILED')
