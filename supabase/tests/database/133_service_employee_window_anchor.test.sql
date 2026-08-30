@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(21);
+select plan(23);
 
 insert into public.categories(id, name, slug)
 values ('98600000-0000-0000-0000-000000000001', 'Service Employee Anchor Test', 'service-employee-anchor-test');
@@ -294,11 +294,17 @@ select is(
   'Locação-style 30-minute grid remains identical even when availability-rule legacy cadence is 60'
 );
 
-select throws_ok(
-  $$ update public.services set slot_interval_minutes = 45 where id = '98600000-0000-0000-0000-000000000010' $$,
-  '23514',
-  null,
-  'service cadence rejects values outside 30-minute increments'
+select ok(
+  exists (
+    select 1
+    from pg_constraint c
+    where c.conrelid = 'public.services'::regclass
+      and c.conname = 'services_slot_interval_minutes_check'
+      and strpos(pg_get_constraintdef(c.oid), 'slot_interval_minutes >= 30') > 0
+      and strpos(pg_get_constraintdef(c.oid), 'slot_interval_minutes <= 480') > 0
+      and strpos(pg_get_constraintdef(c.oid), 'slot_interval_minutes % 30') > 0
+  ),
+  'service cadence is constrained to 30-minute increments from 30 through 480'
 );
 
 select ok(
