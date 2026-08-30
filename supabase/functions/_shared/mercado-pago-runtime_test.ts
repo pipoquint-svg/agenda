@@ -6,33 +6,33 @@ function expectError(code: string, run: () => unknown): void {
   if (actual !== code) throw new Error(`expected ${code}, got ${actual || 'no error'}`)
 }
 
-Deno.test('Mercado Pago sandbox charge requires sandbox-scoped credential, regardless of prefix', () => {
-  const config = mercadoPagoRuntime({
-    environment: 'sandbox',
-    accessToken: 'legacy-generic-token',
-    sandboxAccessToken: 'APP_USR-sandbox-token',
-    creatingCharge: true,
-  })
-  if (config.environment !== 'sandbox') throw new Error('sandbox environment mismatch')
-  if (config.accessToken !== 'APP_USR-sandbox-token') throw new Error('sandbox scoped token not selected')
-
-  expectError('MISSING_ENV:MERCADO_PAGO_SANDBOX_ACCESS_TOKEN', () => mercadoPagoRuntime({
-    environment: 'sandbox',
-    accessToken: 'APP_USR-generic-token',
-    sandboxAccessToken: '',
-    creatingCharge: true,
-  }))
+Deno.test('Mercado Pago accepts only production runtime', () => {
+  for (const environment of ['', 'sandbox', 'staging', 'test']) {
+    expectError('MERCADO_PAGO_ENV_INVALID', () => mercadoPagoRuntime({
+      environment,
+      productionAccessToken: 'APP_USR-production-token',
+      creatingCharge: false,
+    }))
+  }
 })
 
-Deno.test('Mercado Pago production charge requires production-scoped credential and explicit real-charge gate', () => {
+Deno.test('Mercado Pago production reads require the production-scoped credential', () => {
   expectError('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN', () => mercadoPagoRuntime({
     environment: 'production',
-    accessToken: 'APP_USR-generic-token',
     productionAccessToken: '',
-    allowRealCharges: 'true',
-    creatingCharge: true,
+    creatingCharge: false,
   }))
 
+  const config = mercadoPagoRuntime({
+    environment: 'production',
+    productionAccessToken: 'APP_USR-production-token',
+    creatingCharge: false,
+  })
+  if (config.environment !== 'production') throw new Error('production environment mismatch')
+  if (config.accessToken !== 'APP_USR-production-token') throw new Error('production scoped token not selected')
+})
+
+Deno.test('real financial mutations require explicit production gate', () => {
   expectError('REAL_CHARGES_DISABLED', () => mercadoPagoRuntime({
     environment: 'production',
     productionAccessToken: 'APP_USR-production-token',
@@ -46,51 +46,15 @@ Deno.test('Mercado Pago production charge requires production-scoped credential 
     allowRealCharges: 'true',
     creatingCharge: true,
   })
-  if (config.accessToken !== 'APP_USR-production-token') throw new Error('production scoped token not selected')
+  if (config.accessToken !== 'APP_USR-production-token') throw new Error('production charge token not selected')
 })
 
-Deno.test('read and reconciliation may use scoped secret first or generic compatibility token', () => {
-  const sandboxScoped = mercadoPagoRuntime({
-    environment: 'sandbox',
-    accessToken: 'legacy-generic-token',
-    sandboxAccessToken: 'APP_USR-sandbox-token',
-    creatingCharge: false,
-  })
-  if (sandboxScoped.accessToken !== 'APP_USR-sandbox-token') throw new Error('sandbox read did not prefer scoped token')
-
-  const sandboxLegacy = mercadoPagoRuntime({
-    environment: 'sandbox',
-    accessToken: 'APP_USR-generic-token',
-    sandboxAccessToken: '',
-    creatingCharge: false,
-  })
-  if (sandboxLegacy.accessToken !== 'APP_USR-generic-token') throw new Error('generic read fallback unavailable')
-})
-
-Deno.test('credential prefixes are not used as environment metadata', () => {
-  const sandbox = mercadoPagoRuntime({
-    environment: 'sandbox',
-    sandboxAccessToken: 'APP_USR-sandbox-token',
-    creatingCharge: true,
-  })
-  if (sandbox.accessToken !== 'APP_USR-sandbox-token') throw new Error('APP_USR sandbox credential rejected')
-
-  const production = mercadoPagoRuntime({
+Deno.test('credential prefix is not used as environment metadata', () => {
+  const config = mercadoPagoRuntime({
     environment: 'production',
-    productionAccessToken: 'TEST-production-shaped-example',
+    productionAccessToken: 'credential-with-provider-defined-prefix',
     allowRealCharges: 'true',
     creatingCharge: true,
   })
-  if (production.accessToken !== 'TEST-production-shaped-example') throw new Error('prefix inference still active')
-})
-
-Deno.test('missing or invalid environment fails closed', () => {
-  expectError('MERCADO_PAGO_ENV_INVALID', () => mercadoPagoRuntime({ accessToken: 'token' }))
-  expectError('MERCADO_PAGO_ENV_INVALID', () => mercadoPagoRuntime({ environment: 'staging', accessToken: 'token' }))
-  expectError('MISSING_ENV:MERCADO_PAGO_ACCESS_TOKEN', () => mercadoPagoRuntime({
-    environment: 'sandbox',
-    accessToken: '',
-    sandboxAccessToken: '',
-    creatingCharge: false,
-  }))
+  if (config.accessToken !== 'credential-with-provider-defined-prefix') throw new Error('provider credential prefix was interpreted')
 })
