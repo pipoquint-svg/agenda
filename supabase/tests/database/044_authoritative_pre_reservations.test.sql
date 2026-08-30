@@ -1,13 +1,13 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(27);
+select plan(23);
 
 select has_table('public','pre_reservation_access_tokens','opaque token table exists');
 select has_column('public','resource_allocations','pre_reservation_id','allocation owns pre-reservation');
 select has_column('public','appointments','invoice_due_base_at','invoice due base timestamp exists');
 select has_function('public','service_admin_create_pre_reservation',array['uuid','uuid','uuid','timestamp with time zone','uuid','integer','jsonb','integer','text'],'create RPC exists');
-select has_function('public','service_admin_confirm_pre_reservation',array['uuid','uuid'],'confirm RPC exists');
+select has_function('public','service_admin_confirm_pre_reservation',array['uuid','uuid'],'legacy confirm RPC still exists behind payment guard');
 select has_function('public','service_admin_cancel_pre_reservation',array['uuid','uuid','text'],'cancel RPC exists');
 select ok(not has_function_privilege('anon','public.public_get_pre_reservation_context(text)','EXECUTE'),'anon cannot bypass Edge token access');
 select ok(not has_function_privilege('authenticated','public.public_get_pre_reservation_context(text)','EXECUTE'),'authenticated cannot bypass Edge token access');
@@ -42,7 +42,7 @@ insert into public.resource_availability_rules(resource_id,weekday,start_local_t
 insert into public.customers(id,customer_type,name,email,phone) values
 ('94400000-0000-0000-0000-000000000007','BUSINESS','Corporate Prebook','billing@example.test','+5548999999999');
 insert into public.customer_commercial_terms(customer_id,can_prebook,prebook_hold_minutes,max_active_prebooks,requires_manual_confirmation,billing_mode,invoice_due_days,is_active) values
-('94400000-0000-0000-0000-000000000007',true,720,1,true,'INVOICE',15,true);
+('94400000-0000-0000-0000-000000000007',true,720,1,true,'CHECKOUT',null,true);
 insert into public.customer_prebook_authorized_services(customer_id,service_id) values
 ('94400000-0000-0000-0000-000000000007','94400000-0000-0000-0000-000000000005');
 
@@ -51,22 +51,18 @@ select throws_ok($$select public.service_admin_create_pre_reservation('94400000-
 create temp table created as select public.service_admin_create_pre_reservation('94400000-0000-0000-0000-000000000007','94400000-0000-0000-0000-000000000005','94400000-0000-0000-0000-000000000006','2030-01-01 08:00:00-03','24400000-0000-4000-8000-000000000001',4,'[]',1,'test') payload;
 select is((select payload->>'authoritative_resource_hold' from created),'true','pre-reservation reports authoritative hold');
 select is((select count(*)::integer from public.resource_allocations where pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from created) and allocation_type='PRE_RESERVATION' and status='HELD'),1,'shared ledger contains blocking pre-reservation allocation');
-create temp table alloc_before as select id from public.resource_allocations where pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from created) and status='HELD';
 select throws_ok($$select public.create_checkout_hold_for_duration('94400000-0000-0000-0000-000000000005','94400000-0000-0000-0000-000000000006',4,'[]',1,'2030-01-01 08:00:00-03')$$,'P0001','SLOT_NO_LONGER_AVAILABLE','normal hold cannot overlap pre-reservation');
 select throws_ok($$select public.service_admin_create_pre_reservation('94400000-0000-0000-0000-000000000007','94400000-0000-0000-0000-000000000005','94400000-0000-0000-0000-000000000006','2030-01-01 11:00:00-03','24400000-0000-4000-8000-000000000001',4,'[]',1,null)$$,'P0001','MAX_ACTIVE_PREBOOKS_REACHED','max_active_prebooks enforced');
 select ok((select (public.public_get_pre_reservation_context(payload->>'access_token')->>'authoritative_resource_hold')='true' and not (public.public_get_pre_reservation_context(payload->>'access_token') ?| array['customer_id','email','phone','cpf_cnpj']) from created),'opaque context confirms hold without PII');
 select ok((select token_hash<>(select payload->>'access_token' from created) from public.pre_reservation_access_tokens where pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from created)),'raw token is not stored');
-select throws_ok($$select public.service_admin_confirm_pre_reservation((select (payload->>'pre_reservation_id')::uuid from created),'24400000-0000-4000-8000-000000000002')$$,'P0001','ADMIN_PERMISSION_DENIED','INVOICE confirmation requires finance permission');
+select throws_ok($$select public.service_admin_confirm_pre_reservation((select (payload->>'pre_reservation_id')::uuid from created),'24400000-0000-4000-8000-000000000001')$$,'P0001','PRE_RESERVATION_PAYMENT_REQUIRED','admin cannot confirm checkout pre-reservation without approved payment');
+select ok((select prebook_hold_minutes=2880 and requires_manual_confirmation=false and billing_mode='CHECKOUT' from public.customer_commercial_terms where customer_id='94400000-0000-0000-0000-000000000007'),'customer prebook contract is normalized to global 48h and payment-only confirmation');
 
-create temp table confirmed as select public.service_admin_confirm_pre_reservation((select (payload->>'pre_reservation_id')::uuid from created),'24400000-0000-4000-8000-000000000001') payload;
-select ok((select a.status='CONFIRMED' and a.financial_status='UNPAID_AUTHORIZED' and a.billing_mode_snapshot='INVOICE' from public.appointments a where a.id=(select (payload->>'appointment_id')::uuid from confirmed)),'INVOICE confirms as receivable without checkout');
-select ok((select a.invoice_due_basis='SERVICE_START' and a.invoice_due_base_at='2030-01-01 08:00:00-03'::timestamptz and a.invoice_due_days_snapshot=15 and a.invoice_due_at='2030-01-16 08:00:00-03'::timestamptz from public.appointments a where a.id=(select (payload->>'appointment_id')::uuid from confirmed)),'due date is explicitly service start plus configured days');
-select ok((select ra.id=(select id from alloc_before) and ra.allocation_type='APPOINTMENT' and ra.status='CONFIRMED' from public.resource_allocations ra where ra.appointment_id=(select (payload->>'appointment_id')::uuid from confirmed)),'same allocation row transfers atomically to appointment');
-select is((select count(*)::integer from public.payment_transactions where appointment_id=(select (payload->>'appointment_id')::uuid from confirmed)),0,'INVOICE creates no payment transaction');
-select ok((select revoked_at is not null from public.pre_reservation_access_tokens where pre_reservation_id=(select (payload->>'pre_reservation_id')::uuid from created)) and (select count(*)=2 from public.audit_logs where entity_type='PRE_RESERVATION' and entity_id=(select (payload->>'pre_reservation_id')::uuid from created) and action in ('PRE_RESERVATION_CREATED','PRE_RESERVATION_CONFIRMED')),'conversion revokes token and audits both mutations');
+-- Release first fixture so the max-active-prebooks=1 rule permits expiry/cancel scenarios.
+select public.service_admin_cancel_pre_reservation((select (payload->>'pre_reservation_id')::uuid from created),'24400000-0000-4000-8000-000000000001','test fixture release') from created;
 
 create temp table expiring as select public.service_admin_create_pre_reservation('94400000-0000-0000-0000-000000000007','94400000-0000-0000-0000-000000000005','94400000-0000-0000-0000-000000000006','2030-01-01 11:00:00-03','24400000-0000-4000-8000-000000000001',4,'[]',1,null) payload;
-update public.pre_reservations set created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour' where id=(select (payload->>'pre_reservation_id')::uuid from expiring);
+update public.pre_reservations set created_at=now()-interval '49 hours',expires_at=now()-interval '1 hour' where id=(select (payload->>'pre_reservation_id')::uuid from expiring);
 create temp table expired_result as select public.service_expire_pre_reservations() as expired_count;
 select is((select expired_count from expired_result),1,'expiration worker expires exactly one due pre-reservation');
 select ok((select pr.status='EXPIRED' and pr.released_at is not null and pr.released_by_admin_id is null and pr.release_reason='EXPIRED' from public.pre_reservations pr where pr.id=(select (payload->>'pre_reservation_id')::uuid from expiring)),'expiration stores release state and system actor semantics');
