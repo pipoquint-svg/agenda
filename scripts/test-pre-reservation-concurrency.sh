@@ -86,20 +86,20 @@ INSERT INTO public.customer_commercial_terms(
 INSERT INTO public.customer_prebook_authorized_services(customer_id,service_id) VALUES
   ('$CUSTOMER_A'::uuid,'$SERVICE'::uuid),
   ('$CUSTOMER_B'::uuid,'$SERVICE'::uuid);
-
--- The trigger must normalize the stale per-customer inputs to the global contract.
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM public.customer_commercial_terms
-    WHERE customer_id IN ('$CUSTOMER_A'::uuid,'$CUSTOMER_B'::uuid)
-      AND (prebook_hold_minutes <> 2880 OR requires_manual_confirmation OR billing_mode <> 'CHECKOUT')
-  ) THEN
-    RAISE EXCEPTION 'PREBOOK_GLOBAL_CONTRACT_NOT_NORMALIZED';
-  END IF;
-END
-$$;
 SQL
+
+NORMALIZED_COUNT=$(psql "$DATABASE_URL" -qAtc "
+  select count(*)
+  from public.customer_commercial_terms
+  where customer_id in ('$CUSTOMER_A'::uuid,'$CUSTOMER_B'::uuid)
+    and prebook_hold_minutes = 2880
+    and requires_manual_confirmation = false
+    and billing_mode = 'CHECKOUT';
+" | tr -d ' ')
+if [[ "$NORMALIZED_COUNT" != "2" ]]; then
+  echo "FAIL: expected both customer fixtures normalized to 48h CHECKOUT payment-only prebook contract."
+  exit 1
+fi
 
 run_attempt() {
   local customer="$1"
