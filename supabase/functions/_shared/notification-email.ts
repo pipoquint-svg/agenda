@@ -3,6 +3,7 @@ export type NotificationTemplate = {
   event_key?: string
   title_template: string
   body_template: string
+  html_template?: string | null
   variable_schema: unknown
   operation_scope?: string | null
   is_active?: boolean
@@ -26,6 +27,16 @@ type DeliveryInput = {
   payloadSnapshot?: Record<string, unknown>
   isTest?: boolean
 }
+
+const MAX_CUSTOM_HTML_BYTES = 90_000
+const UNSAFE_HTML_PATTERNS = [
+  /<\s*(script|iframe|object|embed|form|base|link|svg|math)\b/i,
+  /\son[a-z]+\s*=/i,
+  /\bsrcdoc\s*=/i,
+  /javascript\s*:/i,
+  /data\s*:\s*text\/html/i,
+  /<\s*meta\b[^>]*http-equiv\s*=/i,
+]
 
 function escapeHtml(value: string): string {
   return value
@@ -74,6 +85,31 @@ export function renderTemplate(source: string, schema: unknown, values: Record<s
   })
 }
 
+export function assertSafeCustomHtml(source: string | null | undefined): void {
+  const html = String(source ?? '').trim()
+  if (!html) return
+  if (new TextEncoder().encode(html).byteLength > MAX_CUSTOM_HTML_BYTES) {
+    throw new Error('NOTIFICATION_HTML_TOO_LARGE')
+  }
+  if (UNSAFE_HTML_PATTERNS.some((pattern) => pattern.test(html))) {
+    throw new Error('NOTIFICATION_HTML_UNSAFE')
+  }
+}
+
+export function renderCustomEmailHtml(
+  source: string,
+  schema: unknown,
+  values: Record<string, string>,
+): string {
+  assertSafeCustomHtml(source)
+  const escapedValues = Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, escapeHtml(String(value ?? ''))]),
+  )
+  const rendered = renderTemplate(source, schema, escapedValues).trim()
+  if (/<\s*html\b/i.test(rendered)) return rendered
+  return `<!doctype html><html lang="pt-BR"><body>${rendered}</body></html>`
+}
+
 export function brandedEmailHtml(brandName: string, text: string): string {
   const brand = brandName.trim() || 'BlackSheep'
   const lines = text.split('\n')
@@ -91,7 +127,11 @@ export function renderNotificationMessage(
 ): NotificationMessage {
   const subject = renderTemplate(template.title_template, template.variable_schema, values)
   const text = renderTemplate(template.body_template, template.variable_schema, values)
-  return { subject, text, html: brandedEmailHtml(brandName, text) }
+  const customHtml = String(template.html_template ?? '').trim()
+  const html = customHtml
+    ? renderCustomEmailHtml(customHtml, template.variable_schema, values)
+    : brandedEmailHtml(brandName, text)
+  return { subject, text, html }
 }
 
 export async function sha256(value: string): Promise<string> {
