@@ -77,6 +77,13 @@ export async function removeService(serviceId: string, accessToken: string): Pro
 export async function saveCustomFields(serviceId: string, fields: ServiceCustomField[], accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', service_id: serviceId, action: 'CUSTOM_FIELDS', fields }) }) }
 export async function saveDayTimePricing(serviceId: string, rules: DayTimePricingRule[], accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', service_id: serviceId, action: 'DAY_TIME_PRICING', rules }) }) }
 export async function saveServiceExtras(serviceId: string, extras: Array<{ extra_id: string; sort_order: number; is_required: boolean; max_quantity: number; schedule_placement: 'PREPEND' | 'APPEND'; default_schedule_minutes: number | null }>, accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', service_id: serviceId, action: 'SERVICE_EXTRAS', extras }) }) }
-export async function saveServiceTiming(payload: TimingPayload, accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', ...payload }) }) }
+export async function saveServiceTiming(payload: TimingPayload, accessToken: string): Promise<void> {
+  let nextPayload = payload
+  if (payload.slot_interval_minutes === undefined) {
+    const current = (await listServiceSettings(accessToken)).find((service) => service.id === payload.service_id)
+    nextPayload = { ...payload, slot_interval_minutes: current?.slot_interval_minutes ?? 30 }
+  }
+  await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', ...nextPayload }) })
+}
 export async function saveDurationConfiguration(payload: DurationConfigurationPayload, accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', ...payload }) }) }
 export async function saveChangePolicy(serviceId: string, policy: ChangePolicy, accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'SERVICE', service_id: serviceId, action: 'CHANGE_POLICY', policy }) }) }
