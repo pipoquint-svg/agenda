@@ -1,6 +1,6 @@
 -- Block 3 hygiene: bounded coupon pagination and removal of an orphaned no-show RPC.
 -- The legacy admin_list_coupons() RPC remains intact for compatibility; the Gestão
--- Edge Function moves to the bounded page contract below.
+-- Edge Function moves to the bounded page contracts below.
 
 create or replace function public.admin_list_coupons_page(
   p_offset integer default 0,
@@ -84,6 +84,80 @@ $$;
 
 revoke all on function public.admin_list_coupons_page(integer, integer) from public, anon, authenticated;
 grant execute on function public.admin_list_coupons_page(integer, integer) to service_role;
+
+create or replace function public.admin_list_coupon_customers_page(
+  p_search text default null,
+  p_offset integer default 0,
+  p_limit integer default 25
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_total bigint;
+  v_customers jsonb;
+begin
+  if p_offset is null or p_offset < 0 then
+    raise exception 'COUPON_CUSTOMER_OFFSET_INVALID';
+  end if;
+
+  if p_limit is null or p_limit < 1 or p_limit > 100 then
+    raise exception 'COUPON_CUSTOMER_LIMIT_INVALID';
+  end if;
+
+  with filtered as (
+    select c.id, c.name, c.email
+    from public.customers c
+    where c.customer_type = 'PERSON'
+      and c.anonymized_at is null
+      and (
+        p_search is null
+        or btrim(p_search) = ''
+        or lower(c.name) like '%' || lower(btrim(p_search)) || '%'
+        or lower(coalesce(c.email, '')) like '%' || lower(btrim(p_search)) || '%'
+        or coalesce(c.phone, '') like '%' || btrim(p_search) || '%'
+      )
+  )
+  select count(*) into v_total from filtered;
+
+  with filtered as (
+    select c.id, c.name, c.email
+    from public.customers c
+    where c.customer_type = 'PERSON'
+      and c.anonymized_at is null
+      and (
+        p_search is null
+        or btrim(p_search) = ''
+        or lower(c.name) like '%' || lower(btrim(p_search)) || '%'
+        or lower(coalesce(c.email, '')) like '%' || lower(btrim(p_search)) || '%'
+        or coalesce(c.phone, '') like '%' || btrim(p_search) || '%'
+      )
+  ), page as (
+    select id, name, email
+    from filtered
+    order by name, id
+    offset p_offset
+    limit p_limit
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'email', email) order by name, id), '[]'::jsonb)
+  into v_customers
+  from page;
+
+  return jsonb_build_object(
+    'customers', v_customers,
+    'total', v_total,
+    'limit', p_limit,
+    'offset', p_offset,
+    'has_more', (p_offset + p_limit) < v_total
+  );
+end;
+$$;
+
+revoke all on function public.admin_list_coupon_customers_page(text, integer, integer) from public, anon, authenticated;
+grant execute on function public.admin_list_coupon_customers_page(text, integer, integer) to service_role;
 
 -- Verified before removal on 2026-08-30:
 -- * no repository consumer;
