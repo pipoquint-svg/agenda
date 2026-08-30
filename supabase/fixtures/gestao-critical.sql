@@ -186,6 +186,8 @@ declare
   v_cash_code text := 'QA-FIN-CASH-' || left(v_token, 8);
   v_refund_code text := 'QA-FIN-REF-' || left(v_token, 8);
   v_balance_code text := 'QA-FIN-SALDO-' || left(v_token, 8);
+  v_cash_local text := to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI');
+  v_cash_month text := to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM');
 begin
   insert into public.customers(id, name, email, phone)
   values (v_customer, 'Cliente QA Financeiro ' || left(v_token, 8), 'qa-fin-' || left(v_token, 8) || '@example.test', '+554899' || left(v_token, 8));
@@ -212,7 +214,8 @@ begin
     (v_late,v_customer,'CREDIT_FROM_RETURN','CREDIT',200,'CLIENT_TOKEN','127.0.0.1','Gestão E2E','qa-balance-late-'||v_token,'qa-balance-late-'||v_token,now(),now()+interval '12 months');
 
   return jsonb_build_object(
-    'month','2035-11',
+    'month',v_cash_month,
+    'paid_at_local',v_cash_local,
     'customer_id',v_customer,
     'pix',jsonb_build_object('id',v_pix,'public_code',v_pix_code,'amount',500),
     'cash',jsonb_build_object('id',v_cash,'public_code',v_cash_code,'amount',200),
@@ -224,7 +227,6 @@ begin
   );
 end;
 $$;
-
 
 -- Test-only read probes. Sensitive finance tables stay unavailable through PostgREST;
 -- the disposable E2E harness can assert authoritative persistence via service_role RPCs.
