@@ -196,15 +196,15 @@ begin
     id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,
     duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at
   ) values
-    (v_pix,v_pix_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-05 10:00:00-03','2035-11-05 11:00:00-03',60,1,v_customer,500,now()),
-    (v_cash,v_cash_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-06 10:00:00-03','2035-11-06 11:00:00-03',60,1,v_customer,200,now()),
-    (v_refund,v_refund_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','PAID','2035-11-07 10:00:00-03','2035-11-07 11:00:00-03',60,1,v_customer,300,now()),
-    (v_balance,v_balance_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-08 10:00:00-03','2035-11-08 11:00:00-03',60,1,v_customer,250,now());
+    (v_pix,v_pix_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED',timestamp '2035-11-05 10:00:00' at time zone 'America/Sao_Paulo',timestamp '2035-11-05 11:00:00' at time zone 'America/Sao_Paulo',60,1,v_customer,500,now()),
+    (v_cash,v_cash_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED',timestamp '2035-11-06 10:00:00' at time zone 'America/Sao_Paulo',timestamp '2035-11-06 11:00:00' at time zone 'America/Sao_Paulo',60,1,v_customer,200,now()),
+    (v_refund,v_refund_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','PAID',timestamp '2035-11-07 10:00:00' at time zone 'America/Sao_Paulo',timestamp '2035-11-07 11:00:00' at time zone 'America/Sao_Paulo',60,1,v_customer,300,now()),
+    (v_balance,v_balance_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED',timestamp '2035-11-08 10:00:00' at time zone 'America/Sao_Paulo',timestamp '2035-11-08 11:00:00' at time zone 'America/Sao_Paulo',60,1,v_customer,250,now());
 
   insert into public.payment_transactions(
     appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,paid_at,payment_purpose,notes
   ) values (
-    v_refund,'CHARGE','PIX','MANUAL','APPROVED',300,300,'2035-10-15 10:00:00-03','CONTRACT','QA precondition for off-gateway refund'
+    v_refund,'CHARGE','PIX','MANUAL','APPROVED',300,300,timestamp '2035-10-15 10:00:00' at time zone 'America/Sao_Paulo','CONTRACT','QA precondition for off-gateway refund'
   );
 
   insert into public.customer_balance_movements(
