@@ -25,7 +25,7 @@ export type ChangePolicy = {
 export type ServiceSettings = {
   id: string; name: string; slug: string; short_description: string | null; full_description: string | null
   category_id: string | null; category_name: string | null; operation_scope: OperationScope | null; is_active: boolean; sort_order: number
-  duration_mode: 'FIXED' | 'BLOCKS'; base_duration_minutes: number; booking_block_minutes: number | null; minimum_booking_blocks: number | null
+  duration_mode: 'FIXED' | 'BLOCKS'; base_duration_minutes: number; slot_interval_minutes: number; booking_block_minutes: number | null; minimum_booking_blocks: number | null
   maximum_booking_blocks: number | null; price_per_block: number | string | null; base_price: number | string; minimum_people: number
   maximum_people: number; price_per_extra_person: number | string; buffer_before_minutes: number; buffer_after_minutes: number
   custom_fields: ServiceCustomField[]; day_time_pricing_rules: DayTimePricingRule[]; service_extras: ServiceExtra[]
@@ -33,7 +33,7 @@ export type ServiceSettings = {
 }
 
 export type ServiceCatalogBundle = { services: ServiceSettings[]; categories: ServiceCategory[]; extras: ExtraCatalogItem[] }
-type TimingPayload = { service_id: string; action: 'TIMING'; duration_mode: 'FIXED' | 'BLOCKS'; base_duration_minutes: number; booking_block_minutes: number | null; minimum_booking_blocks: number | null; maximum_booking_blocks: number | null; base_price: number; price_per_block: number | null; buffer_before_minutes: number; buffer_after_minutes: number }
+type TimingPayload = { service_id: string; action: 'TIMING'; duration_mode: 'FIXED' | 'BLOCKS'; base_duration_minutes: number; slot_interval_minutes: number; booking_block_minutes: number | null; minimum_booking_blocks: number | null; maximum_booking_blocks: number | null; base_price: number; price_per_block: number | null; buffer_before_minutes: number; buffer_after_minutes: number }
 type DurationConfigurationPayload = { service_id: string; action: 'DURATION_CONFIGURATION'; pricing_tiers: DurationPricingTier[]; duration_presets: DurationPreset[] }
 
 // category/people fields are optional at the TypeScript boundary only so the legacy advanced
@@ -57,7 +57,13 @@ async function request(path: string, accessToken: string, init?: RequestInit): P
   return response
 }
 
-export async function loadServiceCatalog(accessToken: string): Promise<ServiceCatalogBundle> { const body = await (await request('admin-service-settings', accessToken)).json(); return { services: body.services ?? [], categories: body.categories ?? [], extras: body.extras ?? [] } }
+export async function loadServiceCatalog(accessToken: string): Promise<ServiceCatalogBundle> {
+  const body = await (await request('admin-service-settings', accessToken)).json()
+  const services = Array.isArray(body.services)
+    ? body.services.map((service: ServiceSettings) => ({ ...service, slot_interval_minutes: Number(service?.slot_interval_minutes ?? 30) }))
+    : []
+  return { services, categories: body.categories ?? [], extras: body.extras ?? [] }
+}
 export async function listServiceSettings(accessToken: string): Promise<ServiceSettings[]> { return (await loadServiceCatalog(accessToken)).services }
 export async function createCategory(payload: { name: string; slug: string; operation_scope: OperationScope }, accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'POST', body: JSON.stringify({ entity: 'CATEGORY', ...payload }) }) }
 export async function saveCategory(payload: ServiceCategory, accessToken: string): Promise<void> { await request('admin-service-settings', accessToken, { method: 'PUT', body: JSON.stringify({ entity: 'CATEGORY', category_id: payload.id, name: payload.name, slug: payload.slug, operation_scope: payload.operation_scope, sort_order: payload.sort_order, is_active: payload.is_active }) }) }
