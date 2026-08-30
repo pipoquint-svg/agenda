@@ -1,5 +1,5 @@
 import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
-import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken } from '../_shared/google.ts'
+import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken, sha256Hex } from '../_shared/google.ts'
 import { managedEventNeedsRepair, type ManagedAppointmentDesiredState } from '../_shared/managed-event.ts'
 
 async function authorize(req: Request): Promise<void> {
@@ -187,29 +187,46 @@ Deno.serve(async (req) => {
       .eq('google_calendar_id', calendar.id)
       .maybeSingle()
 
-    let runForceFull = forceFull || !syncState?.sync_token || ['NEVER_SYNCED', 'STALE', 'REBUILDING'].includes(syncState?.health_status ?? '')
+    const runForceFull = forceFull || !syncState?.sync_token || ['NEVER_SYNCED', 'STALE', 'REBUILDING'].includes(syncState?.health_status ?? '')
     let result
     try {
       result = await performSync(calendar.id, accessToken, calendar.google_calendar_id, syncState?.sync_token ?? null, runForceFull)
     } catch (error) {
       const status = (error as Error & { status?: number }).status
       const message = error instanceof Error ? error.message : 'GOOGLE_SYNC_FAILED'
-      if (status === 410 && !runForceFull) {
-        await client.rpc('mark_google_sync_failure', {
+      if (status === 410 && !runForceFull && syncState?.sync_token) {
+        const staleTokenFingerprint = (await sha256Hex(syncState.sync_token)).slice(0, 20)
+        const { error: failureError } = await client.rpc('mark_google_sync_failure', {
           p_google_calendar_id: calendar.id,
           p_error: 'GOOGLE_SYNC_TOKEN_GONE',
           p_requires_full_sync: true,
         })
-        runForceFull = true
-        result = await performSync(calendar.id, accessToken, calendar.google_calendar_id, null, true)
-      } else {
-        await client.rpc('mark_google_sync_failure', {
+        if (failureError) throw new Error('GOOGLE_SYNC_STALE_MARK_FAILED')
+
+        const { error: enqueueError } = await client.rpc('enqueue_google_calendar_sync', {
           p_google_calendar_id: calendar.id,
-          p_error: message.slice(0, 1000),
-          p_requires_full_sync: status === 410,
+          p_idempotency_key: `google-full-sync:${calendar.id}:token-gone:${staleTokenFingerprint}`,
+          p_payload_json: { source: 'SYNC_TOKEN_GONE', force_full: true },
         })
-        throw error
+        if (enqueueError) throw new Error('GOOGLE_FULL_SYNC_ENQUEUE_FAILED')
+
+        return jsonResponse({
+          google_calendar_id: calendar.id,
+          mode: 'INCREMENTAL_ABORTED',
+          processed: 0,
+          repairs_enqueued: 0,
+          health_status: 'STALE',
+          full_sync_enqueued: true,
+        }, 202)
       }
+
+      const { error: failureError } = await client.rpc('mark_google_sync_failure', {
+        p_google_calendar_id: calendar.id,
+        p_error: message.slice(0, 1000),
+        p_requires_full_sync: status === 410,
+      })
+      if (failureError) throw new Error('GOOGLE_SYNC_FAILURE_SAVE_FAILED')
+      throw error
     }
 
     const { error: successError } = await client.rpc('mark_google_sync_success', {
