@@ -1,5 +1,6 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
+import { sendPreReservationCreatedEmail } from '../_shared/prebook-email.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -23,7 +24,19 @@ Deno.serve(async(req)=>{
   // Ignore any browser-supplied coupon_code so a client cannot swap discounts at submit time.
   const{data:couponCode,error:couponError}=await client.rpc('get_checkout_applied_coupon_code',{p_checkout_hold_token:token});if(couponError)throw new Error('CHECKOUT_COUPON_STATE_FAILED')
   const{data,error}=await client.rpc('service_submit_public_checkout',{p_checkout_hold_token:token,p_coupon_code:typeof couponCode==='string'&&couponCode.trim()?couponCode:null,p_term_version_ids:terms,p_answers:answers,p_acceptance_ip:ip,p_user_agent:userAgent})
-  if(error){const known=error.message.match(/(CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_CUSTOMER_REQUIRED|REQUIRED_SERVICE_FIELDS_MISSING|INVALID_SERVICE_ANSWERS|INVALID_SERVICE_ANSWER_VALUE|TERMS_NOT_ACCEPTED|TERMS_CONFIGURATION_MISSING|INVALID_COUPON|COUPON_USAGE_LIMIT_REACHED|COUPON_CUSTOMER_MISMATCH|COUPON_CUSTOMER_USAGE_LIMIT_REACHED|COUPON_PACKAGE_POLICY_REQUIRES_DECISION|ONLINE_BOOKING_NOT_AVAILABLE|FREE_VISIT_NOT_AVAILABLE|FREE_VISIT_ACTIVE_LIMIT_REACHED)/)?.[1];throw new Error(known??`CHECKOUT_SUBMIT_FAILED:${error.message}`)}
-  return response({ok:true,appointment:data})
+  if(error){const known=error.message.match(/(CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_CUSTOMER_REQUIRED|REQUIRED_SERVICE_FIELDS_MISSING|INVALID_SERVICE_ANSWERS|INVALID_SERVICE_ANSWER_VALUE|TERMS_NOT_ACCEPTED|TERMS_CONFIGURATION_MISSING|INVALID_COUPON|COUPON_USAGE_LIMIT_REACHED|COUPON_CUSTOMER_MISMATCH|COUPON_CUSTOMER_USAGE_LIMIT_REACHED|COUPON_PACKAGE_POLICY_REQUIRES_DECISION|ONLINE_BOOKING_NOT_AVAILABLE|FREE_VISIT_NOT_AVAILABLE|FREE_VISIT_ACTIVE_LIMIT_REACHED|MAX_ACTIVE_PREBOOKS_REACHED|PREBOOK_REQUIRES_CHECKOUT)/)?.[1];throw new Error(known??`CHECKOUT_SUBMIT_FAILED:${error.message}`)}
+  const appointment=(data&&typeof data==='object'&&!Array.isArray(data)?{...(data as Record<string,unknown>)}:{});
+  if(appointment.pre_reservation===true){
+   try{
+    const delivery=await sendPreReservationCreatedEmail(client,{appointmentId:String(appointment.appointment_id??''),accessToken:String(appointment.access_token??'')});
+    appointment.pre_reservation_email_sent=delivery.sent;
+    appointment.pre_reservation_email_reason=delivery.reason;
+   }catch(emailError){
+    appointment.pre_reservation_email_sent=false;
+    appointment.pre_reservation_email_reason=emailError instanceof Error?emailError.message.split(':')[0]:'PRE_RESERVATION_EMAIL_FAILED';
+    console.error('[OPERATION_ALERT] PRE_RESERVATION_EMAIL_FAILED',{appointment_id:appointment.appointment_id,code:appointment.pre_reservation_email_reason});
+   }
+  }
+  return response({ok:true,appointment})
  }catch(error){const code=error instanceof Error?error.message:'CHECKOUT_SUBMIT_FAILED';const publicCode=code.split(':')[0];const neutral=['ONLINE_BOOKING_NOT_AVAILABLE','FREE_VISIT_NOT_AVAILABLE'].includes(publicCode)?'ONLINE_BOOKING_NOT_AVAILABLE':publicCode;const status=neutral==='RATE_LIMITED'?429:neutral==='RATE_LIMIT_BACKEND_FAILED'?503:neutral==='CHECKOUT_HOLD_NOT_ACTIVE'?409:neutral==='ONLINE_BOOKING_NOT_AVAILABLE'?403:400;return response({error:{code:neutral}},status)}
 })
