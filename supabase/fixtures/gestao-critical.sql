@@ -47,10 +47,22 @@ insert into public.service_change_policies (
   reschedule_first_early_percent,
   reschedule_first_late_percent,
   reschedule_repeat_percent,
-  cancellation_late_percent
+  cancellation_late_percent,
+  reschedule_first_early_penalty_type,
+  reschedule_first_early_penalty_value,
+  reschedule_first_late_penalty_type,
+  reschedule_first_late_penalty_value,
+  reschedule_repeat_penalty_type,
+  reschedule_repeat_penalty_value,
+  cancellation_late_penalty_type,
+  cancellation_late_penalty_value
 ) values (
   '99000000-0000-0000-0000-000000000010',
-  0, 0, 0, 0, 0
+  0, 0, 0, 0, 0,
+  'PERCENT', 0,
+  'PERCENT', 0,
+  'PERCENT', 0,
+  'PERCENT', 0
 );
 
 update public.services
