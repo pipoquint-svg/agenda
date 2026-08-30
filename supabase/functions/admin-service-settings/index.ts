@@ -49,7 +49,7 @@ function redactCommercial(data: unknown): unknown {
   if (Array.isArray(data)) return data.map((item) => redactCommercial(item))
   if (!data || typeof data !== 'object') return data
   const item = { ...(data as Record<string, unknown>) }
-  for (const key of ['base_price', 'price_per_block', 'price_per_extra_person', 'price', 'change_policy']) delete item[key]
+  for (const key of ['base_price', 'price_per_block', 'price_per_extra_person', 'price', 'change_policy', 'checkout_minimum_payment_type', 'checkout_minimum_payment_value']) delete item[key]
   if (Array.isArray(item.pricing_tiers)) item.pricing_tiers = redactCommercial(item.pricing_tiers)
   if (Array.isArray(item.day_time_pricing_rules)) item.day_time_pricing_rules = (item.day_time_pricing_rules as unknown[]).map((rule) => {
     if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return rule
@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
       await requirePermission('SERVICES_VIEW')
       const canSeeFinance = await can('FINANCE_VIEW')
       const [servicesResult, categoriesResult, extrasResult] = await Promise.all([
-        client.rpc('service_admin_list_service_settings'),
+        client.rpc('service_admin_list_service_settings_v2'),
         client.rpc('service_admin_list_categories'),
         client.rpc('service_admin_list_extras'),
       ])
@@ -251,6 +251,17 @@ Deno.serve(async (req) => {
       return json(data)
     }
 
+    if (action === 'CHECKOUT_PAYMENT') {
+      await requirePermission('FINANCE_MANAGE')
+      const paymentType = text(body?.checkout_minimum_payment_type).toUpperCase()
+      if (paymentType !== 'PERCENT' && paymentType !== 'FIXED') throw new Error('CHECKOUT_MINIMUM_PAYMENT_TYPE_INVALID')
+      const paymentValue = numeric(body?.checkout_minimum_payment_value, 'checkout_minimum_payment_value')
+      const { data, error } = await client.rpc('service_admin_update_checkout_payment_audited', {
+        p_service_id: serviceId, p_payment_type: paymentType, p_payment_value: paymentValue, p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data)
+    }
     if (action === 'CHANGE_POLICY') {
       await requirePermission('FINANCE_MANAGE')
       if (!body?.policy || typeof body.policy !== 'object' || Array.isArray(body.policy)) throw new Error('INVALID_CHANGE_POLICY')

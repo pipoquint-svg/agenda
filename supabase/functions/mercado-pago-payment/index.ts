@@ -30,6 +30,8 @@ type PaymentContext = {
   contract_settled: number | string
   contract_balance: number | string
   confirmation_percentage: number | string
+  minimum_payment_type: 'PERCENT' | 'FIXED'
+  minimum_payment_value: number | string
   confirmation_target_amount: number | string
   minimum_due_contract_amount: number | string
   minimum_available: boolean
@@ -330,6 +332,8 @@ Deno.serve(async (req) => {
           contract_settled: context.contract_settled,
           contract_balance: context.contract_balance,
           confirmation_percentage: context.confirmation_percentage,
+          minimum_payment_type: context.minimum_payment_type,
+          minimum_payment_value: context.minimum_payment_value,
           confirmation_target_amount: context.confirmation_target_amount,
           minimum_due_contract_amount: context.minimum_due_contract_amount,
           minimum_available: context.minimum_available,
