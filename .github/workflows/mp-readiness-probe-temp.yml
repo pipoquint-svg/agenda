@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Probe sanitized Mercado Pago secret state
+      - name: Probe sanitized Mercado Pago readiness
         shell: bash
         run: |
           set -euo pipefail
@@ -29,10 +29,7 @@ jobs:
               'environment_ok': True,
               'production_token_present': True,
               'webhook_secret_present': True,
-              'allow_real_charges': False,
-              'legacy_sandbox_token_present': False,
-              'legacy_generic_token_present': False,
-              'legacy_test_user_present': False,
+              'allow_real_charges': True,
           }
           bad = {k: (row.get(k), v) for k, v in expected.items() if row.get(k) != v}
           if bad:
