@@ -36,6 +36,28 @@ Deno.test('unified notifications share one canonical From and Reply-To without c
   }
 })
 
+Deno.test('unified notifications keep the documented canonical From when the optional sender override is absent', () => {
+  const previous = {
+    blacksheepFrom: Deno.env.get('EMAIL_FROM_BLACKSHEEP'),
+    blacksheepReply: Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP'),
+  }
+  try {
+    Deno.env.delete('EMAIL_FROM_BLACKSHEEP')
+    Deno.env.delete('EMAIL_REPLY_TO_BLACKSHEEP')
+
+    const blacksheep = notificationSenderForScope('BLACKSHEEP')
+    const sabrina = notificationSenderForScope('SABRINA')
+    assert(blacksheep?.from === 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>', 'BlackSheep notification sender fallback is missing')
+    assert(sabrina?.from === blacksheep?.from, 'Sabrina unified notifications must share the fallback canonical From')
+    assert(blacksheep?.replyTo === null, 'missing optional Reply-To must remain null')
+    assert(senderForScope('BLACKSHEEP') === null, 'Supabase Auth scoped sender must remain environment-backed')
+  } finally {
+    const restore = (key: string, value: string | undefined) => value === undefined ? Deno.env.delete(key) : Deno.env.set(key, value)
+    restore('EMAIL_FROM_BLACKSHEEP', previous.blacksheepFrom)
+    restore('EMAIL_REPLY_TO_BLACKSHEEP', previous.blacksheepReply)
+  }
+})
+
 Deno.test('provider adapter preserves rendered payload and idempotency contract', async () => {
   const payload: EmailProviderPayload = {
     from: 'BlackSheep <agenda@example.test>',
