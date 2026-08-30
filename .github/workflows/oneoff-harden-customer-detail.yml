@@ -1,0 +1,39 @@
+name: One-off harden customer detail
+
+on:
+  push:
+    paths:
+      - .github/workflows/oneoff-harden-customer-detail.yml
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Make optional birthday reconciliation non-blocking
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('supabase/functions/admin-customers/index.ts')
+          text = path.read_text()
+          old = """        if (error) throw new Error(error.message)\n        if (servicesError) throw new Error('CUSTOMER_SERVICES_QUERY_FAILED')\n        if (reconciliationError) throw new Error('CUSTOMER_BIRTH_DATE_RECONCILIATION_QUERY_FAILED')\n        const customer = profile && typeof profile === 'object' && !Array.isArray(profile)\n          ? ((profile as Record<string, unknown>).customer as Record<string, unknown> | undefined)\n          : undefined\n        return json({\n          profile,\n          services: Array.isArray(services) ? services : [],\n          birth_date_reconciliation: birthDateReconciliation ?? { canonical_birth_date: customer?.birth_date ?? null, candidates: [] },\n        })\n"""
+          new = """        if (error) throw new Error(error.message)\n        if (servicesError) throw new Error('CUSTOMER_SERVICES_QUERY_FAILED')\n        const customer = profile && typeof profile === 'object' && !Array.isArray(profile)\n          ? ((profile as Record<string, unknown>).customer as Record<string, unknown> | undefined)\n          : undefined\n        const reconciliationFallback = {\n          canonical_birth_date: customer?.birth_date ?? null,\n          birth_date_locked: false,\n          has_conflict: false,\n          candidates: [],\n        }\n        if (reconciliationError) {\n          console.warn('CUSTOMER_BIRTH_DATE_RECONCILIATION_UNAVAILABLE', { customer_id: id, message: reconciliationError.message })\n        }\n        return json({\n          profile,\n          services: Array.isArray(services) ? services : [],\n          birth_date_reconciliation: reconciliationError ? reconciliationFallback : (birthDateReconciliation ?? reconciliationFallback),\n        })\n"""
+          if old not in text:
+              raise SystemExit('expected customer detail block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Remove one-off workflow and commit
+        shell: bash
+        run: |
+          rm .github/workflows/oneoff-harden-customer-detail.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/admin-customers/index.ts .github/workflows/oneoff-harden-customer-detail.yml
+          git commit -m "fix(customers): keep detail available when reconciliation fails"
+          git push
