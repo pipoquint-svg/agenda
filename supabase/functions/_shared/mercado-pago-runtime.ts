@@ -26,14 +26,18 @@ function optionalEnv(name: string): string {
 /**
  * Mercado Pago production runtime.
  *
- * BlackSheep no longer supports sandbox or generic provider credentials in the
- * operational backend. Every provider read and financial mutation uses the official
- * production-scoped Access Token. Financial mutations additionally require the
- * explicit ALLOW_REAL_CHARGES gate.
+ * BlackSheep no longer supports sandbox credentials in the operational backend.
+ * Every provider read and financial mutation uses the official production-scoped
+ * Access Token. Financial mutations additionally require ALLOW_REAL_CHARGES.
+ *
+ * `accessToken` is accepted only so older call sites remain type-compatible during
+ * the deployment cutover. Its value is deliberately ignored and can never authorize
+ * a provider request.
  */
 export function mercadoPagoRuntime(input: {
   environment?: string | null
   productionAccessToken?: string | null
+  accessToken?: string | null
   allowRealCharges?: string | null
   creatingCharge?: boolean
 }): MercadoPagoRuntime {
@@ -45,8 +49,6 @@ export function mercadoPagoRuntime(input: {
     : optionalEnv('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
   if (!accessToken) throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')
 
-  // Charge creation, provider cancellation and refunds mutate real money. Reads and
-  // reconciliation remain available while the mutation gate is closed.
   if (input.creatingCharge && !enabled(input.allowRealCharges)) {
     throw new Error('REAL_CHARGES_DISABLED')
   }
