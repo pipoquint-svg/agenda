@@ -22,7 +22,7 @@ values ('50000000-0000-0000-0000-000000000006','POLICY-CONSOLIDATED-1','50000000
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
 values ('50000000-0000-0000-0000-000000000006','CHARGE','PIX','MERCADO_PAGO','policy-consolidated-pay-1','APPROVED',500,500,now(),'CONTRACT');
 
-select is((select policy_json->>'snapshot_schema_version' from public.appointment_change_policy_snapshots where appointment_id='50000000-0000-0000-0000-000000000006'),'CONSOLIDATED_POLICY_V2','new reservation freezes consolidated policy');
+select is((select policy_json->>'snapshot_schema_version' from public.appointment_change_policy_snapshots where appointment_id='50000000-0000-0000-0000-000000000006'),'CONSOLIDATED_POLICY_V3','new reservation freezes consolidated policy');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-07 10:00:00-03','CLIENT',1000)->>'penalty_retained')::numeric,0::numeric,'first client reschedule above 48h has zero penalty');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-08 10:00:00-03','CLIENT',1000)->>'penalty_retained')::numeric,0::numeric,'exactly 48h is outside penalty window');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','RESCHEDULE','2035-01-09 10:01:00-03','CLIENT',1000)->>'theoretical_penalty')::numeric,200::numeric,'late first reschedule calculates 20 percent on R$1000 total');
