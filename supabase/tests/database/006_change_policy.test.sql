@@ -42,7 +42,11 @@ select is((public.calculate_reservation_change('50000000-0000-0000-0000-00000000
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'penalty_retained')::numeric,300::numeric,'late cancellation retains 30 percent of R$1000 total');
 select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'refund_due')::numeric,200::numeric,'mandatory R$1000 paid R$500 cancellation refunds R$200');
 select ok((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'penalty_retained')::numeric <= (public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'contract_applied_before')::numeric,'penalty never exceeds applied customer funds');
-select is((public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','OPERATION',null)->>'penalty_retained')::numeric,0::numeric,'operation-origin cancellation has no penalty');
+select is(
+  (public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','OPERATION',null)->>'penalty_retained')::numeric,
+  (public.calculate_reservation_change('50000000-0000-0000-0000-000000000006','CANCEL','2035-01-09 10:01:00-03','CLIENT',null)->>'penalty_retained')::numeric,
+  'operation-origin cancellation follows the same customer policy by default'
+);
 select ok(not exists(select 1 from information_schema.columns where table_schema='public' and table_name='service_change_policies' and column_name='cancellation_credit_validity_days'),'legacy expiring cancellation-credit policy field is absent');
 
 insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people)
