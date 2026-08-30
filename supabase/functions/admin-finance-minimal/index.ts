@@ -9,6 +9,7 @@ const corsHeaders = {
 const TZ = 'America/Sao_Paulo'
 type Row = Record<string, unknown>
 type Scope = 'BLACKSHEEP' | 'SABRINA' | null
+type ReceivableCursor = { start_at: string; appointment_id: string }
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -25,6 +26,34 @@ function uuid(value: unknown, code: string): string {
   const id = clean(value) ?? ''
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new Error(code)
   return id
+}
+
+function decodeReceivableCursor(value: unknown): ReceivableCursor | null {
+  const raw = clean(value)
+  if (!raw) return null
+  try {
+    const normalized = raw.replaceAll('-', '+').replaceAll('_', '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const parsed = JSON.parse(atob(padded)) as Row
+    const startAt = clean(parsed?.start_at)
+    const appointmentId = uuid(parsed?.appointment_id, 'FINANCE_CURSOR_INVALID')
+    if (!startAt || !Number.isFinite(Date.parse(startAt))) throw new Error('FINANCE_CURSOR_INVALID')
+    return { start_at: new Date(startAt).toISOString(), appointment_id: appointmentId }
+  } catch {
+    throw new Error('FINANCE_CURSOR_INVALID')
+  }
+}
+
+function encodeReceivableCursor(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null
+  const cursor = value as Row
+  const startAt = clean(cursor.start_at)
+  const appointmentId = clean(cursor.appointment_id)
+  if (!startAt || !appointmentId) return null
+  return btoa(JSON.stringify({ start_at: startAt, appointment_id: appointmentId }))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/g, '')
 }
 
 function month(value: unknown): string {
@@ -185,27 +214,32 @@ Deno.serve(async (req) => {
         const search = clean(url.searchParams.get('search'))
         const requestedLimit = Number(url.searchParams.get('limit') ?? 30)
         const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 30
-        const data = await readRpc('service_admin_list_receivable_appointments', {
+        const cursor = decodeReceivableCursor(url.searchParams.get('cursor'))
+        const data = await readRpc('service_admin_list_receivable_appointments_page', {
           p_search: search,
+          p_operation_scope: operationScope,
+          p_cursor_start_at: cursor?.start_at ?? null,
+          p_cursor_appointment_id: cursor?.appointment_id ?? null,
           p_limit: limit,
           p_admin_id: admin.adminId,
-        }) as { appointments?: Row[] }
-        if (url.searchParams.has('month') || url.searchParams.has('limit')) return json(data)
-        const receivables = (Array.isArray(data?.appointments) ? data.appointments : []).flatMap((row) => {
-          if (operationScope && row.operation_scope !== operationScope) return []
-          return [{
-            appointment_id: row.appointment_id,
-            public_code: row.public_code,
-            customer_id: row.customer_id,
-            customer_name: row.customer_name,
-            service: row.service_name,
-            start_at: row.start_at,
-            operation_scope: row.operation_scope,
-            commercial_value: row.commercial_value,
-            balance: row.remaining_due,
-          }]
-        })
-        return json({ operation_scope: operationScope, search, receivables })
+        }) as { appointments?: Row[]; has_more?: boolean; next_cursor?: Row | null }
+        const appointments = Array.isArray(data?.appointments) ? data.appointments : []
+        const nextCursor = data?.has_more ? encodeReceivableCursor(data.next_cursor) : null
+        if (url.searchParams.has('month') || url.searchParams.has('limit') || url.searchParams.has('cursor')) {
+          return json({ appointments, has_more: data?.has_more === true, next_cursor: nextCursor })
+        }
+        const receivables = appointments.map((row) => ({
+          appointment_id: row.appointment_id,
+          public_code: row.public_code,
+          customer_id: row.customer_id,
+          customer_name: row.customer_name,
+          service: row.service_name,
+          start_at: row.start_at,
+          operation_scope: row.operation_scope,
+          commercial_value: row.commercial_value,
+          balance: row.remaining_due,
+        }))
+        return json({ operation_scope: operationScope, search, receivables, has_more: data?.has_more === true, next_cursor: nextCursor })
       }
 
       if (action === 'manual_receipts' || action === 'receipts') {
