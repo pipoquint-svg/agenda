@@ -78,8 +78,6 @@ function refundSnapshot(raw: Record<string, unknown>): Record<string, unknown> {
 function providerFinancialMutationRuntime() {
   return mercadoPagoRuntime({
     environment: Deno.env.get('MERCADO_PAGO_ENV'),
-    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
-    sandboxAccessToken: Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'),
     productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'),
     allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
     creatingCharge: true,
