@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(11);
+select plan(13);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at,raw_app_meta_data,raw_user_meta_data)
 values ('7b000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','finance-balance-admin@example.test','',now(),now(),now(),'{}'::jsonb,'{}'::jsonb);
@@ -35,6 +35,8 @@ select ok((public.service_admin_customer_balance_application_preview('7b000000-0
 select is(public.customer_balance_available('7b000000-0000-4000-8000-000000000010'),300::numeric,'preview is read-only');
 select is((public.service_apply_customer_balance_to_appointment('7b000000-0000-4000-8000-000000000040',null,'ADMIN_UI','7b000000-0000-4000-8000-000000000002','127.0.0.1','pgTAP','balance-admin-apply','Gestão QA')->>'amount_applied')::numeric,250::numeric,'admin application consumes the backend-authoritative amount');
 select is(public.customer_balance_available('7b000000-0000-4000-8000-000000000010'),50::numeric,'R$50 remains after application');
+select is((public.service_apply_customer_balance_to_appointment('7b000000-0000-4000-8000-000000000040',null,'ADMIN_UI','7b000000-0000-4000-8000-000000000002','127.0.0.1','pgTAP','balance-admin-replay','Gestão QA')->>'idempotent_replay')::boolean,true,'second application is an idempotent replay');
+select is((select count(*) from public.customer_balance_movements where appointment_id='7b000000-0000-4000-8000-000000000040' and direction='DEBIT'),2::bigint,'idempotent replay creates no additional debit lots');
 select ok(exists(select 1 from public.audit_logs where admin_user_id='7b000000-0000-4000-8000-000000000002' and entity_id='7b000000-0000-4000-8000-000000000040' and action='CUSTOMER_BALANCE_APPLIED'),'admin application records authorship in audit log');
 select ok(not has_function_privilege('anon','public.service_admin_customer_balance_application_preview(uuid,uuid)','EXECUTE') and not has_function_privilege('authenticated','public.service_admin_customer_balance_application_preview(uuid,uuid)','EXECUTE') and has_function_privilege('service_role','public.service_admin_customer_balance_application_preview(uuid,uuid)','EXECUTE'),'preview RPC is service-role-only');
 
