@@ -81,11 +81,24 @@ INSERT INTO public.customers(id,customer_type,name) VALUES
 INSERT INTO public.customer_commercial_terms(
   customer_id,can_prebook,prebook_hold_minutes,max_active_prebooks,requires_manual_confirmation,billing_mode,invoice_due_days,is_active
 ) VALUES
-  ('$CUSTOMER_A'::uuid,true,720,10,true,'INVOICE',15,true),
-  ('$CUSTOMER_B'::uuid,true,720,10,true,'INVOICE',15,true);
+  ('$CUSTOMER_A'::uuid,true,720,10,true,'CHECKOUT',null,true),
+  ('$CUSTOMER_B'::uuid,true,720,10,true,'CHECKOUT',null,true);
 INSERT INTO public.customer_prebook_authorized_services(customer_id,service_id) VALUES
   ('$CUSTOMER_A'::uuid,'$SERVICE'::uuid),
   ('$CUSTOMER_B'::uuid,'$SERVICE'::uuid);
+
+-- The trigger must normalize the stale per-customer inputs to the global contract.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.customer_commercial_terms
+    WHERE customer_id IN ('$CUSTOMER_A'::uuid,'$CUSTOMER_B'::uuid)
+      AND (prebook_hold_minutes <> 2880 OR requires_manual_confirmation OR billing_mode <> 'CHECKOUT')
+  ) THEN
+    RAISE EXCEPTION 'PREBOOK_GLOBAL_CONTRACT_NOT_NORMALIZED';
+  END IF;
+END
+$$;
 SQL
 
 run_attempt() {
