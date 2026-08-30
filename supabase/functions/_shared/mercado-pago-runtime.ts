@@ -1,4 +1,4 @@
-export type MercadoPagoEnvironment = 'production'
+export type MercadoPagoEnvironment = 'sandbox' | 'production'
 
 export type MercadoPagoRuntime = {
   environment: MercadoPagoEnvironment
@@ -32,7 +32,9 @@ function optionalEnv(name: string): string {
  *
  * `accessToken` is accepted only so older call sites remain type-compatible during
  * the deployment cutover. Its value is deliberately ignored and can never authorize
- * a provider request.
+ * a provider request. The environment return type keeps the historical union solely
+ * so defensive live/test-event branches continue to type-check; this function still
+ * rejects every environment other than `production` at runtime.
  */
 export function mercadoPagoRuntime(input: {
   environment?: string | null
