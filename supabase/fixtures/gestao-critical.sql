@@ -220,3 +220,46 @@ begin
   );
 end;
 $$;
+
+
+-- Test-only read probes. Sensitive finance tables stay unavailable through PostgREST;
+-- the disposable E2E harness can assert authoritative persistence via service_role RPCs.
+create or replace function public.qa_read_gestao_payment_transactions(p_appointment_ids uuid[])
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(to_jsonb(t) order by t.created_at), '[]'::jsonb)
+  from (
+    select
+      id, appointment_id, transaction_type, method, provider, status,
+      contract_amount_settled, cash_amount, parent_transaction_id, paid_at, notes, created_at
+    from public.payment_transactions
+    where appointment_id = any(p_appointment_ids)
+  ) t;
+$$;
+
+revoke all on function public.qa_read_gestao_payment_transactions(uuid[]) from public, anon, authenticated;
+grant execute on function public.qa_read_gestao_payment_transactions(uuid[]) to service_role;
+
+create or replace function public.qa_read_gestao_balance_movements(p_customer_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(to_jsonb(m) order by m.created_at), '[]'::jsonb)
+  from (
+    select
+      id, direction, movement_type, amount, appointment_id,
+      source_credit_movement_id, expires_at, created_at
+    from public.customer_balance_movements
+    where customer_id = p_customer_id
+  ) m;
+$$;
+
+revoke all on function public.qa_read_gestao_balance_movements(uuid) from public, anon, authenticated;
+grant execute on function public.qa_read_gestao_balance_movements(uuid) to service_role;
