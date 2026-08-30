@@ -27,6 +27,7 @@ function number(value: number | string | null | undefined): number {
 function cloneService(service: ServiceSettings): ServiceSettings {
   return {
     ...service,
+    slot_interval_minutes: Number(service.slot_interval_minutes ?? 30),
     custom_fields: (service.custom_fields ?? []).map((field) => ({
       ...field,
       options_json: Array.isArray(field.options_json) ? [...field.options_json] : null,
@@ -53,6 +54,8 @@ function durationLabel(minutes: number): string {
   if (!rest) return `${hours}h`
   return `${hours}h${String(rest).padStart(2, '0')}`
 }
+
+const slotIntervalOptions = Array.from({ length: 16 }, (_, index) => (index + 1) * 30)
 
 const fieldTypes: Array<{ value: ServiceFieldType; label: string }> = [
   { value: 'TEXT', label: 'Texto curto' },
@@ -270,6 +273,7 @@ export function ServiceSettingsAdmin() {
         action: 'TIMING',
         duration_mode: draft.duration_mode,
         base_duration_minutes: Number(draft.base_duration_minutes),
+        slot_interval_minutes: Number(draft.slot_interval_minutes ?? 30),
         booking_block_minutes: draft.duration_mode === 'BLOCKS' ? Number(draft.booking_block_minutes ?? 30) : null,
         minimum_booking_blocks: draft.duration_mode === 'BLOCKS' ? Number(draft.minimum_booking_blocks ?? 1) : null,
         maximum_booking_blocks: draft.duration_mode === 'BLOCKS' ? Number(draft.maximum_booking_blocks ?? 1) : null,
@@ -278,10 +282,10 @@ export function ServiceSettingsAdmin() {
         buffer_before_minutes: Number(draft.buffer_before_minutes),
         buffer_after_minutes: Number(draft.buffer_after_minutes),
       }, accessToken)
-      setMessage('Duração, preço base e buffer salvos.')
+      setMessage('Duração, preço base, buffer e passo de agendamento salvos.')
       await load(accessToken, draft.id)
     } catch {
-      setError('Não foi possível salvar duração e buffer. Confira os valores.')
+      setError('Não foi possível salvar duração, buffer e passo de agendamento. Confira os valores.')
     } finally {
       setSaving(false)
     }
@@ -449,10 +453,12 @@ export function ServiceSettingsAdmin() {
               <div className="settings-field-grid">
                 <label><span>Modelo de duração</span><select value={draft.duration_mode} onChange={(event) => patch({ duration_mode: event.target.value as 'FIXED' | 'BLOCKS' })}><option value="FIXED">Duração fixa</option><option value="BLOCKS">Cliente escolhe o tempo</option></select></label>
                 <label><span>Duração base (min)</span><input type="number" min="1" value={draft.base_duration_minutes} onChange={(event) => patch({ base_duration_minutes: Number(event.target.value) })} /></label>
+                <label><span>Passo de agendamento</span><select value={draft.slot_interval_minutes ?? 30} onChange={(event) => patch({ slot_interval_minutes: Number(event.target.value) })}>{slotIntervalOptions.map((minutes) => <option key={minutes} value={minutes}>{durationLabel(minutes)}</option>)}</select></label>
                 <label><span>Preço base (R$)</span><input type="number" min="0" step="0.01" value={number(draft.base_price)} onChange={(event) => patch({ base_price: Number(event.target.value) })} /></label>
                 <label><span>Buffer antes (min)</span><input type="number" min="0" step="5" value={draft.buffer_before_minutes} onChange={(event) => patch({ buffer_before_minutes: Number(event.target.value) })} /></label>
                 <label><span>Buffer depois (min)</span><input type="number" min="0" step="5" value={draft.buffer_after_minutes} onChange={(event) => patch({ buffer_after_minutes: Number(event.target.value) })} /></label>
               </div>
+              {(draft.slot_interval_minutes ?? 30) < draft.base_duration_minutes ? <div className="form-alert">O passo de agendamento é menor que a duração do serviço. Isso é permitido; a trava de conflito continua sendo aplicada normalmente.</div> : null}
               {draft.duration_mode === 'FIXED' ? <div className="settings-rule-callout"><strong>Agenda</strong><span>{durationLabel(draft.base_duration_minutes)} para o cliente + {draft.buffer_after_minutes} min de buffer depois.</span></div> : (
                 <div className="settings-field-grid settings-block-grid">
                   <label><span>Tamanho do bloco (min)</span><input type="number" min="1" value={draft.booking_block_minutes ?? 30} onChange={(event) => patch({ booking_block_minutes: Number(event.target.value) })} /></label>
@@ -461,7 +467,7 @@ export function ServiceSettingsAdmin() {
                   <label><span>Preço/bloco fallback (R$)</span><input type="number" min="0" step="0.01" value={number(draft.price_per_block)} onChange={(event) => patch({ price_per_block: Number(event.target.value) })} /></label>
                 </div>
               )}
-              <button className="primary" type="button" disabled={saving} onClick={() => void saveTiming()}>{saving ? 'Salvando…' : 'Salvar duração e buffer'}</button>
+              <button className="primary" type="button" disabled={saving} onClick={() => void saveTiming()}>{saving ? 'Salvando…' : 'Salvar duração, buffer e passo'}</button>
             </section>
 
             {draft.duration_mode === 'BLOCKS' ? <>
