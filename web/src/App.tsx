@@ -18,6 +18,7 @@ import { NotificationsAdmin } from './NotificationsAdmin'
 import { OperationSettingsAdmin } from './OperationSettingsAdmin'
 import { OpsHealthAdmin } from './OpsHealthAdmin'
 import { PasswordRecoveryPage } from './PasswordRecoveryPage'
+import { PreReservationPaymentPage } from './PreReservationPaymentPage'
 import { ResourceAdmin } from './ResourceAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
@@ -81,6 +82,7 @@ export function App() {
   if (path.startsWith('/admin/demand')) return <DemandCaptureAdmin />
   if (path === '/agendar/sabrina') return <PublicBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep') return <PublicBookingRoute slug="blacksheep" />
+  if (path === '/pre-reserva/confirmar' || path === '/confirmar-pre-reserva') return <PreReservationPaymentPage />
   if (path === '/reserva/gerenciar' || path === '/gerenciar-reserva') return <ManageReservation />
   if (path === '/reserva/saldo' || path === '/pagar-saldo') return <BalanceCollectionPage />
   const params = new URLSearchParams(window.location.search)

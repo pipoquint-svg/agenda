@@ -16,25 +16,25 @@ select lives_ok(
     1440,
     2,
     true,
-    'INVOICE',
-    15,
+    'CHECKOUT',
+    null,
     true,
     '{}'::uuid[],
     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid
   )$$,
-  'corporate customer terms can be configured'
+  'pre booking customer terms can be configured under checkout contract'
 );
 
 select is(
-  (select billing_mode from public.customer_commercial_terms where customer_id = '22222222-2222-4222-8222-222222222222'),
-  'INVOICE',
-  'billing mode is invoice'
+  (select prebook_hold_minutes from public.customer_commercial_terms where customer_id = '22222222-2222-4222-8222-222222222222'),
+  2880,
+  'pre reservation hold is normalized to 48 hours'
 );
 
 select is(
-  (select invoice_due_days from public.customer_commercial_terms where customer_id = '22222222-2222-4222-8222-222222222222'),
-  15,
-  'invoice due days are 15'
+  (select requires_manual_confirmation from public.customer_commercial_terms where customer_id = '22222222-2222-4222-8222-222222222222'),
+  false,
+  'manual confirmation is disabled for pre reservations'
 );
 
 select is(
