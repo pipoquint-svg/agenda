@@ -2,7 +2,7 @@ import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supaba
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
+  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
 }
 
@@ -70,12 +70,34 @@ function amount(value: unknown): number {
   return Math.round(parsed * 100) / 100
 }
 
+function refundAmount(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error('MANUAL_REFUND_AMOUNT_INVALID')
+  return Math.round(parsed * 100) / 100
+}
+
 function paidAt(value: unknown): string | null {
   const raw = clean(value)
   if (!raw) return null
   const parsed = Date.parse(raw)
   if (!Number.isFinite(parsed)) throw new Error('MANUAL_RECEIPT_PAID_AT_INVALID')
   return new Date(parsed).toISOString()
+}
+
+function refundPaidAt(value: unknown): string | null {
+  const raw = clean(value)
+  if (!raw) return null
+  const parsed = Date.parse(raw)
+  if (!Number.isFinite(parsed)) throw new Error('MANUAL_REFUND_PAID_AT_INVALID')
+  return new Date(parsed).toISOString()
+}
+
+function authorshipEvidence(req: Request) {
+  const ip = (req.headers.get('cf-connecting-ip') ?? req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? '').trim()
+  const userAgent = (req.headers.get('user-agent') ?? '').trim()
+  const requestId = (req.headers.get('x-request-id') ?? crypto.randomUUID()).trim()
+  if (!ip || !userAgent || !requestId) throw new Error('MANUAL_REFUND_EVIDENCE_REQUIRED')
+  return { ip, userAgent, requestId }
 }
 
 function csvCell(value: unknown): string {
@@ -90,15 +112,20 @@ function moneyBr(value: unknown): string {
 }
 
 function nfseCsv(rows: Row[]): string {
-  const header = ['Data', 'Cliente', 'CPF/CNPJ', 'Endereço', 'E-mail', 'Serviço', 'Valor', 'Forma de pagamento', 'Operação']
+  const header = ['Data', 'Código', 'Cliente', 'CPF/CNPJ', 'Endereço', 'E-mail', 'Serviço', 'Status atendimento', 'Valor contratado', 'Liquidado no contrato', 'Saldo a receber', 'Situação financeira', 'Forma de pagamento', 'Operação']
   const lines = rows.map((row) => [
     row.date,
+    row.public_code,
     row.client,
     row.cpf_cnpj,
     row.address,
     row.email,
     row.service,
+    row.appointment_status,
     moneyBr(row.value),
+    moneyBr(row.contract_settled),
+    moneyBr(row.outstanding),
+    row.financial_status,
     row.payment_method,
     row.operation,
   ].map(csvCell).join(';'))
@@ -205,6 +232,14 @@ Deno.serve(async (req) => {
         return json({ month: data.month, operation_scope: data.operation_scope, timezone: data.timezone, receipts })
       }
 
+      if (action === 'pending_refunds') {
+        const data = await readRpc('service_admin_finance_pending_refunds', {
+          p_operation_scope: operationScope,
+          p_admin_id: admin.adminId,
+        }) as { refunds?: Row[] } | null
+        return json({ operation_scope: operationScope, refunds: Array.isArray(data?.refunds) ? data.refunds : [] })
+      }
+
       if (action === 'nfse_export' || action === 'export') {
         const selected = selectedMonth(url)
         const data = await readRpc('service_admin_finance_nfse_export', {
@@ -279,13 +314,34 @@ Deno.serve(async (req) => {
       return json(oldFacade ? { result: data } : data)
     }
 
+    if (action === 'record_manual_refund') {
+      const evidence = authorshipEvidence(req)
+      const reference = clean(body.reference)
+      if (!reference) throw new Error('MANUAL_REFUND_EVIDENCE_REQUIRED')
+      const method = clean(body.method)?.toUpperCase()
+      if (method !== 'CASH' && method !== 'PIX') throw new Error('MANUAL_REFUND_METHOD_INVALID')
+      const { data, error } = await client.rpc('service_admin_record_cancellation_manual_refund', {
+        p_policy_action_id: uuid(body.policy_action_id, 'POLICY_ACTION_ID_INVALID'),
+        p_method: method,
+        p_cash_amount: refundAmount(body.amount),
+        p_reference: reference,
+        p_paid_at: refundPaidAt(body.paid_at),
+        p_admin_id: admin.adminId,
+        p_ip: evidence.ip,
+        p_user_agent: evidence.userAgent,
+        p_request_id: evidence.requestId,
+      })
+      if (error) throw new Error(error.message)
+      return json(data, 201)
+    }
+
     return json({ error: { code: 'NOT_FOUND' } }, 404)
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_FINANCE_MINIMAL_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
       : code.endsWith('_NOT_FOUND') || code === 'APPOINTMENT_NOT_FOUND' ? 404
-      : code === 'MANUAL_RECEIPT_ALREADY_REVERSED' || code === 'MANUAL_RECEIPT_EXCEEDS_BALANCE' || code === 'MANUAL_RECEIPT_APPOINTMENT_CLOSED' ? 409
+      : code === 'MANUAL_RECEIPT_ALREADY_REVERSED' || code === 'MANUAL_RECEIPT_EXCEEDS_BALANCE' || code === 'MANUAL_RECEIPT_APPOINTMENT_CLOSED' || code === 'MANUAL_REFUND_EXCEEDS_OFF_GATEWAY_AMOUNT' || code === 'CANCELLATION_REFUND_NOT_PENDING' ? 409
       : 400
     return json({ error: { code } }, status)
   }
