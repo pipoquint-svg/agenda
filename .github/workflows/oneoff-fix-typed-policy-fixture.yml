@@ -57,3 +57,4 @@ jobs:
           git add -A
           git commit -m 'test(db): align critical fixture with typed penalties'
           git push
+# retrigger
