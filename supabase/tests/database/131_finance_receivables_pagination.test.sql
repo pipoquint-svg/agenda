@@ -18,6 +18,11 @@ insert into public.services(id,category_id,name,slug,base_duration_minutes,base_
 values ('7c000000-0000-4000-8000-000000000022','7c000000-0000-4000-8000-000000000021','Finance Pagination Service','finance-pagination-service',60,100,1,10,'BLACKSHEEP');
 insert into public.service_employees(id,service_id,employee_id)
 values ('7c000000-0000-4000-8000-000000000023','7c000000-0000-4000-8000-000000000022','7c000000-0000-4000-8000-000000000020');
+insert into public.service_change_policies(
+  service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,
+  reschedule_repeat_percent,cancellation_late_percent
+)
+values ('7c000000-0000-4000-8000-000000000022',48,0,20,20,20);
 
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at) values
 ('7c000000-0000-4000-8000-000000000040','PAGE-40','7c000000-0000-4000-8000-000000000022','7c000000-0000-4000-8000-000000000023','CONFIRMED','NOT_STARTED','2036-01-01 10:00:00-03','2036-01-01 11:00:00-03',60,1,'7c000000-0000-4000-8000-000000000010',100,now()),
