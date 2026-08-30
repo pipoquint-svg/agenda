@@ -1,9 +1,8 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(16);
+select plan(18);
 
--- Admin owner used only by service-level finance RPCs in this disposable transaction.
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at,raw_app_meta_data,raw_user_meta_data)
 values ('6b000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','finance6b@example.test','',now(),now(),now(),'{}'::jsonb,'{}'::jsonb);
 insert into public.admin_users(id,auth_user_id,display_name,role,is_active)
@@ -25,7 +24,6 @@ values ('6b000000-0000-4000-8000-000000000022',48,0,20,20,20);
 select has_column('public','customer_balance_movements','expires_at','balance lots expose expires_at');
 select has_column('public','customer_balance_movements','source_credit_movement_id','balance debits identify their source credit lot');
 
--- Expired credits do not count; earliest-expiry live credit is consumed first and only up to amount due.
 insert into public.customer_balance_movements(id,customer_id,movement_type,direction,amount,choice_origin,ip_address,user_agent,request_id,idempotency_key,created_at,expires_at) values
 ('6b000000-0000-4000-8000-000000000030','6b000000-0000-4000-8000-000000000010','CREDIT_FROM_RETURN','CREDIT',50,'CLIENT_TOKEN','127.0.0.1','pgTAP','expired-credit','6b-expired',now()-interval '13 months',now()-interval '1 month'),
 ('6b000000-0000-4000-8000-000000000031','6b000000-0000-4000-8000-000000000010','CREDIT_FROM_RETURN','CREDIT',100,'CLIENT_TOKEN','127.0.0.1','pgTAP','early-credit','6b-early',now(),now()+interval '6 months'),
@@ -38,7 +36,6 @@ select is((public.service_apply_customer_balance_to_appointment('6b000000-0000-4
 select is(public.customer_balance_available('6b000000-0000-4000-8000-000000000010'),150::numeric,'R$150 remains after partial balance application');
 select is((select source_credit_movement_id from public.customer_balance_movements where appointment_id='6b000000-0000-4000-8000-000000000040' and direction='DEBIT' limit 1),'6b000000-0000-4000-8000-000000000031'::uuid,'earliest-expiry credit lot is consumed first');
 
--- Off-gateway cancellation refund: pending list -> audited manual child refund -> action completed.
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
 values ('6b000000-0000-4000-8000-000000000041','6B-MANUAL-REFUND','6b000000-0000-4000-8000-000000000022','6b000000-0000-4000-8000-000000000023','CONFIRMED','PARTIALLY_PAID','2035-10-10 10:00:00-03','2035-10-10 11:00:00-03',60,1,'6b000000-0000-4000-8000-000000000011',500,now());
 insert into public.payment_transactions(id,appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
@@ -50,7 +47,6 @@ select lives_ok($$select public.service_admin_record_cancellation_manual_refund(
 select is((select provider from public.payment_transactions where parent_transaction_id='6b000000-0000-4000-8000-000000000050' and transaction_type='REFUND'),'MANUAL','manual return is an auditable child REFUND transaction');
 select is((select status from public.appointment_policy_actions where appointment_id='6b000000-0000-4000-8000-000000000041' and action_type='CANCEL'),'REFUNDED','policy action closes after full manual refund is recorded');
 
--- No-show is a performed service for accrual/NFS-e, while outstanding remains visible.
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at,no_show_at)
 values ('6b000000-0000-4000-8000-000000000042','6B-NO-SHOW','6b000000-0000-4000-8000-000000000022','6b000000-0000-4000-8000-000000000023','NO_SHOW','PARTIALLY_PAID','2035-09-15 10:00:00-03','2035-09-15 11:00:00-03',60,1,'6b000000-0000-4000-8000-000000000012',500,now(),'2035-09-15 11:01:00-03');
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
