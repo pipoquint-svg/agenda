@@ -16,66 +16,39 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-
           path = Path('supabase/functions/admin-service-settings/index.ts')
           text = path.read_text()
-          text = text.replace(
-              "for (const key of ['base_price', 'price_per_block', 'price_per_extra_person', 'price', 'change_policy']) delete item[key]",
-              "for (const key of ['base_price', 'price_per_block', 'price_per_extra_person', 'price', 'change_policy', 'checkout_minimum_payment_type', 'checkout_minimum_payment_value']) delete item[key]",
-          )
-          text = text.replace(
-              "client.rpc('service_admin_list_service_settings'),",
-              "client.rpc('service_admin_list_service_settings_v2'),",
-          )
+          text = text.replace("for (const key of ['base_price', 'price_per_block', 'price_per_extra_person', 'price', 'change_policy']) delete item[key]", "for (const key of ['base_price', 'price_per_block', 'price_per_extra_person', 'price', 'change_policy', 'checkout_minimum_payment_type', 'checkout_minimum_payment_value']) delete item[key]")
+          text = text.replace("client.rpc('service_admin_list_service_settings'),", "client.rpc('service_admin_list_service_settings_v2'),")
           marker = "    if (action === 'CHANGE_POLICY') {\n"
-          block = """    if (action === 'CHECKOUT_PAYMENT') {
-      await requirePermission('FINANCE_MANAGE')
-      const paymentType = text(body?.checkout_minimum_payment_type).toUpperCase()
-      if (paymentType !== 'PERCENT' && paymentType !== 'FIXED') throw new Error('CHECKOUT_MINIMUM_PAYMENT_TYPE_INVALID')
-      const paymentValue = numeric(body?.checkout_minimum_payment_value, 'checkout_minimum_payment_value')
-      const { data, error } = await client.rpc('service_admin_update_checkout_payment_audited', {
-        p_service_id: serviceId,
-        p_payment_type: paymentType,
-        p_payment_value: paymentValue,
-        p_admin_id: admin.adminId,
-      })
-      if (error) throw new Error(error.message)
-      return json(data)
-    }
-
-"""
-          if block not in text:
-              if marker not in text:
-                  raise SystemExit('CHANGE_POLICY marker not found')
+          block = "\n".join([
+              "    if (action === 'CHECKOUT_PAYMENT') {",
+              "      await requirePermission('FINANCE_MANAGE')",
+              "      const paymentType = text(body?.checkout_minimum_payment_type).toUpperCase()",
+              "      if (paymentType !== 'PERCENT' && paymentType !== 'FIXED') throw new Error('CHECKOUT_MINIMUM_PAYMENT_TYPE_INVALID')",
+              "      const paymentValue = numeric(body?.checkout_minimum_payment_value, 'checkout_minimum_payment_value')",
+              "      const { data, error } = await client.rpc('service_admin_update_checkout_payment_audited', {",
+              "        p_service_id: serviceId, p_payment_type: paymentType, p_payment_value: paymentValue, p_admin_id: admin.adminId,",
+              "      })",
+              "      if (error) throw new Error(error.message)",
+              "      return json(data)",
+              "    }",
+              "",
+          ])
+          if "action === 'CHECKOUT_PAYMENT'" not in text:
+              if marker not in text: raise SystemExit('CHANGE_POLICY marker not found')
               text = text.replace(marker, block + marker)
           path.write_text(text)
-
           path = Path('supabase/functions/mercado-pago-payment/index.ts')
           text = path.read_text()
-          old = """  confirmation_percentage: number | string
-  confirmation_target_amount: number | string
-  minimum_due_contract_amount: number | string
-"""
-          new = """  confirmation_percentage: number | string
-  minimum_payment_type: 'PERCENT' | 'FIXED'
-  minimum_payment_value: number | string
-  confirmation_target_amount: number | string
-  minimum_due_contract_amount: number | string
-"""
-          if old not in text and new not in text:
-              raise SystemExit('PaymentContext marker not found')
-          text = text.replace(old, new)
-          old = """          confirmation_percentage: context.confirmation_percentage,
-          confirmation_target_amount: context.confirmation_target_amount,
-"""
-          new = """          confirmation_percentage: context.confirmation_percentage,
-          minimum_payment_type: context.minimum_payment_type,
-          minimum_payment_value: context.minimum_payment_value,
-          confirmation_target_amount: context.confirmation_target_amount,
-"""
-          if old not in text and new not in text:
-              raise SystemExit('financial response marker not found')
-          text = text.replace(old, new)
+          old = "  confirmation_percentage: number | string\n  confirmation_target_amount: number | string\n  minimum_due_contract_amount: number | string\n"
+          new = "  confirmation_percentage: number | string\n  minimum_payment_type: 'PERCENT' | 'FIXED'\n  minimum_payment_value: number | string\n  confirmation_target_amount: number | string\n  minimum_due_contract_amount: number | string\n"
+          if old in text: text = text.replace(old, new)
+          elif new not in text: raise SystemExit('PaymentContext marker not found')
+          old = "          confirmation_percentage: context.confirmation_percentage,\n          confirmation_target_amount: context.confirmation_target_amount,\n"
+          new = "          confirmation_percentage: context.confirmation_percentage,\n          minimum_payment_type: context.minimum_payment_type,\n          minimum_payment_value: context.minimum_payment_value,\n          confirmation_target_amount: context.confirmation_target_amount,\n"
+          if old in text: text = text.replace(old, new)
+          elif new not in text: raise SystemExit('financial response marker not found')
           path.write_text(text)
       - name: Commit patch
         run: |
