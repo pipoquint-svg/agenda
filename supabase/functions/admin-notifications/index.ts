@@ -18,7 +18,7 @@ const corsHeaders = {
 const events = [
   'APPOINTMENT_APPROVED', 'APPOINTMENT_PENDING', 'APPOINTMENT_REJECTED', 'APPOINTMENT_CANCELLED',
   'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'BIRTHDAY',
-  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'MANUAL',
+  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'MANUAL',
 ]
 const channels = ['EMAIL', 'GOOGLE_CALENDAR']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
@@ -29,9 +29,11 @@ const variables = [
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'extras.summary',
   'coupon.code', 'coupon.discount', 'coupon.expires_at',
   'balance.amount', 'balance.expires_at', 'balance.payment_url',
+  'pre_reservation.expires_at', 'pre_reservation.payment_url',
+  'refund.amount', 'refund.error_code',
 ]
 const financialVariables = new Set([
-  'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'coupon.discount', 'balance.amount',
+  'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'coupon.discount', 'balance.amount', 'refund.amount',
 ])
 
 function json(body: unknown, status = 200) {
@@ -94,6 +96,10 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'balance.amount': 'R$ 500,00',
     'balance.expires_at': '30/08/2026 16:00',
     'balance.payment_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/saldo?collection=teste',
+    'pre_reservation.expires_at': '30/08/2026 16:00',
+    'pre_reservation.payment_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/pagamento?pre_reservation=teste',
+    'refund.amount': 'R$ 500,00',
+    'refund.error_code': 'REFUND_TEST',
   }
 }
 
