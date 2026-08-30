@@ -33,7 +33,7 @@ export type ServiceSettings = {
 }
 
 export type ServiceCatalogBundle = { services: ServiceSettings[]; categories: ServiceCategory[]; extras: ExtraCatalogItem[] }
-type TimingPayload = { service_id: string; action: 'TIMING'; duration_mode: 'FIXED' | 'BLOCKS'; base_duration_minutes: number; slot_interval_minutes: number; booking_block_minutes: number | null; minimum_booking_blocks: number | null; maximum_booking_blocks: number | null; base_price: number; price_per_block: number | null; buffer_before_minutes: number; buffer_after_minutes: number }
+type TimingPayload = { service_id: string; action: 'TIMING'; duration_mode: 'FIXED' | 'BLOCKS'; base_duration_minutes: number; slot_interval_minutes?: number; booking_block_minutes: number | null; minimum_booking_blocks: number | null; maximum_booking_blocks: number | null; base_price: number; price_per_block: number | null; buffer_before_minutes: number; buffer_after_minutes: number }
 type DurationConfigurationPayload = { service_id: string; action: 'DURATION_CONFIGURATION'; pricing_tiers: DurationPricingTier[]; duration_presets: DurationPreset[] }
 
 // category/people fields are optional at the TypeScript boundary only so the legacy advanced
