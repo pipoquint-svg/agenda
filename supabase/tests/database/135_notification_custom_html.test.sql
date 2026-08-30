@@ -7,7 +7,17 @@ select plan(8);
 
 select has_column('public', 'notification_template_configs', 'html_template', 'notification templates store optional custom HTML');
 
-select col_is_null('public', 'notification_template_configs', 'html_template', 'custom HTML remains optional for legacy templates');
+select ok(
+  exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'notification_template_configs'
+      and column_name = 'html_template'
+      and is_nullable = 'YES'
+  ),
+  'custom HTML remains optional for legacy templates'
+);
 
 select has_function('public', 'service_admin_list_notification_templates_v2', array[]::text[], 'admin v2 list function exists');
 
