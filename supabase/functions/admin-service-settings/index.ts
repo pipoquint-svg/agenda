@@ -39,10 +39,28 @@ function numeric(value: unknown, field: string, nullable = false): number | null
   return next
 }
 
+function slotInterval(value: unknown): number {
+  const next = integer(value ?? 30, 'slot_interval_minutes')
+  if (next === null || next < 30 || next > 480 || next % 30 !== 0) throw new Error('SLOT_INTERVAL_MINUTES_INVALID')
+  return next
+}
+
 function operationScope(value: unknown): 'SABRINA' | 'BLACKSHEEP' {
   const scope = text(value).toUpperCase()
   if (scope !== 'SABRINA' && scope !== 'BLACKSHEEP') throw new Error('SERVICE_OPERATION_SCOPE_INVALID')
   return scope
+}
+
+function mergeServiceSlotIntervals(data: unknown, rows: Array<{ id: string; slot_interval_minutes: number | null }> | null): unknown {
+  if (!Array.isArray(data)) return data
+  const byId = new Map((rows ?? []).map((row) => [row.id, row.slot_interval_minutes ?? 30]))
+  return data.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item
+    const service = { ...(item as Record<string, unknown>) }
+    const id = typeof service.id === 'string' ? service.id : ''
+    service.slot_interval_minutes = byId.get(id) ?? 30
+    return service
+  })
 }
 
 function redactCommercial(data: unknown): unknown {
@@ -77,16 +95,19 @@ Deno.serve(async (req) => {
     if (req.method === 'GET') {
       await requirePermission('SERVICES_VIEW')
       const canSeeFinance = await can('FINANCE_VIEW')
-      const [servicesResult, categoriesResult, extrasResult] = await Promise.all([
+      const [servicesResult, categoriesResult, extrasResult, slotIntervalsResult] = await Promise.all([
         client.rpc('service_admin_list_service_settings_v2'),
         client.rpc('service_admin_list_categories'),
         client.rpc('service_admin_list_extras'),
+        client.from('services').select('id,slot_interval_minutes'),
       ])
       if (servicesResult.error) throw new Error(servicesResult.error.message)
       if (categoriesResult.error) throw new Error(categoriesResult.error.message)
       if (extrasResult.error) throw new Error(extrasResult.error.message)
+      if (slotIntervalsResult.error) throw new Error(slotIntervalsResult.error.message)
+      const services = mergeServiceSlotIntervals(servicesResult.data, slotIntervalsResult.data)
       return json({
-        services: canSeeFinance ? servicesResult.data : redactCommercial(servicesResult.data),
+        services: canSeeFinance ? services : redactCommercial(services),
         categories: categoriesResult.data ?? [],
         extras: canSeeFinance ? extrasResult.data : redactCommercial(extrasResult.data),
       })
@@ -224,6 +245,7 @@ Deno.serve(async (req) => {
     if (action === 'TIMING') {
       const mode = body?.duration_mode === 'BLOCKS' ? 'BLOCKS' : body?.duration_mode === 'FIXED' ? 'FIXED' : null
       if (!mode) throw new Error('INVALID_DURATION_MODE')
+      const requestedSlotInterval = slotInterval(body?.slot_interval_minutes ?? 30)
       const canSeeFinance = await can('FINANCE_VIEW')
       const { data, error } = await client.rpc('service_admin_update_timing_audited', {
         p_service_id: serviceId, p_duration_mode: mode,
@@ -236,7 +258,32 @@ Deno.serve(async (req) => {
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
-      return json(canSeeFinance ? data : redactCommercial(data))
+
+      const { data: beforeSnapshot, error: beforeSnapshotError } = await client.rpc('service_admin_service_snapshot', { p_service_id: serviceId })
+      if (beforeSnapshotError) throw new Error(beforeSnapshotError.message)
+      const currentSlotInterval = Number(beforeSnapshot?.service?.slot_interval_minutes ?? 30)
+
+      if (currentSlotInterval !== requestedSlotInterval) {
+        const { error: slotError } = await client.from('services').update({ slot_interval_minutes: requestedSlotInterval }).eq('id', serviceId)
+        if (slotError) throw new Error(slotError.message)
+        const { data: afterSnapshot, error: afterSnapshotError } = await client.rpc('service_admin_service_snapshot', { p_service_id: serviceId })
+        if (afterSnapshotError) throw new Error(afterSnapshotError.message)
+        const { error: auditError } = await client.from('audit_logs').insert({
+          admin_user_id: admin.adminId,
+          entity_type: 'SERVICE',
+          entity_id: serviceId,
+          action: 'SERVICE_SLOT_INTERVAL_UPDATED',
+          before_json: beforeSnapshot,
+          after_json: afterSnapshot,
+          origin: 'ADMIN',
+        })
+        if (auditError) throw new Error(auditError.message)
+      }
+
+      const result = data && typeof data === 'object' && !Array.isArray(data)
+        ? { ...(data as Record<string, unknown>), slot_interval_minutes: requestedSlotInterval }
+        : data
+      return json(canSeeFinance ? result : redactCommercial(result))
     }
 
     if (action === 'DURATION_CONFIGURATION') {
