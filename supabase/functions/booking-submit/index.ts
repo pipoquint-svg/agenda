@@ -16,6 +16,7 @@ Deno.serve(async(req)=>{
  try{
   const client=adminClient();await enforceDistributedPublicRateLimit(client,req,{scope:'BOOKING_SUBMIT',limit:30,windowSeconds:600})
   const body=await req.json();const token=typeof body?.checkout_hold_token==='string'?body.checkout_hold_token.trim():'';if(token.length<32)throw new Error('CHECKOUT_HOLD_TOKEN_REQUIRED')
+  const checkoutMode=typeof body?.checkout_mode==='string'?body.checkout_mode.trim().toUpperCase():'PAY_NOW';if(!['PAY_NOW','PREBOOK'].includes(checkoutMode))throw new Error('CHECKOUT_MODE_INVALID')
   const terms=stringArray(body?.term_version_ids??[]);const answers=Array.isArray(body?.answers)?body.answers:[];const ip=requestIp(req);const userAgent=(req.headers.get('user-agent')??'').slice(0,500)||null
   const requestId=(()=>{const supplied=req.headers.get('x-request-id')?.trim()??'';return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(supplied)?supplied:crypto.randomUUID()})()
   const{error:accessError}=await client.rpc('service_public_check_customer_access',{p_checkout_hold_token:token,p_ip:ip,p_user_agent:userAgent??'',p_request_id:requestId})
@@ -23,8 +24,8 @@ Deno.serve(async(req)=>{
   // Coupon choice is authoritative only after it has been confirmed and persisted on the hold.
   // Ignore any browser-supplied coupon_code so a client cannot swap discounts at submit time.
   const{data:couponCode,error:couponError}=await client.rpc('get_checkout_applied_coupon_code',{p_checkout_hold_token:token});if(couponError)throw new Error('CHECKOUT_COUPON_STATE_FAILED')
-  const{data,error}=await client.rpc('service_submit_public_checkout',{p_checkout_hold_token:token,p_coupon_code:typeof couponCode==='string'&&couponCode.trim()?couponCode:null,p_term_version_ids:terms,p_answers:answers,p_acceptance_ip:ip,p_user_agent:userAgent})
-  if(error){const known=error.message.match(/(CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_CUSTOMER_REQUIRED|REQUIRED_SERVICE_FIELDS_MISSING|INVALID_SERVICE_ANSWERS|INVALID_SERVICE_ANSWER_VALUE|TERMS_NOT_ACCEPTED|TERMS_CONFIGURATION_MISSING|INVALID_COUPON|COUPON_USAGE_LIMIT_REACHED|COUPON_CUSTOMER_MISMATCH|COUPON_CUSTOMER_USAGE_LIMIT_REACHED|COUPON_PACKAGE_POLICY_REQUIRES_DECISION|ONLINE_BOOKING_NOT_AVAILABLE|FREE_VISIT_NOT_AVAILABLE|FREE_VISIT_ACTIVE_LIMIT_REACHED|MAX_ACTIVE_PREBOOKS_REACHED|PREBOOK_REQUIRES_CHECKOUT)/)?.[1];throw new Error(known??`CHECKOUT_SUBMIT_FAILED:${error.message}`)}
+  const{data,error}=await client.rpc('service_submit_public_checkout_choice',{p_checkout_hold_token:token,p_checkout_mode:checkoutMode,p_coupon_code:typeof couponCode==='string'&&couponCode.trim()?couponCode:null,p_term_version_ids:terms,p_answers:answers,p_acceptance_ip:ip,p_user_agent:userAgent})
+  if(error){const known=error.message.match(/(CHECKOUT_HOLD_NOT_ACTIVE|CHECKOUT_CUSTOMER_REQUIRED|CHECKOUT_MODE_INVALID|PREBOOK_NOT_AVAILABLE|REQUIRED_SERVICE_FIELDS_MISSING|INVALID_SERVICE_ANSWERS|INVALID_SERVICE_ANSWER_VALUE|TERMS_NOT_ACCEPTED|TERMS_CONFIGURATION_MISSING|INVALID_COUPON|COUPON_USAGE_LIMIT_REACHED|COUPON_CUSTOMER_MISMATCH|COUPON_CUSTOMER_USAGE_LIMIT_REACHED|COUPON_PACKAGE_POLICY_REQUIRES_DECISION|ONLINE_BOOKING_NOT_AVAILABLE|FREE_VISIT_NOT_AVAILABLE|FREE_VISIT_ACTIVE_LIMIT_REACHED|MAX_ACTIVE_PREBOOKS_REACHED|PREBOOK_REQUIRES_CHECKOUT)/)?.[1];throw new Error(known??`CHECKOUT_SUBMIT_FAILED:${error.message}`)}
   const appointment=(data&&typeof data==='object'&&!Array.isArray(data)?{...(data as Record<string,unknown>)}:{});
   if(appointment.pre_reservation===true){
    try{
