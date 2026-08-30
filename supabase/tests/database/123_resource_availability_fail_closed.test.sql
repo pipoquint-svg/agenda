@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(6);
+select plan(7);
 
 create temporary table _resource_availability_function_def as
 select pg_get_functiondef(
@@ -56,6 +56,16 @@ select ok(
       and def like '%v_now%'
   ),
   'expired awaiting-payment holds do not block resources forever'
+);
+
+select ok(
+  exists (
+    select 1 from _resource_availability_function_def
+    where def like '%allocation_type <> ''CHECKOUT_HOLD''%'
+      and def like '%checkout_holds%'
+      and def like '%ch.expires_at > v_now%'
+  ),
+  'expired checkout holds do not keep BLOCKS resource allocations busy'
 );
 
 select * from finish();
