@@ -34,21 +34,138 @@ function dateTime(value: unknown): string {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(parsed)
 }
 
+async function sendRefundFailedNotification(client: any, body: Record<string, unknown>) {
+  const appointmentId = String(body.appointment_id ?? '').trim()
+  const policyActionId = String(body.policy_action_id ?? '').trim()
+  const actorAuthUserId = String(body.actor_auth_user_id ?? '').trim()
+  const errorCode = String(body.error_code ?? 'REFUND_FAILED').trim().slice(0, 120)
+  const refundAmount = numeric(body.refund_amount)
+  if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
+  if (!policyActionId) throw new Error('POLICY_ACTION_ID_REQUIRED')
+  if (!actorAuthUserId) throw new Error('ACTOR_AUTH_USER_ID_REQUIRED')
+  if (!isEnabled()) return jsonResponse({ skipped: true, reason: 'TRANSACTIONAL_EMAIL_DISABLED' })
+
+  const [{ data: appointment, error: appointmentError }, { data: actorData, error: actorError }] = await Promise.all([
+    client.from('appointments').select('id,public_code,service_id').eq('id', appointmentId).maybeSingle(),
+    client.auth.admin.getUserById(actorAuthUserId),
+  ])
+  if (appointmentError || !appointment) throw new Error('APPOINTMENT_LOOKUP_FAILED')
+  if (actorError || !actorData?.user) throw new Error('ADMIN_EMAIL_LOOKUP_FAILED')
+
+  const { data: service, error: serviceError } = await client
+    .from('services')
+    .select('id,operation_scope')
+    .eq('id', appointment.service_id)
+    .maybeSingle()
+  if (serviceError || !service) throw new Error('SERVICE_LOOKUP_FAILED')
+
+  const scope = String(service.operation_scope ?? '').trim().toUpperCase()
+  if (!isScopeEnabled(scope, Deno.env.get('TRANSACTIONAL_EMAIL_SCOPES'))) {
+    return jsonResponse({ skipped: true, reason: 'EMAIL_SCOPE_DISABLED', operation_scope: scope })
+  }
+
+  const sender = notificationSenderForScope(scope)
+  if (!sender) return jsonResponse({ skipped: true, reason: 'EMAIL_SCOPE_SENDER_NOT_CONFIGURED', operation_scope: scope })
+
+  const recipient = normalizedEmail(actorData.user.email)
+  if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    return jsonResponse({ skipped: true, reason: 'EMAIL_RECIPIENT_MISSING_OR_INVALID' })
+  }
+  if (!isRecipientAllowed(recipient, allowRealRecipients(), Deno.env.get('EMAIL_TEST_RECIPIENT_ALLOWLIST'))) {
+    return jsonResponse({ skipped: true, reason: 'EMAIL_RECIPIENT_NOT_ALLOWLISTED', recipient_masked: maskEmail(recipient) })
+  }
+
+  const eventKey = 'REFUND_FAILED'
+  const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template', {
+    p_event_key: eventKey,
+    p_channel: 'EMAIL',
+    p_audience: 'EMPLOYEE',
+    p_service_id: appointment.service_id,
+  })
+  if (resolverError) throw new Error('NOTIFICATION_TEMPLATE_RESOLUTION_FAILED')
+  const template = (Array.isArray(rows) ? rows[0] : null) as NotificationTemplate | null
+  if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+
+  const { data: operationSettings } = await client.rpc('service_admin_get_operation_settings_v2', {
+    p_operation_scope: scope,
+  })
+  const values: Record<string, string> = {
+    'appointment.public_code': String(appointment.public_code ?? ''),
+    'refund.amount': money(refundAmount),
+    'refund.error_code': errorCode,
+    'operation.name': String(operationSettings?.public_name ?? sender.brandName),
+  }
+  const message = renderNotificationMessage(template, values, sender.brandName)
+  const providerIdempotencyKey = `notification:${template.id}:${policyActionId}:${errorCode}:EMAIL:EMPLOYEE`
+  const delivery = await beginNotificationDelivery(client, {
+    templateId: template.id,
+    eventKey,
+    audience: 'EMPLOYEE',
+    appointmentId,
+    recipient,
+    idempotencyKey: providerIdempotencyKey,
+    payloadSnapshot: {
+      template_id: template.id,
+      appointment_id: appointmentId,
+      policy_action_id: policyActionId,
+      error_code: errorCode,
+      refund_amount: refundAmount,
+      operation_scope: scope,
+    },
+  })
+  if (delivery.alreadySent) {
+    return jsonResponse({ skipped: true, reason: 'NOTIFICATION_ALREADY_SENT', provider_message_id: delivery.providerMessageId })
+  }
+
+  const providerPayload: EmailProviderPayload = {
+    from: sender.from,
+    to: [recipient],
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  }
+  if (sender.replyTo) providerPayload.reply_to = sender.replyTo
+
+  try {
+    const providerMessageId = await sendEmailWithProvider(providerPayload, providerIdempotencyKey)
+    await markNotificationSent(client, delivery.id, providerMessageId)
+    return jsonResponse({
+      skipped: false,
+      reason: eventKey,
+      appointment_id: appointmentId,
+      policy_action_id: policyActionId,
+      operation_scope: scope,
+      recipient_masked: maskEmail(recipient),
+      provider: 'RESEND',
+      provider_message_id: providerMessageId,
+      template_id: template.id,
+    })
+  } catch (sendError) {
+    await markNotificationFailed(client, delivery.id, sendError)
+    throw sendError
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
   let deliveryLogId: string | null = null
   try {
     requireInternal(req)
-    const body = await req.json()
+    const body = await req.json() as Record<string, unknown>
+    const reason = String(body.reason ?? 'CONFIRMED').trim().toUpperCase()
+    const client = adminClient()
+
+    if (reason === 'REFUND_FAILED') {
+      return await sendRefundFailedNotification(client, body)
+    }
+
     const appointmentId = String(body.appointment_id ?? '').trim()
     const entityVersion = Number(body.entity_version)
-    const reason = String(body.reason ?? 'CONFIRMED').trim().toUpperCase()
     if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
     if (!Number.isInteger(entityVersion) || entityVersion < 1) throw new Error('ENTITY_VERSION_REQUIRED')
     if (!isEnabled()) return jsonResponse({ stale: false, skipped: true, reason: 'TRANSACTIONAL_EMAIL_DISABLED' })
 
-    const client = adminClient()
     const { data: appointment, error: appointmentError } = await client
       .from('appointments')
       .select('id, public_code, service_id, primary_customer_id, status, financial_status, start_at, end_at, duration_minutes, commercial_value, version, service_name_snapshot, service_description_snapshot')
