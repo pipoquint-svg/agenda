@@ -112,16 +112,14 @@ select is(
   'duration-aware function uses the same independently anchored employee+service ranges'
 );
 
-select ok(
-  not exists (
-    select 1
-    from public.list_available_slots_without_google_sync_gate(
-      '98300000-0000-0000-0000-000000000010',
-      '98300000-0000-0000-0000-000000000021',
-      '[]'::jsonb, 1, '2030-01-05'::date, null
-    )
-  ),
-  'a service cannot accidentally consume another service_employee pair'
+select throws_ok(
+  $$ select * from public.list_available_slots_without_google_sync_gate(
+    '98300000-0000-0000-0000-000000000010',
+    '98300000-0000-0000-0000-000000000021',
+    '[]'::jsonb, 1, '2030-01-05'::date, null
+  ) $$,
+  'P0001', 'EMPLOYEE_NOT_AVAILABLE_FOR_SERVICE',
+  'a service cannot consume another service employee pair'
 );
 
 select is(
@@ -208,7 +206,7 @@ select is(
     )
   ),
   array['08:30','10:00','11:30','14:00','15:30','17:00','18:30']::text[],
-  'physical space open 08:00-22:00 only filters and does not shift employee+service cadence'
+  'physical space open 08:00-22:00 only filters and does not shift employee service cadence'
 );
 
 update public.resource_availability_rules
@@ -288,7 +286,7 @@ select ok(
     like '%where ar.service_employee_id = p_service_employee_id%'
   and pg_get_functiondef('public.list_available_slots_for_duration_without_google_sync_gate(uuid,uuid,integer,jsonb,integer,date,text)'::regprocedure)
     like '%where ar.service_employee_id = p_service_employee_id%',
-  'candidate source remains scoped to the selected employee+service pair in both core functions'
+  'candidate source remains scoped to the selected employee service pair in both core functions'
 );
 
 select * from finish();
