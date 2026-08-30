@@ -175,6 +175,7 @@ set search_path = public
 as $$
 declare
   v_token text := replace(gen_random_uuid()::text, '-', '');
+  v_customer uuid := gen_random_uuid();
   v_pix uuid := gen_random_uuid();
   v_cash uuid := gen_random_uuid();
   v_refund uuid := gen_random_uuid();
@@ -186,14 +187,17 @@ declare
   v_refund_code text := 'QA-FIN-REF-' || left(v_token, 8);
   v_balance_code text := 'QA-FIN-SALDO-' || left(v_token, 8);
 begin
+  insert into public.customers(id, name, email, phone)
+  values (v_customer, 'Cliente QA Financeiro ' || left(v_token, 8), 'qa-fin-' || left(v_token, 8) || '@example.test', '+554899' || left(v_token, 8));
+
   insert into public.appointments(
     id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,
     duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at
   ) values
-    (v_pix,v_pix_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-05 10:00:00-03','2035-11-05 11:00:00-03',60,1,'99000000-0000-0000-0000-000000000050',500,now()),
-    (v_cash,v_cash_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-06 10:00:00-03','2035-11-06 11:00:00-03',60,1,'99000000-0000-0000-0000-000000000050',200,now()),
-    (v_refund,v_refund_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','PAID','2035-11-07 10:00:00-03','2035-11-07 11:00:00-03',60,1,'99000000-0000-0000-0000-000000000050',300,now()),
-    (v_balance,v_balance_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-08 10:00:00-03','2035-11-08 11:00:00-03',60,1,'99000000-0000-0000-0000-000000000050',250,now());
+    (v_pix,v_pix_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-05 10:00:00-03','2035-11-05 11:00:00-03',60,1,v_customer,500,now()),
+    (v_cash,v_cash_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-06 10:00:00-03','2035-11-06 11:00:00-03',60,1,v_customer,200,now()),
+    (v_refund,v_refund_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','PAID','2035-11-07 10:00:00-03','2035-11-07 11:00:00-03',60,1,v_customer,300,now()),
+    (v_balance,v_balance_code,'99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','CONFIRMED','NOT_STARTED','2035-11-08 10:00:00-03','2035-11-08 11:00:00-03',60,1,v_customer,250,now());
 
   insert into public.payment_transactions(
     appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,paid_at,payment_purpose,notes
@@ -204,12 +208,12 @@ begin
   insert into public.customer_balance_movements(
     id,customer_id,movement_type,direction,amount,choice_origin,ip_address,user_agent,request_id,idempotency_key,created_at,expires_at
   ) values
-    (v_early,'99000000-0000-0000-0000-000000000050','CREDIT_FROM_RETURN','CREDIT',100,'CLIENT_TOKEN','127.0.0.1','Gestão E2E','qa-balance-early-'||v_token,'qa-balance-early-'||v_token,now(),now()+interval '6 months'),
-    (v_late,'99000000-0000-0000-0000-000000000050','CREDIT_FROM_RETURN','CREDIT',200,'CLIENT_TOKEN','127.0.0.1','Gestão E2E','qa-balance-late-'||v_token,'qa-balance-late-'||v_token,now(),now()+interval '12 months');
+    (v_early,v_customer,'CREDIT_FROM_RETURN','CREDIT',100,'CLIENT_TOKEN','127.0.0.1','Gestão E2E','qa-balance-early-'||v_token,'qa-balance-early-'||v_token,now(),now()+interval '6 months'),
+    (v_late,v_customer,'CREDIT_FROM_RETURN','CREDIT',200,'CLIENT_TOKEN','127.0.0.1','Gestão E2E','qa-balance-late-'||v_token,'qa-balance-late-'||v_token,now(),now()+interval '12 months');
 
   return jsonb_build_object(
     'month','2035-11',
-    'customer_id','99000000-0000-0000-0000-000000000050',
+    'customer_id',v_customer,
     'pix',jsonb_build_object('id',v_pix,'public_code',v_pix_code,'amount',500),
     'cash',jsonb_build_object('id',v_cash,'public_code',v_cash_code,'amount',200),
     'refund',jsonb_build_object('id',v_refund,'public_code',v_refund_code,'amount',300,'local_date','2035-11-07'),
