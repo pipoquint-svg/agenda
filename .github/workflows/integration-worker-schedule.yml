@@ -22,7 +22,7 @@ jobs:
         shell: bash
         env:
           OIDC_AUDIENCE: blacksheep-agenda-integration-worker
-          WORKER_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/integration-worker-trigger
+          WORKER_URL: https://sbexdggbwqvyhbkatucs.supabase.co/functions/v1/integration-worker-trigger
         run: |
           set -euo pipefail
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
