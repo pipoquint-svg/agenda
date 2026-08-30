@@ -73,13 +73,8 @@ function refundSnapshot(raw: Record<string, unknown>): Record<string, unknown> {
 }
 
 function providerFinancialMutationRuntime() {
-  // Refunds mutate real provider money just like charge creation. Reuse the same
-  // environment-scoped credential + explicit production gate so a generic token can
-  // never authorize a real refund by accident.
   return mercadoPagoRuntime({
     environment: Deno.env.get('MERCADO_PAGO_ENV'),
-    accessToken: Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN'),
-    sandboxAccessToken: Deno.env.get('MERCADO_PAGO_SANDBOX_ACCESS_TOKEN'),
     productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'),
     allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
     creatingCharge: true,
@@ -156,8 +151,6 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message)
       const cancellation = data as Record<string, unknown>
 
-      // Refund remains the safe default. Only an explicit, evidenced ADMIN_UI
-      // choice can convert the pending return into indefinite customer balance.
       if (requestedChoice === 'CUSTOMER_BALANCE' && Number(cancellation.refund_amount ?? 0) > 0) {
         const evidence = requestEvidence(req, body)
         const { data: balanceData, error: balanceError } = await client.rpc('service_credit_customer_balance_from_return', {
