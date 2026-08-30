@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(18);
+select plan(19);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at,raw_app_meta_data,raw_user_meta_data)
 values ('6b000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','finance6b@example.test','',now(),now(),now(),'{}'::jsonb,'{}'::jsonb);
@@ -46,6 +46,7 @@ select throws_ok($$select public.service_admin_record_cancellation_manual_refund
 select lives_ok($$select public.service_admin_record_cancellation_manual_refund((select id from public.appointment_policy_actions where appointment_id='6b000000-0000-4000-8000-000000000041' and action_type='CANCEL'),'PIX',300,'Comprovante PIX 6B','2035-10-01 11:00:00-03','6b000000-0000-4000-8000-000000000002','127.0.0.1','pgTAP','6b-refund-ok')$$,'off-gateway refund can be recorded by FINANCE_MANAGE');
 select is((select provider from public.payment_transactions where parent_transaction_id='6b000000-0000-4000-8000-000000000050' and transaction_type='REFUND'),'MANUAL','manual return is an auditable child REFUND transaction');
 select is((select status from public.appointment_policy_actions where appointment_id='6b000000-0000-4000-8000-000000000041' and action_type='CANCEL'),'REFUNDED','policy action closes after full manual refund is recorded');
+select is((public.service_admin_record_cancellation_manual_refund((select id from public.appointment_policy_actions where appointment_id='6b000000-0000-4000-8000-000000000041' and action_type='CANCEL'),'PIX',300,'Comprovante PIX 6B','2035-10-01 11:00:00-03','6b000000-0000-4000-8000-000000000002','127.0.0.1','pgTAP','6b-refund-ok')->>'idempotent_replay')::boolean,true,'same manual refund request replays idempotently after the action is already refunded');
 
 insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at,no_show_at)
 values ('6b000000-0000-4000-8000-000000000042','6B-NO-SHOW','6b000000-0000-4000-8000-000000000022','6b000000-0000-4000-8000-000000000023','NO_SHOW','PARTIALLY_PAID','2035-09-15 10:00:00-03','2035-09-15 11:00:00-03',60,1,'6b000000-0000-4000-8000-000000000012',500,now(),'2035-09-15 11:01:00-03');
@@ -53,7 +54,7 @@ insert into public.payment_transactions(appointment_id,transaction_type,method,p
 values ('6b000000-0000-4000-8000-000000000042','CHARGE','PIX','MANUAL','APPROVED',200,200,'2035-09-10 10:00:00-03','CONTRACT');
 select is((public.service_admin_finance_month_close('2035-09-01','BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'services'->>'service_count')::integer,1,'month close counts NO_SHOW as a performed service');
 select is((public.service_admin_finance_month_close('2035-09-01','BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'contract'->>'outstanding')::numeric,300::numeric,'no-show keeps R$300 outstanding instead of refunding or crediting it');
-select is((public.service_admin_finance_month_close('2035-09-01','BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'cash'->>'received')::numeric,200::numeric,'cash received is reported separately from contracted revenue');
+select is((public.service_admin_finance_month_close('2035-09-01','BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'cash'->>'received')::numeric,500::numeric,'September cash includes R$300 received for a future service plus R$200 from the no-show service');
 select is((public.service_admin_finance_month_close('2035-09-01','BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'customer_balance'->>'accounting_classification'),'LIABILITY_NOT_REVENUE','customer balance remains a liability, not revenue');
 select is((public.service_admin_finance_nfse_export('2035-09-01','BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'rows'->0->>'appointment_status'),'NO_SHOW','NFS-e export includes no-show services');
 
