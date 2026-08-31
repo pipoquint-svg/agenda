@@ -1,16 +1,16 @@
 -- Keep checkout-hold creation on the same injectable clock used by availability
 -- and autonomous expiry tests. In production agenda.test_now is unset, so this
 -- remains exactly equivalent to now().
+--
+-- Hosted production may have the same function formatted differently from a
+-- clean migration rebuild. Patch the semantic assignment with a whitespace-
+-- tolerant regex so the migration is safe across both representations.
 
 do $migration$
 declare
   v_oid oid;
   v_def text;
-  v_old text := $old$  v_expires_at := now() + make_interval(mins => v_hold_minutes);$old$;
-  v_new text := $new$  v_expires_at := coalesce(
-    nullif(current_setting('agenda.test_now', true), '')::timestamptz,
-    now()
-  ) + make_interval(mins => v_hold_minutes);$new$;
+  v_patched text;
 begin
   select p.oid
     into v_oid
@@ -25,11 +25,25 @@ begin
   end if;
 
   v_def := pg_get_functiondef(v_oid);
-  if position(v_old in v_def) = 0 then
+
+  if position('agenda.test_now' in v_def) > 0 then
+    return;
+  end if;
+
+  v_patched := regexp_replace(
+    v_def,
+    'v_expires_at\s*:=\s*now\(\)\s*\+\s*make_interval\(mins\s*=>\s*v_hold_minutes\)\s*;',
+    $replacement$v_expires_at := coalesce(
+    nullif(current_setting('agenda.test_now', true), '')::timestamptz,
+    now()
+  ) + make_interval(mins => v_hold_minutes);$replacement$
+  );
+
+  if v_patched = v_def then
     raise exception 'expected duration checkout hold expiry assignment not found';
   end if;
 
-  execute replace(v_def, v_old, v_new);
+  execute v_patched;
 end;
 $migration$;
 
