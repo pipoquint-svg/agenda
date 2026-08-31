@@ -206,3 +206,6 @@ verify_jwt = false
 
 [functions.admin-resource-settings]
 verify_jwt = false
+
+[functions.admin-special-calendar]
+verify_jwt = false
