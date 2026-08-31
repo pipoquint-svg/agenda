@@ -255,7 +255,9 @@ Deno.serve(async (req) => {
     if (action === 'TIMING') {
       const mode = body?.duration_mode === 'BLOCKS' ? 'BLOCKS' : body?.duration_mode === 'FIXED' ? 'FIXED' : null
       if (!mode) throw new Error('INVALID_DURATION_MODE')
-      const requestedSlotInterval = slotInterval(body?.slot_interval_minutes ?? 30)
+      const requestedSlotInterval = body?.slot_interval_minutes === undefined || body?.slot_interval_minutes === null
+        ? null
+        : slotInterval(body.slot_interval_minutes)
       const canSeeFinance = await can('FINANCE_VIEW')
       const { data, error } = await client.rpc('service_admin_update_timing_audited', {
         p_service_id: serviceId, p_duration_mode: mode,
@@ -272,9 +274,10 @@ Deno.serve(async (req) => {
       const { data: beforeSnapshot, error: beforeSnapshotError } = await client.rpc('service_admin_service_snapshot', { p_service_id: serviceId })
       if (beforeSnapshotError) throw new Error(beforeSnapshotError.message)
       const currentSlotInterval = Number(beforeSnapshot?.service?.slot_interval_minutes ?? 30)
+      const effectiveSlotInterval = requestedSlotInterval ?? currentSlotInterval
 
-      if (currentSlotInterval !== requestedSlotInterval) {
-        const { error: slotError } = await client.from('services').update({ slot_interval_minutes: requestedSlotInterval }).eq('id', serviceId)
+      if (currentSlotInterval !== effectiveSlotInterval) {
+        const { error: slotError } = await client.from('services').update({ slot_interval_minutes: effectiveSlotInterval }).eq('id', serviceId)
         if (slotError) throw new Error(slotError.message)
         const { data: afterSnapshot, error: afterSnapshotError } = await client.rpc('service_admin_service_snapshot', { p_service_id: serviceId })
         if (afterSnapshotError) throw new Error(afterSnapshotError.message)
@@ -291,7 +294,7 @@ Deno.serve(async (req) => {
       }
 
       const result = data && typeof data === 'object' && !Array.isArray(data)
-        ? { ...(data as Record<string, unknown>), slot_interval_minutes: requestedSlotInterval }
+        ? { ...(data as Record<string, unknown>), slot_interval_minutes: effectiveSlotInterval }
         : data
       return json(canSeeFinance ? result : redactCommercial(result))
     }
