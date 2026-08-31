@@ -1,0 +1,3 @@
+/agendar/*
+  Content-Security-Policy: frame-ancestors 'self' https://www.sabrinapierri.com.br https://sabrinapierri.com.br
+  ! X-Frame-Options
