@@ -36,6 +36,11 @@ type PaymentContext = {
   minimum_due_contract_amount: number | string
   minimum_available: boolean
   full_available: boolean
+  payment_mode: 'MINIMUM_OR_FULL' | 'MINIMUM_ONLY' | 'FULL_ONLY'
+  policy_allows_minimum: boolean
+  policy_allows_full: boolean
+  pix_discount_percent: number | string
+  card_max_installments: number | string
   payer: { name: string; email: string; tax_id: string }
 }
 
@@ -352,7 +357,11 @@ Deno.serve(async (req) => {
           full_pix_due: fullPixDue,
           minimum_available: context.minimum_available,
           full_available: context.full_available,
+          payment_mode: context.payment_mode,
+          policy_allows_minimum: context.policy_allows_minimum,
+          policy_allows_full: context.policy_allows_full,
           pix_discount_percent: pixDiscountPercent,
+          card_max_installments: Number(context.card_max_installments),
         },
         payment_methods: {
           pix_available: providerReady,
@@ -398,6 +407,17 @@ Deno.serve(async (req) => {
     const requestKey = typeof input?.request_key === 'string' ? input.request_key.trim() : ''
     if (!paymentKind) throw new Error('INVALID_PAYMENT_KIND')
     if (!method) throw new Error('PUBLIC_PAYMENT_METHOD_NOT_ALLOWED')
+
+    if (paymentKind === 'FULL' && !context.policy_allows_full) {
+      throw new Error('PAYMENT_POLICY_FULL_NOT_ALLOWED:Este serviço permite online apenas o sinal. Escolha pagar o sinal; o saldo deve ser quitado presencialmente pela Gestão.')
+    }
+    if (paymentKind === 'MINIMUM' && !context.policy_allows_minimum) {
+      throw new Error('PAYMENT_POLICY_MINIMUM_NOT_ALLOWED:Este serviço exige pagamento integral online. Escolha o valor integral para continuar.')
+    }
+
+    const validatedCard = method === 'CARD'
+      ? validateCardSubmission(input?.card, Number(context.card_max_installments))
+      : null
 
     const { data: intentData, error: intentError } = await client.rpc('service_create_payment_intent_by_token', {
       p_access_token: token,
@@ -456,15 +476,15 @@ Deno.serve(async (req) => {
       providerPaymentMethodId = 'pix'
       paymentMethod = { id: 'pix', type: 'bank_transfer' }
     } else {
-      const card = validateCardSubmission(input?.card)
+      if (!validatedCard) throw new Error('CARD_DATA_INVALID')
       const identification = payerIdentification(context.payer.tax_id)
       const providerDescription = safeProviderDescription(context.provider_commercial_description)
-      providerPaymentMethodId = card.paymentMethodId
+      providerPaymentMethodId = validatedCard.paymentMethodId
       paymentMethod = {
-        id: card.paymentMethodId,
+        id: validatedCard.paymentMethodId,
         type: 'credit_card',
-        token: card.token,
-        installments: card.installments,
+        token: validatedCard.token,
+        installments: validatedCard.installments,
       }
       providerBody.capture_mode = 'automatic'
       providerBody.description = providerDescription
@@ -563,10 +583,23 @@ Deno.serve(async (req) => {
       state: applied.state,
     }, normalized === 'APPROVED' ? 200 : 201)
   } catch (error) {
-    const code = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
-    if (code.startsWith('MERCADO_PAGO_') && code.includes('MISMATCH')) console.error('Mercado Pago validation failed', code)
-    const publicCode = code.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PROVIDER_COMMERCIAL_DESCRIPTION_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
-      ?? (code.startsWith('MERCADO_PAGO_') && (code.includes('MISMATCH') || code === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED') ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' : code.split(':')[0])
+    const rawCode = error instanceof Error ? error.message : 'PAYMENT_REQUEST_FAILED'
+    if (rawCode.startsWith('MERCADO_PAGO_') && rawCode.includes('MISMATCH')) console.error('Mercado Pago validation failed', rawCode)
+
+    const explicitCode = rawCode.includes(':') ? rawCode.slice(0, rawCode.indexOf(':')) : rawCode
+    const explicitMessage = rawCode.includes(':') ? rawCode.slice(rawCode.indexOf(':') + 1).trim() : ''
+    const userMessageCodes = new Set([
+      'PAYMENT_POLICY_FULL_NOT_ALLOWED',
+      'PAYMENT_POLICY_MINIMUM_NOT_ALLOWED',
+      'BALANCE_COLLECTION_POLICY_DENIED',
+      'CARD_INSTALLMENTS_POLICY_EXCEEDED',
+      'CARD_INSTALLMENTS_INVALID',
+      'CARD_INSTALLMENT_LIMIT_INVALID',
+    ])
+
+    const publicCode = rawCode.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|PAYMENT_POLICY_FULL_NOT_ALLOWED|PAYMENT_POLICY_MINIMUM_NOT_ALLOWED|BALANCE_COLLECTION_POLICY_DENIED|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|CARD_INSTALLMENTS_POLICY_EXCEEDED|CARD_INSTALLMENT_LIMIT_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PROVIDER_COMMERCIAL_DESCRIPTION_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
+      ?? (rawCode.startsWith('MERCADO_PAGO_') && (rawCode.includes('MISMATCH') || rawCode === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED') ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' : explicitCode)
+
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'PAYMENT_HOLD_EXPIRED' ? 409
       : publicCode === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED' ? 502
@@ -578,6 +611,10 @@ Deno.serve(async (req) => {
         || publicCode === 'REAL_CHARGES_DISABLED' ? 503
       : publicCode.startsWith('APPOINTMENT_TOKEN') || publicCode === 'TOKEN_SCOPE_DENIED' ? 401
       : 400
-    return response({ error: { code: publicCode } }, status)
+
+    const message = userMessageCodes.has(publicCode) && explicitCode === publicCode && explicitMessage
+      ? explicitMessage
+      : undefined
+    return response({ error: { code: publicCode, ...(message ? { message } : {}) } }, status)
   }
 })
