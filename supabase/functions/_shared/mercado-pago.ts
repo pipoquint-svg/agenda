@@ -13,6 +13,7 @@ export type MercadoPagoPaymentSnapshot = {
   payment_method_id: string | null
   payment_type_id: string | null
   transaction_amount: number | null
+  installments: number | null
   external_reference: string | null
   date_approved: string | null
   date_created: string | null
@@ -65,6 +66,11 @@ function firstOrderPayment(raw: Record<string, unknown>): {
   const payments = Array.isArray(transactions?.payments) ? transactions?.payments as unknown[] : []
   const payment = payments.length > 0 ? object(payments[0]) : null
   return { payment, count: payments.length }
+}
+
+function providerInstallments(paymentMethod: Record<string, unknown> | null): number | null {
+  const value = Number(paymentMethod?.installments)
+  return Number.isInteger(value) && value >= 1 && value <= 12 ? value : null
 }
 
 export function parseMercadoPagoSignature(value: string): { ts: string; v1: string } {
@@ -184,6 +190,9 @@ export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): Mercad
   const qrBase64 = text(paymentMethod?.qr_code_base64)
   const ticketUrl = text(paymentMethod?.ticket_url)
   const challengeUrl = text(transactionSecurity?.url)
+  const installments = (text(paymentMethod?.type) ?? '').toLowerCase() === 'credit_card'
+    ? providerInstallments(paymentMethod)
+    : null
 
   return {
     id: text(raw.id) ?? '',
@@ -195,6 +204,7 @@ export function sanitizeMercadoPagoPayment(raw: Record<string, unknown>): Mercad
     payment_method_id: text(paymentMethod?.id),
     payment_type_id: text(paymentMethod?.type),
     transaction_amount: Number.isFinite(amount) ? amount : null,
+    installments,
     external_reference: text(raw.external_reference),
     date_approved: clientStatus === 'approved' ? lastUpdated : null,
     date_created: dateCreated,
@@ -222,6 +232,7 @@ export function mercadoPagoPaymentStorageSnapshot(snapshot: MercadoPagoPaymentSn
     payment_method_id: snapshot.payment_method_id,
     payment_type_id: snapshot.payment_type_id,
     transaction_amount: snapshot.transaction_amount,
+    installments: snapshot.installments,
     external_reference: snapshot.external_reference,
     date_approved: snapshot.date_approved,
     date_created: snapshot.date_created,
