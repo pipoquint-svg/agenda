@@ -308,6 +308,32 @@ Deno.serve(async (req) => {
         .single()
       if (settingsError) throw new Error('PAYMENT_SETTINGS_LOAD_FAILED')
 
+      let minimumPixDue: number | null = null
+      if (context.minimum_available) {
+        const { data: minimumPixAmounts, error: minimumPixError } = await client.rpc('service_calculate_payment_cash_amount', {
+          p_contract_amount: context.minimum_due_contract_amount,
+          p_method: 'PIX',
+          p_pix_discount_percent: settings.pix_discount_percent,
+        })
+        if (minimumPixError) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
+        const value = Number((minimumPixAmounts as Record<string, unknown> | null)?.cash_amount)
+        if (!Number.isFinite(value)) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
+        minimumPixDue = value
+      }
+
+      let fullPixDue: number | null = null
+      if (context.full_available) {
+        const { data: fullPixAmounts, error: fullPixError } = await client.rpc('service_calculate_payment_cash_amount', {
+          p_contract_amount: context.contract_balance,
+          p_method: 'PIX',
+          p_pix_discount_percent: settings.pix_discount_percent,
+        })
+        if (fullPixError) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
+        const value = Number((fullPixAmounts as Record<string, unknown> | null)?.cash_amount)
+        if (!Number.isFinite(value)) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
+        fullPixDue = value
+      }
+
       const providerReady = providerPaymentsConfigured()
       return response({
         appointment: {
@@ -333,6 +359,8 @@ Deno.serve(async (req) => {
           minimum_payment_value: context.minimum_payment_value,
           confirmation_target_amount: context.confirmation_target_amount,
           minimum_due_contract_amount: context.minimum_due_contract_amount,
+          minimum_pix_due: minimumPixDue,
+          full_pix_due: fullPixDue,
           minimum_available: context.minimum_available,
           full_available: context.full_available,
           pix_discount_percent: settings.pix_discount_percent,
