@@ -1,0 +1,112 @@
+name: Patch Sabrina Hold Flow
+
+on:
+  push:
+    branches:
+      - feat/sabrina-booking-journey
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/sabrina-booking-journey
+          fetch-depth: 0
+
+      - name: Patch hold timing and people flow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('web/src/SabrinaBookingJourney.tsx')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str):
+              global text
+              if old not in text:
+                  raise SystemExit(f'missing replacement target: {label}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import { PaymentPanel } from './PaymentPanel'\n",
+              "import { updateCheckoutSelection } from './checkoutSelectionApi'\nimport { PaymentPanel } from './PaymentPanel'\n",
+              'selection api import',
+          )
+
+          replace_once(
+              "    ['INVALID_PEOPLE_COUNT', 'A quantidade de pessoas não é válida para este serviço.'],\n",
+              "    ['INVALID_PEOPLE_COUNT', 'A quantidade de pessoas não é válida para este serviço.'],\n    ['HOLD_SELECTION_REQUIRES_NEW_SLOT', 'Não foi possível manter este horário ao atualizar a reserva. Escolha o horário novamente.'],\n    ['HOLD_SELECTION_LOCKED', 'Este horário já não pode ser alterado. Escolha o horário novamente.'],\n",
+              'hold selection errors',
+          )
+
+          replace_once(
+              """  const probeKey = useMemo(() => {\n    if (!service || !employeeRelationId) return ''\n    return JSON.stringify({\n      service: service.id,\n      employee: employeeRelationId,\n      extras: [...extras].sort((a, b) => a.extra_id.localeCompare(b.extra_id)),\n      people: peopleCount,\n    })\n  }, [service, employeeRelationId, extras, peopleCount])\n""",
+              """  const probeKey = useMemo(() => {\n    if (!service || !employeeRelationId) return ''\n    return JSON.stringify({\n      service: service.id,\n      employee: employeeRelationId,\n      extras: [...extras].sort((a, b) => a.extra_id.localeCompare(b.extra_id)),\n    })\n  }, [service, employeeRelationId, extras])\n""",
+              'availability fingerprint',
+          )
+
+          text = text.replace("['CUSTOMER', 'REVIEW'].includes(step)", "['PEOPLE', 'CUSTOMER', 'REVIEW'].includes(step)")
+
+          replace_once(
+              """  async function loadDay(day: string): Promise<{ length: number }> {\n    if (!service || !employeeRelationId) return { length: 0 }\n    const result = await listBookingSlots({\n      pageSlug: slug,\n      serviceId: service.id,\n      serviceEmployeeId: employeeRelationId,\n      extras,\n      peopleCount,\n      localDate: day,\n    })\n    return { length: result.length }\n  }\n""",
+              """  async function loadDay(day: string): Promise<{ length: number }> {\n    if (!service || !employeeRelationId) return { length: 0 }\n    const result = await listBookingSlots({\n      pageSlug: slug,\n      serviceId: service.id,\n      serviceEmployeeId: employeeRelationId,\n      extras,\n      peopleCount: service.minimum_people,\n      localDate: day,\n    })\n    return { length: result.length }\n  }\n""",
+              'calendar availability',
+          )
+
+          replace_once(
+              """  async function chooseDate(nextDate: string) {\n    if (!service || !employeeRelationId) return\n    setDate(nextDate)\n    setSelectedSlot(null)\n    setSlots([])\n    setLoadingSlots(true)\n    setError('')\n    try {\n      const result = await listBookingSlots({\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceEmployeeId: employeeRelationId,\n        extras,\n        peopleCount,\n        localDate: nextDate,\n      })\n      setSlots(result)\n      if (result.length === 0) setError('Esse dia acabou de ficar sem horários disponíveis. Escolha outra data.')\n    } catch (cause) {\n      setError(readableError(cause))\n    } finally {\n      setLoadingSlots(false)\n    }\n  }\n""",
+              """  async function chooseDate(nextDate: string) {\n    if (!service || !employeeRelationId) return\n    setDate(nextDate)\n    setSelectedSlot(null)\n    setSlots([])\n    setLoadingSlots(true)\n    setError('')\n    try {\n      const result = await listBookingSlots({\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceEmployeeId: employeeRelationId,\n        extras,\n        peopleCount: service.minimum_people,\n        localDate: nextDate,\n      })\n      setSlots(result)\n      if (result.length === 0) setError('Esse dia acabou de ficar sem horários disponíveis. Escolha outra data.')\n    } catch (cause) {\n      setError(readableError(cause))\n    } finally {\n      setLoadingSlots(false)\n    }\n  }\n""",
+              'selected day availability',
+          )
+
+          replace_once(
+              """  async function confirmPeopleAndProtectSlot() {\n    if (!service || !employeeRelationId || !date || !selectedSlot) return\n    setBusy(true)\n    setError('')\n    try {\n      const refreshed = await listBookingSlots({\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceEmployeeId: employeeRelationId,\n        extras,\n        peopleCount,\n        localDate: date,\n      })\n      const validSlot = refreshed.find((item) => item.slot_start_at === selectedSlot.slot_start_at)\n      if (!validSlot) {\n        setSelectedSlot(null)\n        setSlots(refreshed)\n        setError('A quantidade de pessoas alterou a disponibilidade deste horário. Escolha outro horário.')\n        setStep('DATE')\n        return\n      }\n\n      const nextHold = await createBookingHold({\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceEmployeeId: employeeRelationId,\n        extras,\n        peopleCount,\n        requestedStartAt: validSlot.slot_start_at,\n      })\n      setHold(nextHold)\n      sessionStorage.setItem('bs_checkout_hold', JSON.stringify({\n        token: nextHold.checkout_hold_token,\n        id: nextHold.checkout_hold_id,\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceName: service.name,\n        expiresAt: nextHold.expires_at,\n      }))\n\n      const [nextContext, nextCoupon] = await Promise.all([\n        loadCheckoutContext(nextHold.checkout_hold_token),\n        loadCheckoutCoupon(nextHold.checkout_hold_token),\n      ])\n      setContext(nextContext)\n      setCoupon(nextCoupon)\n      setCouponCode(nextCoupon.coupon_code ?? '')\n      setStep('CUSTOMER')\n    } catch (cause) {\n      setError(readableError(cause))\n      if (cause instanceof Error && cause.message.includes('SLOT_NO_LONGER_AVAILABLE')) {\n        setSelectedSlot(null)\n        setStep('DATE')\n      }\n    } finally {\n      setBusy(false)\n    }\n  }\n""",
+              """  async function protectSlotAndContinue(slot: BookingSlot) {\n    if (!service || !employeeRelationId || !date || hold) return\n    setBusy(true)\n    setSelectedSlot(slot)\n    setError('')\n    try {\n      const nextHold = await createBookingHold({\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceEmployeeId: employeeRelationId,\n        extras,\n        peopleCount: service.minimum_people,\n        requestedStartAt: slot.slot_start_at,\n      })\n      setHold(nextHold)\n      sessionStorage.setItem('bs_checkout_hold', JSON.stringify({\n        token: nextHold.checkout_hold_token,\n        id: nextHold.checkout_hold_id,\n        pageSlug: slug,\n        serviceId: service.id,\n        serviceName: service.name,\n        expiresAt: nextHold.expires_at,\n      }))\n      setStep('PEOPLE')\n    } catch (cause) {\n      setSelectedSlot(null)\n      setError(readableError(cause))\n      if (cause instanceof Error && cause.message.includes('SLOT_NO_LONGER_AVAILABLE')) {\n        await chooseDate(date)\n      }\n    } finally {\n      setBusy(false)\n    }\n  }\n\n  async function confirmPeopleAndContinue() {\n    if (!hold) return\n    setBusy(true)\n    setError('')\n    try {\n      await updateCheckoutSelection({\n        token: hold.checkout_hold_token,\n        extras,\n        peopleCount,\n      })\n      const [nextContext, nextCoupon] = await Promise.all([\n        loadCheckoutContext(hold.checkout_hold_token),\n        loadCheckoutCoupon(hold.checkout_hold_token),\n      ])\n      setContext(nextContext)\n      setCoupon(nextCoupon)\n      setCouponCode(nextCoupon.coupon_code ?? '')\n      setStep('CUSTOMER')\n    } catch (cause) {\n      setError(readableError(cause))\n      const message = cause instanceof Error ? cause.message : ''\n      if (message.includes('CHECKOUT_HOLD_NOT_ACTIVE') || message.includes('HOLD_EXPIRED') || message.includes('HOLD_SELECTION_REQUIRES_NEW_SLOT')) {\n        sessionStorage.removeItem('bs_checkout_hold')\n        setHold(null)\n        setContext(null)\n        setSelectedSlot(null)\n        setStep('DATE')\n      }\n    } finally {\n      setBusy(false)\n    }\n  }\n""",
+              'hold creation flow',
+          )
+
+          replace_once(
+              """                    <button type=\"button\" key={slot.slot_start_at} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => setSelectedSlot(slot)}>\n                      <strong>{clock.format(new Date(slot.slot_start_at))}</strong>\n                      <small>até {clock.format(new Date(slot.slot_end_at))}</small>\n                    </button>\n""",
+              """                    <button type=\"button\" key={slot.slot_start_at} disabled={busy} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => void protectSlotAndContinue(slot)}>\n                      <strong>{clock.format(new Date(slot.slot_start_at))}</strong>\n                      <small>{busy && selectedSlot?.slot_start_at === slot.slot_start_at ? 'protegendo…' : `até ${clock.format(new Date(slot.slot_end_at))}`}</small>\n                    </button>\n""",
+              'time selection click',
+          )
+
+          replace_once(
+              """              <div className=\"sby-actions\"><button className=\"sby-secondary\" type=\"button\" onClick={goBack}>Voltar</button><button className=\"sby-primary\" type=\"button\" disabled={!selectedSlot} onClick={() => setStep('PEOPLE')}>Continuar</button></div>\n""",
+              """              <div className=\"sby-actions\"><button className=\"sby-secondary\" type=\"button\" disabled={busy} onClick={goBack}>Voltar</button></div>\n""",
+              'date actions',
+          )
+
+          replace_once(
+              """          {step === 'PEOPLE' && service && selectedSlot ? (\n            <>\n              <div className=\"sby-stage-title\"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>Antes de proteger o horário, confirmamos a disponibilidade com a quantidade final.</p></div>\n""",
+              """          {step === 'PEOPLE' && service && selectedSlot && hold ? (\n            <>\n              <div className=\"sby-stage-title\"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>Seu horário já está protegido. A quantidade de pessoas não altera a duração do ensaio.</p></div>\n""",
+              'people stage intro',
+          )
+
+          replace_once(
+              """              <div className=\"sby-actions\"><button className=\"sby-secondary\" type=\"button\" disabled={busy} onClick={goBack}>Voltar</button><button className=\"sby-primary\" type=\"button\" disabled={busy} onClick={() => void confirmPeopleAndProtectSlot()}>{busy ? 'Confirmando…' : 'Confirmar horário'}</button></div>\n""",
+              """              <div className=\"sby-actions end\"><button className=\"sby-primary\" type=\"button\" disabled={busy} onClick={() => void confirmPeopleAndContinue()}>{busy ? 'Salvando…' : 'Continuar'}</button></div>\n""",
+              'people stage action',
+          )
+
+          path.write_text(text)
+          PY
+
+      - name: Commit patched flow
+        shell: bash
+        run: |
+          if git diff --quiet -- web/src/SabrinaBookingJourney.tsx; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/src/SabrinaBookingJourney.tsx
+          git commit -m "fix: create hold immediately after time selection"
+          git push origin HEAD:feat/sabrina-booking-journey
