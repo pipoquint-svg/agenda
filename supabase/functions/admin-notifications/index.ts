@@ -18,14 +18,16 @@ const corsHeaders = {
 
 const events = [
   'APPOINTMENT_APPROVED', 'APPOINTMENT_PENDING', 'APPOINTMENT_REJECTED', 'APPOINTMENT_CANCELLED',
-  'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'BIRTHDAY',
+  'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'WAITLIST_SIGNUP_TEAM', 'BIRTHDAY',
   'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'MANUAL',
 ]
 const channels = ['EMAIL', 'GOOGLE_CALENDAR']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
+  'appointment.manage_url',
   'customer.name', 'customer.email', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
+  'waitlist.name', 'waitlist.email', 'waitlist.whatsapp', 'waitlist.created_at',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'extras.summary',
   'coupon.code', 'coupon.discount', 'coupon.expires_at',
@@ -75,12 +77,17 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'appointment.start_at': '30/08/2026 14:00',
     'appointment.end_at': '30/08/2026 15:00',
     'appointment.duration': '60 min',
+    'appointment.manage_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=RESCHEDULE',
     'customer.name': 'Teste BlackSheep',
     'customer.email': recipient,
     'employee.name': 'Equipe BlackSheep',
     'auth.invite_url': 'https://www.blacksheepestudiocriativo.com.br/gestao/primeiro-acesso',
     'service.name': 'Serviço de teste',
     'service.description': 'Descrição de exemplo para conferir a apresentação do e-mail.',
+    'waitlist.name': 'Cliente da lista de espera',
+    'waitlist.email': 'cliente.lista@example.com',
+    'waitlist.whatsapp': '(48) 99999-0000',
+    'waitlist.created_at': '31/08/2026 14:30',
     'operation.name': brandName,
     'operation.email': recipient,
     'operation.phone': '(48) 0000-0000',
