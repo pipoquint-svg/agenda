@@ -40,10 +40,15 @@ insert into public.booking_page_services(booking_page_id,service_id,is_active,so
   ('98700000-0000-0000-0000-000000000030','98700000-0000-0000-0000-000000000011',true,20),
   ('98700000-0000-0000-0000-000000000030','98700000-0000-0000-0000-000000000012',true,30);
 
-insert into public.admin_users(id,display_name,role,is_active) values
-  ('98700000-0000-0000-0000-000000000040','Waitlist Owner','OWNER',true),
-  ('98700000-0000-0000-0000-000000000041','Waitlist Operation','OPERATION',true),
-  ('98700000-0000-0000-0000-000000000042','Waitlist Finance','FINANCE',true);
+insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
+  ('98700000-0000-4000-8000-000000000140','00000000-0000-0000-0000-000000000000','authenticated','authenticated','waitlist-owner@example.test','',now(),now()),
+  ('98700000-0000-4000-8000-000000000141','00000000-0000-0000-0000-000000000000','authenticated','authenticated','waitlist-operation@example.test','',now(),now()),
+  ('98700000-0000-4000-8000-000000000142','00000000-0000-0000-0000-000000000000','authenticated','authenticated','waitlist-finance@example.test','',now(),now());
+
+insert into public.admin_users(id,auth_user_id,display_name,role,is_active) values
+  ('98700000-0000-0000-0000-000000000040','98700000-0000-4000-8000-000000000140','Waitlist Owner','OWNER',true),
+  ('98700000-0000-0000-0000-000000000041','98700000-0000-4000-8000-000000000141','Waitlist Operation','OPERATION',true),
+  ('98700000-0000-0000-0000-000000000042','98700000-0000-4000-8000-000000000142','Waitlist Finance','FINANCE',true);
 
 insert into public.customers(id,name,email,phone)
 values ('98700000-0000-0000-0000-000000000050','Existing waitlist client','existing-waitlist@example.com','+55 (48) 99999-7050');
