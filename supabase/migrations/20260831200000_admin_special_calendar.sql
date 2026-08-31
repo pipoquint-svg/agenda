@@ -17,8 +17,18 @@ grant select, insert, update, delete on table public.special_calendar_dates to s
 create index if not exists special_calendar_dates_year_idx
   on public.special_calendar_dates ((extract(year from local_date)));
 
+alter table public.availability_exceptions
+  add column if not exists special_calendar_date_id uuid references public.special_calendar_dates(id) on delete cascade;
+
+create unique index if not exists availability_exceptions_resource_special_date_uidx
+  on public.availability_exceptions(resource_id, special_calendar_date_id)
+  where resource_id is not null and special_calendar_date_id is not null;
+
 comment on table public.special_calendar_dates is
-  'Calendario especial autoritativo da BlackSheep. SURCHARGE aplica adicional comercial, NORMAL neutraliza o adicional e CLOSED remove disponibilidade de recursos fisicos.';
+  'Calendario especial autoritativo da BlackSheep. SURCHARGE aplica adicional comercial, NORMAL neutraliza apenas o adicional de feriado e CLOSED materializa bloqueio do recurso fisico da locacao.';
+
+comment on column public.availability_exceptions.special_calendar_date_id is
+  'Preenchido apenas para bloqueios gerenciados automaticamente pelo Calendario especial.';
 
 create or replace function public.blacksheep_special_date_treatment(p_date date)
 returns text
@@ -45,6 +55,110 @@ $function$;
 
 comment on function public.blacksheep_rental_special_date(date) is
   'Compatibilidade do motor de locacao: true para datas com acrescimo ou fechadas; NORMAL e datas ausentes retornam false.';
+
+create or replace function public.blacksheep_sync_special_calendar_date(p_special_date_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $function$
+declare
+  v_date date;
+  v_name text;
+  v_treatment text;
+  v_start timestamptz;
+  v_end timestamptz;
+begin
+  select local_date, name, treatment
+    into v_date, v_name, v_treatment
+  from public.special_calendar_dates
+  where id = p_special_date_id;
+
+  delete from public.availability_exceptions
+  where special_calendar_date_id = p_special_date_id;
+
+  if v_date is null or v_treatment <> 'CLOSED' then
+    return;
+  end if;
+
+  v_start := v_date::timestamp at time zone 'America/Sao_Paulo';
+  v_end := (v_date + 1)::timestamp at time zone 'America/Sao_Paulo';
+
+  insert into public.availability_exceptions(
+    resource_id,
+    exception_type,
+    start_at,
+    end_at,
+    reason,
+    created_by,
+    special_calendar_date_id
+  )
+  select
+    r.id,
+    'BLOCK',
+    v_start,
+    v_end,
+    'Calendário especial · ' || v_name,
+    null,
+    p_special_date_id
+  from public.resources r
+  where upper(r.resource_type::text) <> 'PERSON'
+    and exists (
+      select 1
+      from public.service_resources sr
+      join public.services s on s.id = sr.service_id
+      where sr.resource_id = r.id
+        and s.slug = 'locacao-estudio'
+        and s.operation_scope = 'BLACKSHEEP'
+    )
+  on conflict (resource_id, special_calendar_date_id)
+    where resource_id is not null and special_calendar_date_id is not null
+  do update set
+    exception_type = excluded.exception_type,
+    start_at = excluded.start_at,
+    end_at = excluded.end_at,
+    reason = excluded.reason,
+    created_by = null;
+end;
+$function$;
+
+create or replace function public.blacksheep_sync_all_closed_special_dates()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $function$
+declare
+  v_id uuid;
+begin
+  for v_id in select id from public.special_calendar_dates where treatment = 'CLOSED'
+  loop
+    perform public.blacksheep_sync_special_calendar_date(v_id);
+  end loop;
+end;
+$function$;
+
+revoke all on function public.blacksheep_sync_special_calendar_date(uuid) from public, anon, authenticated;
+revoke all on function public.blacksheep_sync_all_closed_special_dates() from public, anon, authenticated;
+grant execute on function public.blacksheep_sync_special_calendar_date(uuid) to service_role;
+grant execute on function public.blacksheep_sync_all_closed_special_dates() to service_role;
+
+create or replace function public.blacksheep_sync_special_calendar_on_service_resource()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $function$
+begin
+  perform public.blacksheep_sync_all_closed_special_dates();
+  return coalesce(new, old);
+end;
+$function$;
+
+drop trigger if exists trg_blacksheep_special_calendar_service_resource on public.service_resources;
+create trigger trg_blacksheep_special_calendar_service_resource
+after insert or update or delete on public.service_resources
+for each statement execute function public.blacksheep_sync_special_calendar_on_service_resource();
 
 create or replace function public.service_admin_list_special_calendar_dates(
   p_start_year integer,
@@ -178,6 +292,8 @@ begin
         updated_at = now()
     where id = v_id;
   end if;
+
+  perform public.blacksheep_sync_special_calendar_date(v_id);
 
   select to_jsonb(scd.*) into v_after
   from public.special_calendar_dates scd
@@ -358,32 +474,133 @@ begin
 end;
 $seed$;
 
-do $patch$
+select public.blacksheep_sync_all_closed_special_dates();
+
+create or replace function public.service_admin_remove_resource_exception_audited(
+  p_exception_id uuid,
+  p_admin_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $function$
 declare
-  v_oid oid;
-  v_definition text;
-  v_patched text;
-  v_anchor text := E'      v_resource_local_date := (lower(v_resource.occupied_range) at time zone v_timezone)::date;\n      v_resource_dow := extract(dow from v_resource_local_date)::smallint;';
-  v_replacement text := E'      v_resource_local_date := (lower(v_resource.occupied_range) at time zone v_timezone)::date;\n      v_resource_dow := extract(dow from v_resource_local_date)::smallint;\n\n      if public.blacksheep_special_date_treatment(v_resource_local_date) = ''CLOSED''\n         and exists (\n           select 1 from public.resources r\n           where r.id = v_resource.resource_id\n             and upper(r.resource_type::text) <> ''PERSON''\n         ) then\n        v_resource_ok := false;\n        exit;\n      end if;';
+  v_before jsonb;
+  v_special_calendar_date_id uuid;
 begin
-  for v_oid in
-    select p.oid
-    from pg_proc p
-    join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public'
-      and p.proname in (
-        'list_available_slots_for_duration_without_google_sync_gate',
-        'list_available_slots_without_google_sync_gate'
-      )
-  loop
-    v_definition := pg_get_functiondef(v_oid);
-    if position('public.blacksheep_special_date_treatment(v_resource_local_date)' in v_definition) = 0 then
-      v_patched := replace(v_definition, v_anchor, v_replacement);
-      if v_patched = v_definition then
-        raise exception 'special calendar availability patch anchor not found for %', v_oid::regprocedure;
-      end if;
-      execute v_patched;
-    end if;
-  end loop;
+  if not public.service_admin_has_permission(p_admin_id, 'SERVICES_MANAGE') then
+    raise exception using errcode = 'P0001', message = 'ADMIN_PERMISSION_DENIED';
+  end if;
+
+  select
+    jsonb_build_object(
+      'id', ae.id,
+      'resource_id', ae.resource_id,
+      'exception_type', ae.exception_type,
+      'start_at', ae.start_at,
+      'end_at', ae.end_at,
+      'reason', ae.reason,
+      'created_at', ae.created_at
+    ),
+    ae.special_calendar_date_id
+  into v_before, v_special_calendar_date_id
+  from public.availability_exceptions ae
+  where ae.id = p_exception_id
+    and ae.resource_id is not null;
+
+  if v_before is null then
+    raise exception using errcode = 'P0001', message = 'RESOURCE_EXCEPTION_NOT_FOUND';
+  end if;
+
+  if v_special_calendar_date_id is not null then
+    raise exception using errcode = 'P0001', message = 'RESOURCE_EXCEPTION_MANAGED_BY_SPECIAL_CALENDAR';
+  end if;
+
+  delete from public.availability_exceptions
+  where id = p_exception_id;
+
+  insert into public.audit_logs(
+    admin_user_id,
+    entity_type,
+    entity_id,
+    action,
+    before_json,
+    after_json,
+    origin
+  ) values (
+    p_admin_id,
+    'RESOURCE_EXCEPTION',
+    p_exception_id,
+    'RESOURCE_EXCEPTION_DELETED',
+    v_before,
+    null,
+    'ADMIN'
+  );
+
+  return v_before;
 end;
-$patch$;
+$function$;
+
+create or replace function public.service_admin_list_resource_settings()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $function$
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', r.id,
+        'name', r.name,
+        'resource_type', r.resource_type,
+        'is_active', r.is_active,
+        'availability_rules', coalesce((
+          select jsonb_agg(
+            jsonb_build_object(
+              'id', rar.id,
+              'weekday', rar.weekday,
+              'start_local_time', rar.start_local_time,
+              'end_local_time', rar.end_local_time,
+              'is_active', rar.is_active
+            ) order by rar.weekday, rar.start_local_time, rar.end_local_time, rar.id
+          )
+          from public.resource_availability_rules rar
+          where rar.resource_id = r.id
+        ), '[]'::jsonb),
+        'exceptions', coalesce((
+          select jsonb_agg(
+            jsonb_build_object(
+              'id', ae.id,
+              'exception_type', ae.exception_type,
+              'start_at', ae.start_at,
+              'end_at', ae.end_at,
+              'reason', ae.reason,
+              'created_at', ae.created_at
+            ) order by ae.start_at desc, ae.id
+          )
+          from public.availability_exceptions ae
+          where ae.resource_id = r.id
+            and ae.special_calendar_date_id is null
+            and ae.end_at >= now() - interval '30 days'
+        ), '[]'::jsonb),
+        'service_bindings', coalesce((
+          select jsonb_agg(
+            jsonb_build_object(
+              'service_id', sr.service_id,
+              'service_name', s.name,
+              'operation_scope', s.operation_scope,
+              'is_required', sr.is_required
+            ) order by s.sort_order, s.name, s.id
+          )
+          from public.service_resources sr
+          join public.services s on s.id = sr.service_id
+          where sr.resource_id = r.id
+        ), '[]'::jsonb)
+      ) order by r.name, r.id
+    ),
+    '[]'::jsonb
+  )
+  from public.resources r;
+$function$;
