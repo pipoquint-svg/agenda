@@ -262,7 +262,7 @@ export function assertMercadoPagoPaymentMatchesIntent(
   }
 }
 
-export function validateCardSubmission(value: unknown): {
+export function validateCardSubmission(value: unknown, maxInstallments: number): {
   token: string
   paymentMethodId: string
   installments: number
@@ -273,11 +273,20 @@ export function validateCardSubmission(value: unknown): {
   const token = typeof row.token === 'string' ? row.token.trim() : ''
   const paymentMethodId = typeof row.payment_method_id === 'string' ? row.payment_method_id.trim() : ''
   const installments = Number(row.installments)
-  const issuerId = row.issuer_id == null ? null : String(row.issuer_id).trim() || null
 
+  if (!Number.isInteger(maxInstallments) || maxInstallments < 1 || maxInstallments > 12) {
+    throw new Error('CARD_INSTALLMENT_LIMIT_INVALID:Não foi possível validar o limite de parcelas desta reserva. Atualize a página e tente novamente.')
+  }
+
+  const issuerId = row.issuer_id == null ? null : String(row.issuer_id).trim() || null
   if (token.length < 10 || token.length > 500) throw new Error('CARD_TOKEN_INVALID')
   if (!/^[A-Za-z0-9_-]{2,80}$/.test(paymentMethodId)) throw new Error('CARD_PAYMENT_METHOD_INVALID')
-  if (!Number.isInteger(installments) || installments < 1 || installments > 6) throw new Error('CARD_INSTALLMENTS_INVALID')
+  if (!Number.isInteger(installments) || installments < 1 || installments > 12) {
+    throw new Error('CARD_INSTALLMENTS_INVALID:Escolha uma quantidade válida de parcelas para continuar.')
+  }
+  if (installments > maxInstallments) {
+    throw new Error(`CARD_INSTALLMENTS_POLICY_EXCEEDED:Esta reserva permite no máximo ${maxInstallments} parcela${maxInstallments === 1 ? '' : 's'}. Escolha uma quantidade menor para continuar.`)
+  }
 
   return { token, paymentMethodId, installments, issuerId }
 }

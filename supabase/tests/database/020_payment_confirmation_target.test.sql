@@ -13,10 +13,11 @@ values ('97000000-0000-0000-0000-000000000002', 'Payment Target Employee');
 
 insert into public.services (
   id, category_id, name, slug, base_duration_minutes, base_price,
-  minimum_people, maximum_people, maximum_booking_horizon_days, confirmation_percentage
+  minimum_people, maximum_people, maximum_booking_horizon_days, confirmation_percentage,
+  checkout_minimum_payment_type, checkout_minimum_payment_value, pix_discount_percent
 ) values
-  ('97000000-0000-0000-0000-000000000010','97000000-0000-0000-0000-000000000001','Default Confirmation Service','default-confirmation-target',60,1000,1,1,5000,null),
-  ('97000000-0000-0000-0000-000000000011','97000000-0000-0000-0000-000000000001','Full Confirmation Service','full-confirmation-target',60,1000,1,1,5000,100);
+  ('97000000-0000-0000-0000-000000000010','97000000-0000-0000-0000-000000000001','Default Confirmation Service','default-confirmation-target',60,1000,1,1,5000,null,'PERCENT',50,5),
+  ('97000000-0000-0000-0000-000000000011','97000000-0000-0000-0000-000000000001','Full Confirmation Service','full-confirmation-target',60,1000,1,1,5000,100,'PERCENT',100,5);
 
 insert into public.service_employees (id, service_id, employee_id)
 values
@@ -47,47 +48,47 @@ create temporary table target_results (name text primary key, payload jsonb not 
 
 insert into target_results values (
   'default',
-  public.create_payment_intent('97000000-0000-0000-0000-000000000040',50,'PIX','target-default')
+  public.create_payment_intent_v2('97000000-0000-0000-0000-000000000040','MINIMUM','PIX','target-default')
 );
 
-select is((select (payload->>'confirmation_percentage')::numeric from target_results where name='default'),50::numeric,'default confirmation percentage comes from operation settings');
+select is((select (payload->>'payment_percentage')::numeric from target_results where name='default'),50::numeric,'default minimum percentage comes from the appointment snapshot');
 select is((select (payload->>'confirmation_target_amount')::numeric from target_results where name='default'),500::numeric,'default confirmation target is 50 percent of contract value');
 select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='default'),500::numeric,'first minimum payment settles exactly the confirmation target');
-select is((select (payload->>'cash_amount')::numeric from target_results where name='default'),475::numeric,'PIX discount applies only to the minimum transaction cash portion');
+select is((select (payload->>'cash_amount')::numeric from target_results where name='default'),475::numeric,'PIX snapshot discount applies only to the minimum transaction cash portion');
 
 insert into target_results values (
   'partial',
-  public.create_payment_intent('97000000-0000-0000-0000-000000000041',50,'PIX','target-partial')
+  public.create_payment_intent_v2('97000000-0000-0000-0000-000000000041','MINIMUM','PIX','target-partial')
 );
 
 select is((select (payload->>'contract_settled_before')::numeric from target_results where name='partial'),200::numeric,'payment intent sees contract settlement already received');
 select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='partial'),300::numeric,'minimum payment charges only the R$300 gap to the R$500 threshold');
-select is((select (payload->>'cash_amount')::numeric from target_results where name='partial'),285::numeric,'PIX discount is R$15 on the R$300 confirmation gap');
+select is((select (payload->>'cash_amount')::numeric from target_results where name='partial'),285::numeric,'PIX snapshot discount is R$15 on the R$300 confirmation gap');
 
 insert into target_results values (
-  'full',
-  public.create_payment_intent('97000000-0000-0000-0000-000000000042',100,'CARD','target-full')
+  'full-minimum',
+  public.create_payment_intent_v2('97000000-0000-0000-0000-000000000042','MINIMUM','CARD','target-full-minimum')
 );
 
-select is((select (payload->>'confirmation_percentage')::numeric from target_results where name='full'),100::numeric,'service can explicitly require 100 percent confirmation');
-select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='full'),1000::numeric,'100 percent confirmation settles the full outstanding contract');
+select is((select (payload->>'payment_percentage')::numeric from target_results where name='full-minimum'),100::numeric,'service can explicitly require a 100 percent minimum');
+select is((select (payload->>'contract_amount_settled')::numeric from target_results where name='full-minimum'),1000::numeric,'100 percent minimum settles the full outstanding contract');
 
 select throws_ok(
-  $$ select public.create_payment_intent('97000000-0000-0000-0000-000000000042',50,'CARD','target-invalid-percent') $$,
-  'P0001','INVALID_PAYMENT_PERCENTAGE',
-  'client cannot choose 50 percent when the service explicitly requires 100 percent'
+  $$ select public.create_payment_intent_v2('97000000-0000-0000-0000-000000000042','PERCENT_50','CARD','target-invalid-kind') $$,
+  'P0001','INVALID_PAYMENT_KIND',
+  'client cannot bypass the payment-kind contract with an arbitrary percentage'
 );
 
 select throws_ok(
-  $$ select public.create_payment_intent('97000000-0000-0000-0000-000000000043',50,'CARD','target-satisfied') $$,
+  $$ select public.create_payment_intent_v2('97000000-0000-0000-0000-000000000043','MINIMUM','CARD','target-satisfied') $$,
   'P0001','CONFIRMATION_PAYMENT_ALREADY_SATISFIED',
   'minimum payment cannot be recreated after the confirmation threshold is already satisfied'
 );
 
 select is(
-  (public.create_payment_intent('97000000-0000-0000-0000-000000000041',100,'CARD','target-full-after-partial')->>'contract_amount_settled')::numeric,
+  (public.create_payment_intent_v2('97000000-0000-0000-0000-000000000041','FULL','CARD','target-full-after-partial')->>'contract_amount_settled')::numeric,
   800::numeric,
-  '100 percent option settles the exact outstanding contract balance'
+  'full option settles the exact outstanding contract balance'
 );
 
 select * from finish();

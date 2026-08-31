@@ -63,9 +63,9 @@ select ok(
 );
 
 select ok(
-  pg_get_functiondef('public.create_payment_intent(uuid,numeric,text,text)'::regprocedure)
+  pg_get_functiondef('public.create_payment_intent_v2(uuid,text,text,text)'::regprocedure)
     like '%service_calculate_payment_cash_amount%',
-  'payment intent uses the same authoritative cash calculator as preview'
+  'payment intent v2 uses the same authoritative cash calculator as preview'
 );
 
 select * from finish();

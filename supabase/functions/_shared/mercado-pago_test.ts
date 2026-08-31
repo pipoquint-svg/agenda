@@ -223,13 +223,25 @@ Deno.test('Order with multiple provider payment transactions is rejected', () =>
   assert(rejected, 'Agenda must never accept multi-transaction Order for one internal charge')
 })
 
-Deno.test('card submission accepts only tokenized bounded data', () => {
-  const card = validateCardSubmission({ token: 'card_token_123456789', payment_method_id: 'visa', installments: 3, issuer_id: '123' })
+Deno.test('card submission validates against reservation installment cap', () => {
+  const card = validateCardSubmission({ token: 'card_token_123456789', payment_method_id: 'visa', installments: 3, issuer_id: '123' }, 6)
   assert(card.paymentMethodId === 'visa' && card.installments === 3, 'valid tokenized card')
 
+  const ten = validateCardSubmission({ token: 'card_token_123456789', payment_method_id: 'visa', installments: 10 }, 10)
+  assert(ten.installments === 10, 'snapshot cap above legacy six must be accepted')
+
+  const twelve = validateCardSubmission({ token: 'card_token_123456789', payment_method_id: 'visa', installments: 12 }, 12)
+  assert(twelve.installments === 12, 'twelve installments are valid when snapshot permits')
+
   let rejected = false
-  try { validateCardSubmission({ token: '123', payment_method_id: 'visa', installments: 3 }) } catch { rejected = true }
+  try { validateCardSubmission({ token: '123', payment_method_id: 'visa', installments: 3 }, 6) } catch { rejected = true }
   assert(rejected, 'short/raw-looking token must fail')
+
+  rejected = false
+  try { validateCardSubmission({ token: 'card_token_123456789', payment_method_id: 'visa', installments: 10 }, 6) } catch (error) {
+    rejected = error instanceof Error && error.message.startsWith('CARD_INSTALLMENTS_POLICY_EXCEEDED:')
+  }
+  assert(rejected, 'installments above reservation snapshot cap must fail')
 })
 
 Deno.test('payer identification resolves CPF and CNPJ only', () => {

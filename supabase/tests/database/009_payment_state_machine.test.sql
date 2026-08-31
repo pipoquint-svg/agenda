@@ -71,14 +71,14 @@ where a.id in (
 create temporary table payment_test_ids (name text primary key, id uuid not null);
 
 insert into payment_test_ids
-select 'pix1', (public.create_payment_intent(
-  '90000000-0000-0000-0000-000000000030', 50, 'PIX', 'idem-pay-pix-1'
+select 'pix1', (public.create_payment_intent_v2(
+  '90000000-0000-0000-0000-000000000030', 'MINIMUM', 'PIX', 'idem-pay-pix-1'
 )->>'transaction_id')::uuid;
 
 select is(
   (select contract_amount_settled from public.payment_transactions where id=(select id from payment_test_ids where name='pix1')),
   500.00::numeric,
-  '50 percent intent settles half of current contract balance'
+  'minimum intent settles the 50 percent confirmation target'
 );
 
 select is(
@@ -94,7 +94,7 @@ select is(
 );
 
 select is(
-  (public.create_payment_intent('90000000-0000-0000-0000-000000000030',50,'PIX','idem-pay-pix-1')->>'idempotent_replay')::boolean,
+  (public.create_payment_intent_v2('90000000-0000-0000-0000-000000000030','MINIMUM','PIX','idem-pay-pix-1')->>'idempotent_replay')::boolean,
   true,
   'payment intent is idempotent'
 );
@@ -111,7 +111,7 @@ select public.apply_provider_payment_status(
 );
 
 select is((select status::text from public.appointments where id='90000000-0000-0000-0000-000000000030'),'CONFIRMED','approved provider payment confirms active booking');
-select is((select financial_status::text from public.appointments where id='90000000-0000-0000-0000-000000000030'),'PARTIALLY_PAID','50 percent approval leaves contract partially paid');
+select is((select financial_status::text from public.appointments where id='90000000-0000-0000-0000-000000000030'),'PARTIALLY_PAID','minimum approval leaves contract partially paid');
 select is((select status::text from public.resource_allocations where appointment_id='90000000-0000-0000-0000-000000000030'),'CONFIRMED','approved payment promotes allocation to confirmed');
 select is((select count(*)::integer from public.integration_jobs where entity_id='90000000-0000-0000-0000-000000000030'),2,'confirmation emits Google and message outbox jobs once');
 
@@ -122,14 +122,14 @@ select is(
 );
 
 insert into payment_test_ids
-select 'card2', (public.create_payment_intent(
-  '90000000-0000-0000-0000-000000000030', 100, 'CARD', 'idem-pay-card-2'
+select 'card2', (public.create_payment_intent_v2(
+  '90000000-0000-0000-0000-000000000030', 'FULL', 'CARD', 'idem-pay-card-2'
 )->>'transaction_id')::uuid;
 
 select is(
   (select contract_amount_settled from public.payment_transactions where id=(select id from payment_test_ids where name='card2')),
   500.00::numeric,
-  '100 percent second intent settles remaining contract balance only'
+  'full second intent settles remaining contract balance only'
 );
 
 select public.apply_provider_payment_status(
@@ -144,7 +144,7 @@ select public.register_manual_payment(
   '90000000-0000-0000-0000-000000000031','PIX',300,'manual deposit',null,true
 );
 select is((select status::text from public.appointments where id='90000000-0000-0000-0000-000000000031'),'CONFIRMED','manual payment can explicitly confirm pending booking');
-select is((select cash_amount from public.payment_transactions where appointment_id='90000000-0000-0000-0000-000000000031'),285.00::numeric,'manual PIX uses same 5 percent transaction discount rule');
+select is((select cash_amount from public.payment_transactions where appointment_id='90000000-0000-0000-0000-000000000031'),300.00::numeric,'manual PIX records the exact received amount without automatic discount');
 
 select public.confirm_without_payment(
   '90000000-0000-0000-0000-000000000032','Parceiro paga presencialmente',null
@@ -152,8 +152,8 @@ select public.confirm_without_payment(
 select is((select financial_status::text from public.appointments where id='90000000-0000-0000-0000-000000000032'),'UNPAID_AUTHORIZED','admin can confirm without payment while preserving financial state');
 
 insert into payment_test_ids
-select 'late', (public.create_payment_intent(
-  '90000000-0000-0000-0000-000000000033', 50, 'CARD', 'idem-pay-late'
+select 'late', (public.create_payment_intent_v2(
+  '90000000-0000-0000-0000-000000000033', 'MINIMUM', 'CARD', 'idem-pay-late'
 )->>'transaction_id')::uuid;
 
 update public.appointments
@@ -174,8 +174,8 @@ select ok(
 );
 
 insert into payment_test_ids
-select 'reject', (public.create_payment_intent(
-  '90000000-0000-0000-0000-000000000034', 50, 'CARD', 'idem-pay-reject'
+select 'reject', (public.create_payment_intent_v2(
+  '90000000-0000-0000-0000-000000000034', 'MINIMUM', 'CARD', 'idem-pay-reject'
 )->>'transaction_id')::uuid;
 select public.apply_provider_payment_status(
   (select id from payment_test_ids where name='reject'),
