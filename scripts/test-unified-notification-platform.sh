@@ -6,6 +6,7 @@ confirmation="$root/email-send/index.ts"
 balance="$root/balance-collection-notify-email/index.ts"
 birthday="$root/birthday-email-worker/index.ts"
 admin_notifications="$root/admin-notifications/index.ts"
+admin_team="$root/admin-team-members/index.ts"
 waitlist="$root/waitlist-signup/index.ts"
 auth="$root/auth-send-email/index.ts"
 
@@ -39,6 +40,7 @@ done
 
 grep -Fq 'WAITLIST_SIGNUP_TEAM' "$waitlist" || fail 'waitlist signup does not use its dedicated team event'
 grep -Fq "scope: 'WAITLIST_SIGNUP'" "$waitlist" || fail 'waitlist signup is missing distributed public rate limiting'
+grep -Fq "'WAITLIST_VIEW','WAITLIST_MANAGE'" "$admin_team" || fail 'admin team API does not accept waitlist permission changes'
 
 grep -Fq 'claim_birthday_notification_deliveries' "$birthday" || fail 'birthday worker does not claim central delivery logs'
 grep -Fq 'finalize_birthday_notification_delivery' "$birthday" || fail 'birthday worker does not finalize central delivery logs'
