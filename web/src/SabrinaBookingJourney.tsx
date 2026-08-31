@@ -33,6 +33,7 @@ import {
   submitPreReservationCheckout,
   type CheckoutPrebookOption,
 } from './prebookChoiceApi'
+import { updateCheckoutSelection } from './checkoutSelectionApi'
 import { PaymentPanel } from './PaymentPanel'
 import { SabrinaAvailabilityCalendar } from './SabrinaAvailabilityCalendar'
 import './sabrinaBookingJourney.css'
@@ -123,6 +124,8 @@ function readableError(error: unknown): string {
     ['HOLD_EXPIRED', 'O tempo para concluir a reserva terminou. Escolha o horário novamente.'],
     ['REQUIRED_EXTRA_MISSING', 'Revise os extras obrigatórios antes de continuar.'],
     ['INVALID_PEOPLE_COUNT', 'A quantidade de pessoas não é válida para este serviço.'],
+    ['HOLD_SELECTION_REQUIRES_NEW_SLOT', 'Não foi possível manter este horário ao atualizar a reserva. Escolha o horário novamente.'],
+    ['HOLD_SELECTION_LOCKED', 'Este horário já não pode ser alterado. Escolha o horário novamente.'],
     ['PUBLIC_SERVICE_NOT_AVAILABLE_ON_PAGE', 'Esse serviço não está disponível nesta página.'],
     ['EMPLOYEE_NOT_AVAILABLE_FOR_SERVICE', 'O profissional selecionado não está disponível para este serviço.'],
     ['INVALID_EXTRA', 'Um dos extras selecionados não está disponível para este serviço.'],
@@ -251,9 +254,8 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
       service: service.id,
       employee: employeeRelationId,
       extras: [...extras].sort((a, b) => a.extra_id.localeCompare(b.extra_id)),
-      people: peopleCount,
     })
-  }, [service, employeeRelationId, extras, peopleCount])
+  }, [service, employeeRelationId, extras])
 
   useEffect(() => {
     let active = true
@@ -288,7 +290,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
   }, [service, employeeRelationId, extras, peopleCount, slug])
 
   useEffect(() => {
-    if (!hold || !['CUSTOMER', 'REVIEW'].includes(step)) {
+    if (!hold || !['PEOPLE', 'CUSTOMER', 'REVIEW'].includes(step)) {
       setRemainingSeconds(0)
       return
     }
@@ -367,7 +369,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
       serviceId: service.id,
       serviceEmployeeId: employeeRelationId,
       extras,
-      peopleCount,
+      peopleCount: service.minimum_people,
       localDate: day,
     })
     return { length: result.length }
@@ -386,7 +388,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         serviceId: service.id,
         serviceEmployeeId: employeeRelationId,
         extras,
-        peopleCount,
+        peopleCount: service.minimum_people,
         localDate: nextDate,
       })
       setSlots(result)
@@ -398,35 +400,19 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     }
   }
 
-  async function confirmPeopleAndProtectSlot() {
-    if (!service || !employeeRelationId || !date || !selectedSlot) return
+  async function protectSlotAndContinue(slot: BookingSlot) {
+    if (!service || !employeeRelationId || !date || hold) return
     setBusy(true)
+    setSelectedSlot(slot)
     setError('')
     try {
-      const refreshed = await listBookingSlots({
-        pageSlug: slug,
-        serviceId: service.id,
-        serviceEmployeeId: employeeRelationId,
-        extras,
-        peopleCount,
-        localDate: date,
-      })
-      const validSlot = refreshed.find((item) => item.slot_start_at === selectedSlot.slot_start_at)
-      if (!validSlot) {
-        setSelectedSlot(null)
-        setSlots(refreshed)
-        setError('A quantidade de pessoas alterou a disponibilidade deste horário. Escolha outro horário.')
-        setStep('DATE')
-        return
-      }
-
       const nextHold = await createBookingHold({
         pageSlug: slug,
         serviceId: service.id,
         serviceEmployeeId: employeeRelationId,
         extras,
-        peopleCount,
-        requestedStartAt: validSlot.slot_start_at,
+        peopleCount: service.minimum_people,
+        requestedStartAt: slot.slot_start_at,
       })
       setHold(nextHold)
       sessionStorage.setItem('bs_checkout_hold', JSON.stringify({
@@ -437,10 +423,31 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         serviceName: service.name,
         expiresAt: nextHold.expires_at,
       }))
+      setStep('PEOPLE')
+    } catch (cause) {
+      setSelectedSlot(null)
+      setError(readableError(cause))
+      if (cause instanceof Error && cause.message.includes('SLOT_NO_LONGER_AVAILABLE')) {
+        await chooseDate(date)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
 
+  async function confirmPeopleAndContinue() {
+    if (!hold) return
+    setBusy(true)
+    setError('')
+    try {
+      await updateCheckoutSelection({
+        token: hold.checkout_hold_token,
+        extras,
+        peopleCount,
+      })
       const [nextContext, nextCoupon] = await Promise.all([
-        loadCheckoutContext(nextHold.checkout_hold_token),
-        loadCheckoutCoupon(nextHold.checkout_hold_token),
+        loadCheckoutContext(hold.checkout_hold_token),
+        loadCheckoutCoupon(hold.checkout_hold_token),
       ])
       setContext(nextContext)
       setCoupon(nextCoupon)
@@ -448,7 +455,11 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
       setStep('CUSTOMER')
     } catch (cause) {
       setError(readableError(cause))
-      if (cause instanceof Error && cause.message.includes('SLOT_NO_LONGER_AVAILABLE')) {
+      const message = cause instanceof Error ? cause.message : ''
+      if (message.includes('CHECKOUT_HOLD_NOT_ACTIVE') || message.includes('HOLD_EXPIRED') || message.includes('HOLD_SELECTION_REQUIRES_NEW_SLOT')) {
+        sessionStorage.removeItem('bs_checkout_hold')
+        setHold(null)
+        setContext(null)
         setSelectedSlot(null)
         setStep('DATE')
       }
@@ -614,7 +625,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         </nav>
 
         {error ? <div className="sby-alert" role="alert">{error}</div> : null}
-        {hold && ['CUSTOMER', 'REVIEW'].includes(step) && remainingSeconds > 0 ? (
+        {hold && ['PEOPLE', 'CUSTOMER', 'REVIEW'].includes(step) && remainingSeconds > 0 ? (
           <div className="sby-hold-strip">
             <span>Horário protegido</span>
             <strong>{String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:{String(remainingSeconds % 60).padStart(2, '0')}</strong>
@@ -683,20 +694,20 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                 <div className="sby-time-head"><strong>{formatDate(date)}</strong><small>{loadingSlots ? 'Buscando horários…' : `${slots.length} horário${slots.length === 1 ? '' : 's'} disponível${slots.length === 1 ? '' : 'is'}`}</small></div>
                 <div className="sby-time-grid">
                   {slots.map((slot) => (
-                    <button type="button" key={slot.slot_start_at} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => setSelectedSlot(slot)}>
+                    <button type="button" key={slot.slot_start_at} disabled={busy} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => void protectSlotAndContinue(slot)}>
                       <strong>{clock.format(new Date(slot.slot_start_at))}</strong>
-                      <small>até {clock.format(new Date(slot.slot_end_at))}</small>
+                      <small>{busy && selectedSlot?.slot_start_at === slot.slot_start_at ? 'protegendo…' : `até ${clock.format(new Date(slot.slot_end_at))}`}</small>
                     </button>
                   ))}
                 </div>
               </div> : null}
-              <div className="sby-actions"><button className="sby-secondary" type="button" onClick={goBack}>Voltar</button><button className="sby-primary" type="button" disabled={!selectedSlot} onClick={() => setStep('PEOPLE')}>Continuar</button></div>
+              <div className="sby-actions"><button className="sby-secondary" type="button" disabled={busy} onClick={goBack}>Voltar</button></div>
             </>
           ) : null}
 
-          {step === 'PEOPLE' && service && selectedSlot ? (
+          {step === 'PEOPLE' && service && selectedSlot && hold ? (
             <>
-              <div className="sby-stage-title"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>Antes de proteger o horário, confirmamos a disponibilidade com a quantidade final.</p></div>
+              <div className="sby-stage-title"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>Seu horário já está protegido. A quantidade de pessoas não altera a duração do ensaio.</p></div>
               <div className="sby-selected-time"><span>{formatDate(date)}</span><strong>{timeRange(selectedSlot)}</strong></div>
               {service.minimum_people === service.maximum_people ? (
                 <div className="sby-people-fixed">{service.minimum_people} {service.minimum_people === 1 ? 'pessoa' : 'pessoas'}</div>
@@ -707,7 +718,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                   ))}
                 </div>
               )}
-              <div className="sby-actions"><button className="sby-secondary" type="button" disabled={busy} onClick={goBack}>Voltar</button><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmPeopleAndProtectSlot()}>{busy ? 'Confirmando…' : 'Confirmar horário'}</button></div>
+              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmPeopleAndContinue()}>{busy ? 'Salvando…' : 'Continuar'}</button></div>
             </>
           ) : null}
 
