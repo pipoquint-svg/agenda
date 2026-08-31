@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 
-select plan(18);
+select plan(20);
 
 insert into public.categories(id,name,slug)
 values ('98700000-0000-0000-0000-000000000001','Waitlist test','waitlist-test');
