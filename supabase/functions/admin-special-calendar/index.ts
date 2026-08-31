@@ -48,6 +48,19 @@ function enumValue(value: unknown, allowed: string[], code: string): string {
   return next
 }
 
+function booleanValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false
+  if (typeof value !== 'boolean') throw new Error('SPECIAL_DATE_REPEAT_INVALID')
+  return value
+}
+
+function currentSaoPauloYear(): number {
+  return Number(new Intl.DateTimeFormat('en', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+  }).format(new Date()))
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -59,7 +72,7 @@ Deno.serve(async (req) => {
     if (req.method === 'GET') {
       if (!(await hasAdminPermission(admin.adminId, 'SERVICES_VIEW'))) throw new Error('ADMIN_PERMISSION_DENIED')
       const url = new URL(req.url)
-      const currentYear = new Date().getUTCFullYear()
+      const currentYear = currentSaoPauloYear()
       const startYear = year(url.searchParams.get('start_year'), currentYear)
       const endYear = year(url.searchParams.get('end_year'), startYear)
       if (endYear < startYear || endYear - startYear > 20) throw new Error('SPECIAL_CALENDAR_YEAR_RANGE_INVALID')
@@ -99,8 +112,9 @@ Deno.serve(async (req) => {
     const treatment = enumValue(record.treatment, ['SURCHARGE', 'NORMAL', 'CLOSED'], 'SPECIAL_DATE_TREATMENT_INVALID')
     const sourceStatus = enumValue(record.source_status, ['OFFICIAL', 'PROJECTED', 'MANUAL'], 'SPECIAL_DATE_SOURCE_STATUS_INVALID')
     const notes = text(record.notes) || null
+    const repeatFutureYears = booleanValue(record.repeat_future_years)
 
-    const { data, error } = await client.rpc('service_admin_upsert_special_calendar_date_audited', {
+    const { data, error } = await client.rpc('service_admin_upsert_special_calendar_date_recurring_audited', {
       p_id: id,
       p_local_date: date,
       p_name: name,
@@ -108,6 +122,7 @@ Deno.serve(async (req) => {
       p_treatment: treatment,
       p_source_status: sourceStatus,
       p_notes: notes,
+      p_repeat_future_years: repeatFutureYears,
       p_admin_id: admin.adminId,
     })
     if (error) throw new Error(error.message)
