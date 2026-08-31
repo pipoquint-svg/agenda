@@ -301,35 +301,24 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET') {
       const context = await loadContext(token)
-      const { data: settings, error: settingsError } = await client
-        .from('operation_settings')
-        .select('pix_discount_percent')
-        .eq('id', 1)
-        .single()
-      if (settingsError) throw new Error('PAYMENT_SETTINGS_LOAD_FAILED')
+      const { data: previewData, error: previewError } = await client.rpc('service_get_public_payment_method_preview', {
+        p_access_token: token,
+      })
+      if (previewError) throw new Error(previewError.message)
+      const preview = (previewData ?? {}) as Record<string, unknown>
+      const pixDiscountPercent = Number(preview.pix_discount_percent)
+      if (!Number.isFinite(pixDiscountPercent)) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
 
       let minimumPixDue: number | null = null
       if (context.minimum_available) {
-        const { data: minimumPixAmounts, error: minimumPixError } = await client.rpc('service_calculate_payment_cash_amount', {
-          p_contract_amount: context.minimum_due_contract_amount,
-          p_method: 'PIX',
-          p_pix_discount_percent: settings.pix_discount_percent,
-        })
-        if (minimumPixError) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
-        const value = Number((minimumPixAmounts as Record<string, unknown> | null)?.cash_amount)
+        const value = Number(preview.minimum_due_pix_cash_amount)
         if (!Number.isFinite(value)) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
         minimumPixDue = value
       }
 
       let fullPixDue: number | null = null
       if (context.full_available) {
-        const { data: fullPixAmounts, error: fullPixError } = await client.rpc('service_calculate_payment_cash_amount', {
-          p_contract_amount: context.contract_balance,
-          p_method: 'PIX',
-          p_pix_discount_percent: settings.pix_discount_percent,
-        })
-        if (fullPixError) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
-        const value = Number((fullPixAmounts as Record<string, unknown> | null)?.cash_amount)
+        const value = Number(preview.full_due_pix_cash_amount)
         if (!Number.isFinite(value)) throw new Error('PAYMENT_PIX_AMOUNT_CALCULATION_FAILED')
         fullPixDue = value
       }
@@ -363,7 +352,7 @@ Deno.serve(async (req) => {
           full_pix_due: fullPixDue,
           minimum_available: context.minimum_available,
           full_available: context.full_available,
-          pix_discount_percent: settings.pix_discount_percent,
+          pix_discount_percent: pixDiscountPercent,
         },
         payment_methods: {
           pix_available: providerReady,
