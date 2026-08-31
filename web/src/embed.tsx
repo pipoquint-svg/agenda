@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BookingPageDuration } from './BookingPageDuration'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
+import { SabrinaBookingJourney } from './SabrinaBookingJourney'
 import './embed-base.css'
 import './checkout.css'
 
@@ -13,8 +14,14 @@ function mountAgenda(target: HTMLElement) {
   createRoot(target).render(
     <StrictMode>
       <div className="bs-agenda-embed">
-        <BookingPageDuration slug={slug} />
-        <BookingCheckoutSession />
+        {slug === 'sabrina' ? (
+          <SabrinaBookingJourney slug={slug} />
+        ) : (
+          <>
+            <BookingPageDuration slug={slug} />
+            <BookingCheckoutSession />
+          </>
+        )}
       </div>
     </StrictMode>,
   )
