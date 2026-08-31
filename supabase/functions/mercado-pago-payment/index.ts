@@ -118,9 +118,6 @@ function providerRuntime(options: { creatingCharge?: boolean } = {}) {
 }
 
 function providerPayerEmail(contextEmail: string): string {
-  // Keep the payer identity consistent between Brick tokenization and Orders API.
-  // Sandbox/test behavior is controlled by test credentials and cardholder test data,
-  // never by replacing the customer's email after the token has been created.
   return contextEmail
 }
 
@@ -396,9 +393,8 @@ Deno.serve(async (req) => {
 
     let providerPaymentMethodId: string | null = null
     let paymentMethod: Record<string, unknown>
-    const identification = payerIdentification(context.payer.tax_id)
     const amount = moneyString(intent.cash_amount)
-    const providerDescription = safeProviderDescription(context.provider_commercial_description)
+    const payerEmail = providerPayerEmail(context.payer.email)
 
     if (intent.idempotent_replay) {
       const existing = await loadTransaction(intent.transaction_id)
@@ -431,22 +427,21 @@ Deno.serve(async (req) => {
     const providerBody: Record<string, unknown> = {
       type: 'online',
       processing_mode: 'automatic',
-      capture_mode: 'automatic',
       external_reference: intent.transaction_id,
-      description: providerDescription,
       total_amount: amount,
-      payer: {
-        email: providerPayerEmail(context.payer.email),
-        identification,
-      },
+      payer: { email: payerEmail },
       transactions: { payments: [] },
     }
 
     if (method === 'PIX') {
+      // Keep Pix aligned with the current Mercado Pago Orders contract: only the
+      // required payer email is sent, and capture_mode is left to the provider.
       providerPaymentMethodId = 'pix'
       paymentMethod = { id: 'pix', type: 'bank_transfer' }
     } else {
       const card = validateCardSubmission(input?.card)
+      const identification = payerIdentification(context.payer.tax_id)
+      const providerDescription = safeProviderDescription(context.provider_commercial_description)
       providerPaymentMethodId = card.paymentMethodId
       paymentMethod = {
         id: card.paymentMethodId,
@@ -454,6 +449,9 @@ Deno.serve(async (req) => {
         token: card.token,
         installments: card.installments,
       }
+      providerBody.capture_mode = 'automatic'
+      providerBody.description = providerDescription
+      providerBody.payer = { email: payerEmail, identification }
 
       if (shouldUseThreeDS()) {
         providerBody.config = {
