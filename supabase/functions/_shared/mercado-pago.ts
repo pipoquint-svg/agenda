@@ -277,7 +277,7 @@ export function validateCardSubmission(value: unknown): {
 
   if (token.length < 10 || token.length > 500) throw new Error('CARD_TOKEN_INVALID')
   if (!/^[A-Za-z0-9_-]{2,80}$/.test(paymentMethodId)) throw new Error('CARD_PAYMENT_METHOD_INVALID')
-  if (!Number.isInteger(installments) || installments < 1 || installments > 24) throw new Error('CARD_INSTALLMENTS_INVALID')
+  if (!Number.isInteger(installments) || installments < 1 || installments > 6) throw new Error('CARD_INSTALLMENTS_INVALID')
 
   return { token, paymentMethodId, installments, issuerId }
 }
