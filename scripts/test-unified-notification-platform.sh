@@ -6,6 +6,7 @@ confirmation="$root/email-send/index.ts"
 balance="$root/balance-collection-notify-email/index.ts"
 birthday="$root/birthday-email-worker/index.ts"
 admin_notifications="$root/admin-notifications/index.ts"
+waitlist="$root/waitlist-signup/index.ts"
 auth="$root/auth-send-email/index.ts"
 
 fail() {
@@ -13,7 +14,7 @@ fail() {
   exit 1
 }
 
-for flow in "$confirmation" "$balance" "$birthday" "$admin_notifications"; do
+for flow in "$confirmation" "$balance" "$birthday" "$admin_notifications" "$waitlist"; do
   grep -Fq 'notificationSenderForScope' "$flow" || fail "$flow bypasses the canonical notification sender"
   grep -Fq 'sendEmailWithProvider' "$flow" || fail "$flow bypasses the canonical provider"
   grep -Fq 'renderNotificationMessage' "$flow" || fail "$flow bypasses the shared renderer"
@@ -29,12 +30,15 @@ for flow in "$confirmation" "$balance" "$birthday" "$admin_notifications"; do
   fi
 done
 
-for flow in "$confirmation" "$balance"; do
+for flow in "$confirmation" "$balance" "$waitlist"; do
   grep -Fq 'resolve_notification_template' "$flow" || fail "$flow does not resolve its active database template"
   grep -Fq 'beginNotificationDelivery' "$flow" || fail "$flow does not create/update notification_delivery_logs"
   grep -Fq 'markNotificationSent' "$flow" || fail "$flow does not mark successful deliveries"
   grep -Fq 'markNotificationFailed' "$flow" || fail "$flow does not persist provider failures"
 done
+
+grep -Fq 'WAITLIST_SIGNUP_TEAM' "$waitlist" || fail 'waitlist signup does not use its dedicated team event'
+grep -Fq "scope: 'WAITLIST_SIGNUP'" "$waitlist" || fail 'waitlist signup is missing distributed public rate limiting'
 
 grep -Fq 'claim_birthday_notification_deliveries' "$birthday" || fail 'birthday worker does not claim central delivery logs'
 grep -Fq 'finalize_birthday_notification_delivery' "$birthday" || fail 'birthday worker does not finalize central delivery logs'
