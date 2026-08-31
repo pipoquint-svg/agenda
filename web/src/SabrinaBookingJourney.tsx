@@ -216,6 +216,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
   const [serviceId, setServiceId] = useState('')
   const [employeeRelationId, setEmployeeRelationId] = useState('')
   const [extraQuantities, setExtraQuantities] = useState<Record<string, number>>({})
+  const [expandedExtras, setExpandedExtras] = useState<Record<string, boolean>>({})
   const [peopleCount, setPeopleCount] = useState(1)
   const [quote, setQuote] = useState<BookingQuote | null>(null)
 
@@ -333,6 +334,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     setExtraQuantities(Object.fromEntries(
       (next?.extras ?? []).filter((extra) => extra.is_required).map((extra) => [extra.id, 1]),
     ))
+    setExpandedExtras({})
     setPeopleCount(next?.minimum_people ?? 1)
     resetAfterService()
     setError('')
@@ -666,7 +668,19 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                     <div className={`sby-extra ${quantity > 0 ? 'selected' : ''}`} key={extra.id}>
                       <div>
                         <strong>{extra.name}{extra.is_required ? ' · obrigatório' : ''}</strong>
-                        {extra.description ? <small>{extra.description}</small> : null}
+                        {extra.description ? (
+                          <>
+                            {expandedExtras[extra.id] ? <small className="sby-extra-description">{extra.description}</small> : null}
+                            <button
+                              type="button"
+                              className="sby-extra-more"
+                              aria-expanded={Boolean(expandedExtras[extra.id])}
+                              onClick={() => setExpandedExtras((current) => ({ ...current, [extra.id]: !current[extra.id] }))}
+                            >
+                              {expandedExtras[extra.id] ? 'Ver menos' : 'Ver mais'}
+                            </button>
+                          </>
+                        ) : null}
                         <span>+ {money.format(numeric(extra.price))}</span>
                         {(extra.default_schedule_minutes ?? 0) > 0 ? <em>Acrescenta {extra.default_schedule_minutes} min à ocupação da agenda.</em> : null}
                       </div>
