@@ -25,6 +25,14 @@ insert into public.service_employees(id,service_id,employee_id) values
   ('98700000-0000-0000-0000-000000000021','98700000-0000-0000-0000-000000000011','98700000-0000-0000-0000-000000000002'),
   ('98700000-0000-0000-0000-000000000022','98700000-0000-0000-0000-000000000012','98700000-0000-0000-0000-000000000002');
 
+insert into public.service_change_policies(
+  service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,
+  reschedule_repeat_percent,cancellation_late_percent
+) values
+  ('98700000-0000-0000-0000-000000000010',48,0,20,20,20),
+  ('98700000-0000-0000-0000-000000000011',48,0,20,20,20),
+  ('98700000-0000-0000-0000-000000000012',48,0,20,20,20);
+
 insert into public.booking_pages(id,slug,display_name,title,brand_key,is_active)
 values ('98700000-0000-0000-0000-000000000030','waitlist-test','Waitlist','Waitlist test','SABRINA',true);
 insert into public.booking_page_services(booking_page_id,service_id,is_active,sort_order) values
