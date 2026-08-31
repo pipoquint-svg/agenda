@@ -1,0 +1,20 @@
+.waitlist-form {
+  margin-top: 14px;
+  border: 1px solid #d9d9d3;
+  border-radius: 12px;
+  background: #f8f8f5;
+  padding: 14px;
+}
+.waitlist-heading { display: grid; gap: 5px; margin-bottom: 12px; }
+.waitlist-heading strong { color: #20201e; font-size: .96rem; }
+.waitlist-heading p { margin: 0; color: #666660; font-size: .84rem; line-height: 1.45; }
+.waitlist-fields { display: grid; gap: 10px; }
+.waitlist-fields label { display: grid; gap: 5px; color: #44443f; font-size: .8rem; font-weight: 700; }
+.waitlist-fields input { min-height: 42px; width: 100%; border: 1px solid #cccac3; border-radius: 8px; background: #fff; padding: 9px 11px; font: inherit; color: #20201e; }
+.waitlist-fields input:focus { outline: 2px solid color-mix(in srgb, var(--booking-accent) 22%, transparent); border-color: var(--booking-accent); }
+.waitlist-submit { margin-top: 12px; min-height: 43px; }
+.waitlist-error { margin-top: 10px; color: #9f1f1f; font-size: .82rem; }
+.waitlist-success { margin-top: 14px; border: 1px solid #b8d3bd; border-radius: 12px; background: #f0f8f1; padding: 14px; color: #315b38; }
+.waitlist-success strong { color: #24492a; }
+.waitlist-success p { margin: 5px 0 0; font-size: .86rem; line-height: 1.45; }
+@media (min-width: 650px) { .waitlist-fields { grid-template-columns: repeat(3,minmax(0,1fr)); } }

@@ -13,6 +13,7 @@ import {
   type DurationBookingPageData,
   type DurationBookingService,
 } from './bookingDurationApi'
+import { WaitlistSignupForm } from './WaitlistSignupForm'
 import './booking.css'
 import './durationRecommendations.css'
 
@@ -96,6 +97,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   const [quote, setQuote] = useState<BookingQuote | null>(null)
   const [slots, setSlots] = useState<BookingSlot[]>([])
   const [searchingSlots, setSearchingSlots] = useState(false)
+  const [slotsSearchCompleted, setSlotsSearchCompleted] = useState(false)
   const [creatingHold, setCreatingHold] = useState<string | null>(null)
   const [hold, setHold] = useState<(CheckoutHold & { contracted_minutes?: number }) | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
@@ -167,6 +169,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   function resetAvailability() {
     setLocalDate('')
     setSlots([])
+    setSlotsSearchCompleted(false)
     setHold(null)
     setHoldExpired(false)
   }
@@ -198,6 +201,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   async function searchSlots() {
     if (!service || !employeeRelationId || !localDate || selectedContractedMinutes <= 0) return
     setSearchingSlots(true)
+    setSlotsSearchCompleted(false)
     setError(null)
     setHoldExpired(false)
     try {
@@ -211,8 +215,10 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         localDate,
       })
       setSlots(result)
+      setSlotsSearchCompleted(true)
     } catch (cause) {
       setSlots([])
+      setSlotsSearchCompleted(false)
       setError(readableError(cause))
     } finally {
       setSearchingSlots(false)
@@ -391,7 +397,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                 <section className="booking-step">
                   <div className="step-title"><span>•</span><div><h2>Data e horário</h2><p>Mostramos somente os horários realmente disponíveis para sua reserva.</p></div></div>
                   <div className="date-search">
-                    <label>Data<input type="date" min={todayLocal()} value={localDate} onChange={(event) => { setLocalDate(event.target.value); setSlots([]) }} /></label>
+                    <label>Data<input type="date" min={todayLocal()} value={localDate} onChange={(event) => { setLocalDate(event.target.value); setSlots([]); setSlotsSearchCompleted(false) }} /></label>
                     <button className="primary" type="button" onClick={searchSlots} disabled={!localDate || !employeeRelationId || searchingSlots}>{searchingSlots ? 'Buscando horários…' : 'Buscar horários'}</button>
                   </div>
 
@@ -409,7 +415,14 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                         )
                       })}
                     </div>
-                  ) : localDate && !searchingSlots ? <div className="booking-empty compact"><p>Nenhum horário disponível para esta busca. Tente outra data.</p></div> : null}
+                  ) : slotsSearchCompleted ? (
+                    <div className="booking-empty compact">
+                      <p>Nenhum horário disponível para esta busca. Tente outra data.</p>
+                      {service.duration_mode === 'FIXED' ? (
+                        <WaitlistSignupForm bookingPageSlug={slug} serviceId={service.id} serviceName={service.name} />
+                      ) : null}
+                    </div>
+                  ) : null}
                 </section>
 
                 {quote ? (

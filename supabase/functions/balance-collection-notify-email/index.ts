@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     const payUrl = `${baseUrl}/reserva/saldo?collection=${encodeURIComponent(collection.id)}`
 
     const eventKey = 'RENTAL_BALANCE_DUE'
-    const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template', {
+    const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template_v2', {
       p_event_key: eventKey,
       p_channel: 'EMAIL',
       p_audience: 'CUSTOMER',

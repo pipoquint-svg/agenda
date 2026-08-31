@@ -76,7 +76,7 @@ async function sendRefundFailedNotification(client: any, body: Record<string, un
   }
 
   const eventKey = 'REFUND_FAILED'
-  const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template', {
+  const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template_v2', {
     p_event_key: eventKey,
     p_channel: 'EMAIL',
     p_audience: 'EMPLOYEE',
@@ -196,7 +196,7 @@ Deno.serve(async (req) => {
     }
 
     const eventKey = 'APPOINTMENT_APPROVED'
-    const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template', {
+    const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template_v2', {
       p_event_key: eventKey, p_channel: 'EMAIL', p_audience: 'CUSTOMER', p_service_id: appointment.service_id,
     })
     if (resolverError) throw new Error('NOTIFICATION_TEMPLATE_RESOLUTION_FAILED')

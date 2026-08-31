@@ -2,6 +2,7 @@ import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supaba
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import {
+  assertSafeCustomHtml,
   beginNotificationDelivery,
   markNotificationFailed,
   markNotificationSent,
@@ -18,7 +19,7 @@ const corsHeaders = {
 const events = [
   'APPOINTMENT_APPROVED', 'APPOINTMENT_PENDING', 'APPOINTMENT_REJECTED', 'APPOINTMENT_CANCELLED',
   'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'BIRTHDAY',
-  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'MANUAL',
+  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'MANUAL',
 ]
 const channels = ['EMAIL', 'GOOGLE_CALENDAR']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
@@ -29,9 +30,11 @@ const variables = [
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'extras.summary',
   'coupon.code', 'coupon.discount', 'coupon.expires_at',
   'balance.amount', 'balance.expires_at', 'balance.payment_url',
+  'pre_reservation.expires_at', 'pre_reservation.payment_url',
+  'refund.amount', 'refund.error_code',
 ]
 const financialVariables = new Set([
-  'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'coupon.discount', 'balance.amount',
+  'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'coupon.discount', 'balance.amount', 'refund.amount',
 ])
 
 function json(body: unknown, status = 200) {
@@ -94,6 +97,10 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'balance.amount': 'R$ 500,00',
     'balance.expires_at': '30/08/2026 16:00',
     'balance.payment_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/saldo?collection=teste',
+    'pre_reservation.expires_at': '30/08/2026 16:00',
+    'pre_reservation.payment_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/pagamento?pre_reservation=teste',
+    'refund.amount': 'R$ 500,00',
+    'refund.error_code': 'REFUND_TEST',
   }
 }
 
@@ -143,7 +150,7 @@ Deno.serve(async (req) => {
         return json({ versions: data ?? [] })
       }
       const [templates, services, categories] = await Promise.all([
-        client.rpc('service_admin_list_notification_templates'),
+        client.rpc('service_admin_list_notification_templates_v2'),
         client.rpc('service_admin_list_service_settings'),
         client.rpc('service_admin_list_categories'),
       ])
@@ -176,7 +183,7 @@ Deno.serve(async (req) => {
       const templateId = uuid(record.template_id) as string
       const { data: template, error: templateError } = await client
         .from('notification_template_configs')
-        .select('id,event_key,channel,audience,operation_scope,category_id,title_template,body_template,is_active,variable_schema')
+        .select('id,event_key,channel,audience,operation_scope,category_id,title_template,body_template,html_template,is_active,variable_schema')
         .eq('id', templateId).maybeSingle()
       if (templateError || !template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
       if (template.channel !== 'EMAIL') throw new Error('NOTIFICATION_TEST_EMAIL_ONLY')
@@ -237,17 +244,19 @@ Deno.serve(async (req) => {
     const channel = (text(record.channel) as string).toUpperCase()
     const audience = (text(record.audience) as string).toUpperCase()
     const operationScope = text(record.operation_scope, true)?.toUpperCase() ?? null
+    const htmlTemplate = typeof record.html_template === 'string' ? record.html_template.trim() || null : null
     if (!events.includes(eventKey)) throw new Error('NOTIFICATION_EVENT_INVALID')
     if (!channels.includes(channel)) throw new Error('NOTIFICATION_CHANNEL_INVALID')
     if (!audiences.includes(audience)) throw new Error('NOTIFICATION_AUDIENCE_INVALID')
     if (operationScope !== null && !['SABRINA', 'BLACKSHEEP'].includes(operationScope)) throw new Error('NOTIFICATION_OPERATION_SCOPE_INVALID')
+    assertSafeCustomHtml(htmlTemplate)
     const requestedVariables = Array.isArray(record.variable_schema) ? record.variable_schema.map((item) => text(item) as string) : []
     if (requestedVariables.some((item) => !variables.includes(item))) throw new Error('NOTIFICATION_VARIABLE_INVALID')
     if (requestedVariables.some((item) => financialVariables.has(item)) && !(await hasAdminPermission(admin.adminId, 'FINANCE_MANAGE'))) {
       throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
     }
 
-    const { data, error } = await client.rpc('service_admin_upsert_notification_template', {
+    const { data, error } = await client.rpc('service_admin_upsert_notification_template_v2', {
       p_template_id: uuid(record.template_id, true),
       p_event_key: eventKey,
       p_channel: channel,
@@ -256,6 +265,7 @@ Deno.serve(async (req) => {
       p_category_id: uuid(record.category_id, true),
       p_title_template: text(record.title_template),
       p_body_template: typeof record.body_template === 'string' ? record.body_template : '',
+      p_html_template: htmlTemplate,
       p_is_active: record.is_active === true,
       p_variable_schema: requestedVariables,
       p_reminder_offset_minutes: integer(record.reminder_offset_minutes),
