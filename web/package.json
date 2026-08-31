@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --config vite.embed.config.ts",
     "check": "tsc -b --pretty false",
     "smoke:admin-browser": "node scripts/admin-browser-smoke.mjs"
   },
