@@ -131,11 +131,11 @@ begin
 
   v_definition := pg_get_functiondef(v_oid);
 
-  if position('''surcharge_amount'',v_a.surcharge_amount_snapshot' in v_definition) = 0 then
-    v_patched := replace(
+  if v_definition !~ '''surcharge_amount''[[:space:]]*,[[:space:]]*v_a[.]surcharge_amount_snapshot' then
+    v_patched := regexp_replace(
       v_definition,
-      '''base_price'',v_a.base_price_snapshot,''variable_price_adjustment''',
-      '''base_price'',v_a.base_price_snapshot,''surcharge_amount'',v_a.surcharge_amount_snapshot,''variable_price_adjustment'''
+      '''base_price''[[:space:]]*,[[:space:]]*v_a[.]base_price_snapshot[[:space:]]*,',
+      '''base_price'',v_a.base_price_snapshot,''surcharge_amount'',v_a.surcharge_amount_snapshot,'
     );
 
     if v_patched = v_definition then
