@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root='supabase/functions'
-confirmation="$root/email-send/index.ts"
+confirmation="$root/email-send/platform.ts"
 balance="$root/balance-collection-notify-email/index.ts"
 birthday="$root/birthday-email-worker/index.ts"
 admin_notifications="$root/admin-notifications/index.ts"
