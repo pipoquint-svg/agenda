@@ -24,11 +24,6 @@ function timestamp(value: unknown): string {
   if (!next || Number.isNaN(Date.parse(next))) throw new Error('TIMESTAMP_INVALID')
   return new Date(next).toISOString()
 }
-function requiredEnv(name: string): string {
-  const value = Deno.env.get(name)?.trim()
-  if (!value) throw new Error(`MISSING_ENV:${name}`)
-  return value
-}
 
 type GoogleCalendarRow = {
   id: string
@@ -83,18 +78,22 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const [employees, services, google, mappings, writes] = await Promise.all([
+      const [employees, services, google, mappings, writes, serviceResources, resources] = await Promise.all([
         client.rpc('admin_list_employees'),
         client.rpc('service_admin_list_service_settings'),
         client.from('google_calendars').select('id,name,is_active,google_calendar_id,google_connection_id,access_role').eq('is_active', true).order('name'),
         client.from('google_calendar_resources').select('google_calendar_id,resource_id'),
         client.from('service_employee_calendar_write').select('google_calendar_id'),
+        client.from('service_resources').select('service_id,resource_id,is_required').eq('is_required', true),
+        client.from('resources').select('id,name,resource_type,is_active').eq('is_active', true),
       ])
       if (employees.error) throw new Error(employees.error.message)
       if (services.error) throw new Error(services.error.message)
       if (google.error) throw new Error(google.error.message)
       if (mappings.error) throw new Error(mappings.error.message)
       if (writes.error) throw new Error(writes.error.message)
+      if (serviceResources.error) throw new Error(serviceResources.error.message)
+      if (resources.error) throw new Error(resources.error.message)
 
       const configuredCalendarIds = new Set<string>([
         ...(mappings.data ?? []).map((row) => row.google_calendar_id),
@@ -109,6 +108,20 @@ Deno.serve(async (req) => {
         const list = mappedByResource.get(row.resource_id) ?? []
         if (!list.includes(canonicalCalendarId)) list.push(canonicalCalendarId)
         mappedByResource.set(row.resource_id,list)
+      }
+
+      const resourceTypeById = new Map<string,string>()
+      for (const resource of resources.data ?? []) {
+        resourceTypeById.set(String(resource.id), String(resource.resource_type ?? '').toUpperCase())
+      }
+      const physicalResourcesByService = new Map<string,string[]>()
+      for (const row of serviceResources.data ?? []) {
+        const serviceId = String(row.service_id)
+        const resourceId = String(row.resource_id)
+        if (resourceTypeById.get(resourceId) !== 'PHYSICAL') continue
+        const list = physicalResourcesByService.get(serviceId) ?? []
+        if (!list.includes(resourceId)) list.push(resourceId)
+        physicalResourcesByService.set(serviceId, list)
       }
 
       const employeeRows = (employees.data ?? []).map((employee: Record<string,unknown>) => {
@@ -132,10 +145,31 @@ Deno.serve(async (req) => {
             }
           })
           : employee.service_assignments
+
+        const directBlockingCalendarIds = typeof employee.resource_id === 'string'
+          ? mappedByResource.get(employee.resource_id) ?? []
+          : []
+        const sharedResourceIds = new Set<string>()
+        for (const assignment of Array.isArray(serviceAssignments) ? serviceAssignments : []) {
+          if (!assignment || typeof assignment !== 'object' || Array.isArray(assignment)) continue
+          const row = assignment as Record<string, unknown>
+          if (row.is_active === false || typeof row.service_id !== 'string') continue
+          for (const resourceId of physicalResourcesByService.get(row.service_id) ?? []) sharedResourceIds.add(resourceId)
+        }
+        const sharedBlockingCalendarIds: string[] = []
+        for (const resourceId of sharedResourceIds) {
+          for (const calendarId of mappedByResource.get(resourceId) ?? []) {
+            if (!sharedBlockingCalendarIds.includes(calendarId)) sharedBlockingCalendarIds.push(calendarId)
+          }
+        }
+        const effectiveBlockingCalendarIds = [...new Set([...sharedBlockingCalendarIds, ...directBlockingCalendarIds])]
+
         return {
           ...employee,
           service_assignments: serviceAssignments,
-          blocking_calendar_ids: typeof employee.resource_id === 'string' ? mappedByResource.get(employee.resource_id) ?? [] : [],
+          blocking_calendar_ids: directBlockingCalendarIds,
+          shared_blocking_calendar_ids: sharedBlockingCalendarIds,
+          effective_blocking_calendar_ids: effectiveBlockingCalendarIds,
         }
       })
       return json({
@@ -185,11 +219,9 @@ Deno.serve(async (req) => {
         return json(data)
       }
       const calendarId = uuid(body.google_calendar_id)
-      const prefix = requiredEnv('GOOGLE_TEST_CALENDAR_PREFIX')
       const { data: calendar, error: calendarError } = await client.from('google_calendars').select('id,name,access_role,is_active').eq('id',calendarId).maybeSingle()
       if (calendarError || !calendar?.is_active) throw new Error('GOOGLE_CALENDAR_NOT_ACTIVE')
       if (!(calendar.access_role === 'writer' || calendar.access_role === 'owner')) throw new Error('GOOGLE_CALENDAR_WRITE_ACCESS_REQUIRED')
-      if (!calendar.name.toLocaleUpperCase('pt-BR').startsWith(prefix.toLocaleUpperCase('pt-BR'))) throw new Error('GOOGLE_TEST_CALENDAR_PREFIX_REQUIRED')
       const { data, error } = await client.rpc('admin_set_service_employee_write_calendar_audited', { p_service_employee_id: serviceEmployeeId, p_google_calendar_id: calendarId, p_time_scope: text(body.time_scope).toUpperCase() || 'FULL_APPOINTMENT', p_admin_id: admin.adminId })
       if (error) throw new Error(error.message)
       return json(data)
@@ -198,14 +230,12 @@ Deno.serve(async (req) => {
       if (!(await hasAdminPermission(admin.adminId, 'INTEGRATIONS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')
       const employeeId = uuid(body.employee_id)
       const calendarId = uuid(body.google_calendar_id)
-      const prefix = requiredEnv('GOOGLE_TEST_CALENDAR_PREFIX')
       const [{ data: employee, error: employeeError }, { data: calendar, error: calendarError }] = await Promise.all([
         client.from('employees').select('id,resource_id,is_active').eq('id', employeeId).maybeSingle(),
         client.from('google_calendars').select('id,name,is_active').eq('id', calendarId).maybeSingle(),
       ])
       if (employeeError || !employee?.is_active || !employee.resource_id) throw new Error('EMPLOYEE_RESOURCE_NOT_AVAILABLE')
       if (calendarError || !calendar?.is_active) throw new Error('GOOGLE_CALENDAR_NOT_ACTIVE')
-      if (!calendar.name.toLocaleUpperCase('pt-BR').startsWith(prefix.toLocaleUpperCase('pt-BR'))) throw new Error('GOOGLE_TEST_CALENDAR_PREFIX_REQUIRED')
       if (action === 'BLOCKING_CALENDAR_MAP') {
         const { data, error } = await client.rpc('service_admin_add_google_calendar_resource_mapping', { p_google_calendar_id: calendarId, p_resource_id: employee.resource_id, p_admin_user_id: admin.adminId })
         if (error) throw new Error(error.message)
