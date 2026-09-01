@@ -30,6 +30,49 @@ function requiredEnv(name: string): string {
   return value
 }
 
+type GoogleCalendarRow = {
+  id: string
+  name: string
+  google_calendar_id: string
+  google_connection_id: string
+  access_role: string
+  is_active: boolean
+}
+
+function googleCalendarDisplayKey(calendar: GoogleCalendarRow): string {
+  const normalizedName = calendar.name.trim().toLocaleLowerCase('pt-BR')
+  if (normalizedName === 'feriados no brasil') return `name:${normalizedName}`
+  return `remote:${calendar.google_calendar_id}`
+}
+
+function canonicalGoogleCalendars(
+  calendars: GoogleCalendarRow[],
+  configuredCalendarIds: Set<string>,
+): { calendars: GoogleCalendarRow[]; canonicalIdById: Map<string, string> } {
+  const canonicalByKey = new Map<string, GoogleCalendarRow>()
+  const score = (calendar: GoogleCalendarRow) =>
+    (configuredCalendarIds.has(calendar.id) ? 100 : 0)
+    + (calendar.access_role === 'owner' ? 20 : calendar.access_role === 'writer' ? 10 : 0)
+
+  for (const calendar of calendars) {
+    const key = googleCalendarDisplayKey(calendar)
+    const current = canonicalByKey.get(key)
+    if (!current || score(calendar) > score(current) || (score(calendar) === score(current) && calendar.id < current.id)) {
+      canonicalByKey.set(key, calendar)
+    }
+  }
+
+  const canonicalIdById = new Map<string, string>()
+  for (const calendar of calendars) {
+    canonicalIdById.set(calendar.id, canonicalByKey.get(googleCalendarDisplayKey(calendar))?.id ?? calendar.id)
+  }
+
+  const deduped = [...canonicalByKey.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, 'pt-BR') || left.id.localeCompare(right.id)
+  )
+  return { calendars: deduped, canonicalIdById }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -40,30 +83,65 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const [employees, services, google, mappings] = await Promise.all([
+      const [employees, services, google, mappings, writes] = await Promise.all([
         client.rpc('admin_list_employees'),
         client.rpc('service_admin_list_service_settings'),
-        client.from('google_calendars').select('id,name,is_active,google_connection_id,access_role').eq('is_active', true).order('name'),
+        client.from('google_calendars').select('id,name,is_active,google_calendar_id,google_connection_id,access_role').eq('is_active', true).order('name'),
         client.from('google_calendar_resources').select('google_calendar_id,resource_id'),
+        client.from('service_employee_calendar_write').select('google_calendar_id'),
       ])
       if (employees.error) throw new Error(employees.error.message)
       if (services.error) throw new Error(services.error.message)
       if (google.error) throw new Error(google.error.message)
       if (mappings.error) throw new Error(mappings.error.message)
+      if (writes.error) throw new Error(writes.error.message)
+
+      const configuredCalendarIds = new Set<string>([
+        ...(mappings.data ?? []).map((row) => row.google_calendar_id),
+        ...(writes.data ?? []).map((row) => row.google_calendar_id),
+      ])
+      const canonical = canonicalGoogleCalendars((google.data ?? []) as GoogleCalendarRow[], configuredCalendarIds)
+      const canonicalById = new Map(canonical.calendars.map((calendar) => [calendar.id, calendar]))
+
       const mappedByResource = new Map<string,string[]>()
       for (const row of mappings.data ?? []) {
+        const canonicalCalendarId = canonical.canonicalIdById.get(row.google_calendar_id) ?? row.google_calendar_id
         const list = mappedByResource.get(row.resource_id) ?? []
-        list.push(row.google_calendar_id)
+        if (!list.includes(canonicalCalendarId)) list.push(canonicalCalendarId)
         mappedByResource.set(row.resource_id,list)
       }
-      const employeeRows = (employees.data ?? []).map((employee: Record<string,unknown>) => ({
-        ...employee,
-        blocking_calendar_ids: typeof employee.resource_id === 'string' ? mappedByResource.get(employee.resource_id) ?? [] : [],
-      }))
+
+      const employeeRows = (employees.data ?? []).map((employee: Record<string,unknown>) => {
+        const serviceAssignments = Array.isArray(employee.service_assignments)
+          ? employee.service_assignments.map((assignment) => {
+            if (!assignment || typeof assignment !== 'object' || Array.isArray(assignment)) return assignment
+            const row = assignment as Record<string, unknown>
+            const writeCalendar = row.write_calendar
+            if (!writeCalendar || typeof writeCalendar !== 'object' || Array.isArray(writeCalendar)) return assignment
+            const write = writeCalendar as Record<string, unknown>
+            const originalId = typeof write.google_calendar_id === 'string' ? write.google_calendar_id : ''
+            const canonicalId = canonical.canonicalIdById.get(originalId) ?? originalId
+            const canonicalCalendar = canonicalById.get(canonicalId)
+            return {
+              ...row,
+              write_calendar: {
+                ...write,
+                google_calendar_id: canonicalId,
+                calendar_name: canonicalCalendar?.name ?? write.calendar_name,
+              },
+            }
+          })
+          : employee.service_assignments
+        return {
+          ...employee,
+          service_assignments: serviceAssignments,
+          blocking_calendar_ids: typeof employee.resource_id === 'string' ? mappedByResource.get(employee.resource_id) ?? [] : [],
+        }
+      })
       return json({
         employees: employeeRows,
         services: (services.data ?? []).map((s: Record<string, unknown>) => ({ id: s.id, name: s.name, category_id: s.category_id, category_name: s.category_name, operation_scope: s.operation_scope, is_active: s.is_active })),
-        google_calendars: (google.data ?? []).map((calendar) => ({ ...calendar, writable: calendar.access_role === 'writer' || calendar.access_role === 'owner' })),
+        google_calendars: canonical.calendars.map((calendar) => ({ ...calendar, writable: calendar.access_role === 'writer' || calendar.access_role === 'owner' })),
       })
     }
 
