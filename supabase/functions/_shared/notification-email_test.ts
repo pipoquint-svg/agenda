@@ -131,15 +131,47 @@ Deno.test('already-sent delivery is idempotent and never creates a second send a
   assert(writes === 0, 'already sent delivery must not be mutated or inserted again')
 })
 
-Deno.test('delivery success and failure persist explicit history states', async () => {
+Deno.test('provider evidence is authoritative even if a stale retry previously marked the row failed', async () => {
+  let writes = 0
+  const client = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { id: 'log-1', status: 'FAILED', attempt_count: 5, provider_message_id: 'msg-accepted' }, error: null }),
+        }),
+      }),
+      update: () => { writes += 1; return { eq: async () => ({ error: null }) } },
+      insert: () => { writes += 1; return { select: () => ({ single: async () => ({ data: { id: 'new' }, error: null }) }) } },
+    }),
+  }
+  const result = await beginNotificationDelivery(client, {
+    templateId: 'template-1',
+    eventKey: 'APPOINTMENT_APPROVED',
+    audience: 'CUSTOMER',
+    recipient: 'cliente@example.test',
+    idempotencyKey: 'notification:provider-evidence',
+  })
+  assert(result.alreadySent === true, 'provider evidence must suppress duplicate provider sends')
+  assert(result.providerMessageId === 'msg-accepted', 'accepted provider message id must be returned')
+  assert(writes === 0, 'provider evidence must not start another delivery attempt')
+})
+
+Deno.test('delivery success and failure persist explicit history states without downgrading provider evidence', async () => {
   const updates: Array<Record<string, unknown>> = []
+  const filters: Array<[string, string, unknown]> = []
   const client = {
     from: (table: string) => {
       assert(table === 'notification_delivery_logs', 'delivery helper wrote outside central log table')
       return {
         update: (payload: Record<string, unknown>) => {
           updates.push(payload)
-          return { eq: async () => ({ error: null }) }
+          const chain: any = {
+            eq: (column: string, value: unknown) => { filters.push(['eq', column, value]); return chain },
+            neq: (column: string, value: unknown) => { filters.push(['neq', column, value]); return chain },
+            is: (column: string, value: unknown) => { filters.push(['is', column, value]); return Promise.resolve({ error: null }) },
+            then: (resolve: (value: { error: null }) => unknown) => resolve({ error: null }),
+          }
+          return chain
         },
       }
     },
@@ -153,4 +185,6 @@ Deno.test('delivery success and failure persist explicit history states', async 
   assert(updates[0].provider_message_id === 'provider-1', 'provider message id was not persisted')
   assert(updates[1].status === 'FAILED', 'provider failure was not marked FAILED')
   assert(updates[1].last_error_code === 'EMAIL_PROVIDER_HTTP_429', 'stable provider failure code was not persisted')
+  assert(filters.some(([op, column, value]) => op === 'neq' && column === 'status' && value === 'SENT'), 'failure transition must not overwrite SENT')
+  assert(filters.some(([op, column, value]) => op === 'is' && column === 'provider_message_id' && value === null), 'failure transition must not overwrite provider evidence')
 })
