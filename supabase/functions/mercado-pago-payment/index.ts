@@ -227,7 +227,59 @@ async function loadTransaction(transactionId: string): Promise<TransactionRow | 
   return data as TransactionRow | null
 }
 
+async function tryImmediateConfirmationEmail(
+  client: ReturnType<typeof adminClient>,
+  appointmentId: string,
+  normalizedPaymentStatus: string,
+): Promise<void> {
+  if (normalizedPaymentStatus !== 'APPROVED' || !appointmentId) return
+
+  try {
+    const { data: appointment, error: appointmentError } = await client
+      .from('appointments')
+      .select('id,status,version')
+      .eq('id', appointmentId)
+      .maybeSingle()
+    if (appointmentError || !appointment || appointment.status !== 'CONFIRMED') return
+
+    const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const internalSecret = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
+    if (!base || !internalSecret) {
+      console.error('[OPERATION_ALERT] IMMEDIATE_CONFIRMATION_EMAIL_RUNTIME_MISSING')
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8000)
+    try {
+      const emailResponse = await fetch(`${base}/functions/v1/email-send`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-secret': internalSecret,
+        },
+        body: JSON.stringify({
+          appointment_id: appointment.id,
+          entity_version: appointment.version,
+          reason: 'PAYMENT_CONFIRMED',
+        }),
+        signal: controller.signal,
+      })
+      if (!emailResponse.ok) {
+        console.error('[OPERATION_ALERT] IMMEDIATE_CONFIRMATION_EMAIL_FAILED', { status: emailResponse.status })
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch (error) {
+    console.error('[OPERATION_ALERT] IMMEDIATE_CONFIRMATION_EMAIL_FAILED', {
+      code: error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN',
+    })
+  }
+}
+
 async function validateAndApplyProviderOrder(input: {
+  appointmentId: string
   transactionId: string
   cashAmount: number | string
   method: 'PIX' | 'CARD'
@@ -288,6 +340,8 @@ async function validateAndApplyProviderOrder(input: {
     p_paid_at: snapshot.date_approved,
   })
   if (applyError) throw new Error('PAYMENT_STATUS_APPLY_FAILED')
+
+  await tryImmediateConfirmationEmail(client, input.appointmentId, normalized)
   return { snapshot, state: applied }
 }
 
@@ -392,6 +446,7 @@ Deno.serve(async (req) => {
 
       const provider = await mercadoPagoGetOrder(providerOrderId)
       const applied = await validateAndApplyProviderOrder({
+        appointmentId: context.appointment_id,
         transactionId: transaction.id,
         cashAmount: transaction.cash_amount,
         method: transaction.method,
@@ -438,6 +493,7 @@ Deno.serve(async (req) => {
       if (existing?.provider_payment_id && (existing.method === 'PIX' || existing.method === 'CARD')) {
         const provider = await mercadoPagoGetOrder(existing.provider_payment_id)
         const applied = await validateAndApplyProviderOrder({
+          appointmentId: intent.appointment_id,
           transactionId: intent.transaction_id,
           cashAmount: intent.cash_amount,
           method: existing.method,
@@ -560,6 +616,7 @@ Deno.serve(async (req) => {
     }
 
     const applied = await validateAndApplyProviderOrder({
+      appointmentId: intent.appointment_id,
       transactionId: intent.transaction_id,
       cashAmount: intent.cash_amount,
       method,
