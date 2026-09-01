@@ -21,8 +21,12 @@ export function csvSet(value: string | null | undefined): Set<string> {
 }
 
 function isAgendaProductionProject(): boolean {
-  const url = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
-  return url === 'https://sbexdggbwqvyhbkatucs.supabase.co'
+  try {
+    const url = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
+    return url === 'https://sbexdggbwqvyhbkatucs.supabase.co'
+  } catch {
+    return false
+  }
 }
 
 export function isScopeEnabled(scope: string, configuredScopes: string | null | undefined): boolean {
