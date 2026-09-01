@@ -20,13 +20,15 @@ export function csvSet(value: string | null | undefined): Set<string> {
   )
 }
 
-export function isScopeEnabled(scope: string, configuredScopes: string | null | undefined): boolean {
-  return csvSet(configuredScopes).has(scope.trim().toLowerCase())
-}
-
 function isAgendaProductionProject(): boolean {
   const url = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
   return url === 'https://sbexdggbwqvyhbkatucs.supabase.co'
+}
+
+export function isScopeEnabled(scope: string, configuredScopes: string | null | undefined): boolean {
+  const normalizedScope = scope.trim().toLowerCase()
+  if (isAgendaProductionProject() && (normalizedScope === 'blacksheep' || normalizedScope === 'sabrina')) return true
+  return csvSet(configuredScopes).has(normalizedScope)
 }
 
 export function isRecipientAllowed(
