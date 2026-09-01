@@ -20,13 +20,15 @@ Deno.test('refresh token encryption round-trips without storing plaintext', asyn
   assert(await decryptRefreshToken(ciphertext) === plaintext, 'decrypted token must match input')
 })
 
-Deno.test('OAuth URL requests offline access, state and minimal calendar scopes', () => {
+Deno.test('OAuth URL requests account selection, consent, offline access, state and minimal calendar scopes', () => {
   Deno.env.set('GOOGLE_CLIENT_ID', 'client-id')
   Deno.env.set('GOOGLE_REDIRECT_URI', 'https://example.com/google-oauth')
   const url = new URL(googleOAuthUrl('state-value'))
   assert(url.origin === 'https://accounts.google.com', 'must use Google authorization origin')
   assert(url.searchParams.get('access_type') === 'offline', 'must request offline access')
-  assert(url.searchParams.get('prompt') === 'consent', 'must request consent for refresh token')
+  const prompts = new Set((url.searchParams.get('prompt') ?? '').split(/\s+/).filter(Boolean))
+  assert(prompts.has('select_account'), 'must force explicit Google account selection')
+  assert(prompts.has('consent'), 'must request consent for refresh token')
   assert(url.searchParams.get('state') === 'state-value', 'must preserve CSRF state')
   const scope = url.searchParams.get('scope') ?? ''
   assert(scope.includes('calendar.events'), 'must request event scope')

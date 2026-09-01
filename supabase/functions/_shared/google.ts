@@ -66,7 +66,7 @@ export function googleOAuthUrl(state: string): string {
     redirect_uri: requiredEnv('GOOGLE_REDIRECT_URI'),
     response_type: 'code',
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: 'select_account consent',
     include_granted_scopes: 'true',
     scope: GOOGLE_SCOPES.join(' '),
     state,
