@@ -82,7 +82,6 @@ Deno.serve(async (req) => {
     const secret = requireInternal(req)
     const client = adminClient()
     const workerId = `edge:${crypto.randomUUID()}`
-    const transactionalEmailWorkerEnabled = envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED')
     const googleIntegrationEnabled = envEnabled('GOOGLE_INTEGRATION_ENABLED')
 
     const { data: kommoSettings, error: kommoSettingsError } = await client
@@ -168,25 +167,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    const claimJobTypes: string[] = []
+    const claimJobTypes: string[] = ['APPOINTMENT_CONFIRMED_MESSAGE']
     if (googleIntegrationEnabled) claimJobTypes.push('GOOGLE_CALENDAR_SYNC', 'GOOGLE_APPOINTMENT_SYNC')
     if (kommoIntegrationEnabled) claimJobTypes.push('KOMMO_APPOINTMENT_SYNC')
-    if (transactionalEmailWorkerEnabled) claimJobTypes.push('APPOINTMENT_CONFIRMED_MESSAGE')
 
-    let jobs: any[] = []
-    if (claimJobTypes.length > 0) {
-      const { data: claimedJobs, error: claimError } = await client.rpc('claim_integration_jobs', {
-        p_worker_id: workerId,
-        p_job_types: claimJobTypes,
-        p_limit: 10,
-      })
-      if (claimError) throw new Error('INTEGRATION_JOB_CLAIM_FAILED')
-      jobs = claimedJobs ?? []
-    }
+    const { data: claimedJobs, error: claimError } = await client.rpc('claim_integration_jobs', {
+      p_worker_id: workerId,
+      p_job_types: claimJobTypes,
+      p_limit: 10,
+    })
+    if (claimError) throw new Error('INTEGRATION_JOB_CLAIM_FAILED')
+    const jobs: any[] = claimedJobs ?? []
 
-    // A webhook and periodic reconciliation can legitimately enqueue several sync jobs
-    // for the same calendar. Execute one per claimed batch, preferring force_full, and
-    // finish the redundant jobs without issuing competing Google sync requests.
     const primaryGoogleSyncJob = new Map<string, any>()
     for (const job of jobs) {
       if (job.job_type !== 'GOOGLE_CALENDAR_SYNC') continue
@@ -232,14 +224,17 @@ Deno.serve(async (req) => {
             continue
           }
         } else if (job.job_type === 'APPOINTMENT_CONFIRMED_MESSAGE') {
-          if (!transactionalEmailWorkerEnabled) throw new Error('TRANSACTIONAL_EMAIL_WORKER_DISABLED')
           if (!Number.isInteger(job.entity_version) || job.entity_version < 1) throw new Error('APPOINTMENT_CONFIRMED_MESSAGE_VERSION_REQUIRED')
           const reason = typeof job.payload_json?.reason === 'string' ? job.payload_json.reason : 'CONFIRMED'
-          const result = await invokeFunction<{ stale?: boolean; current_version?: number }>('email-send', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, reason })
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number; skipped?: boolean; reason?: string }>('email-send', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, reason })
           if (result.stale) {
             await discardStaleJob(client, job, workerId, result.current_version, 'APPOINTMENT_CONFIRMED_MESSAGE_STALE_VERSION_MISSING')
             discardedStale += 1
             continue
+          }
+          if (result.skipped === true && result.reason !== 'NOTIFICATION_ALREADY_SENT') {
+            const skipReason = String(result.reason ?? 'UNKNOWN').replace(/[^A-Z0-9_]/gi, '_').slice(0, 100)
+            throw new Error(`APPOINTMENT_CONFIRMATION_EMAIL_SKIPPED:${skipReason}`)
           }
         } else if (job.job_type === 'KOMMO_APPOINTMENT_SYNC') {
           if (!kommoIntegrationEnabled) throw new Error('KOMMO_INTEGRATION_DISABLED')
@@ -282,7 +277,7 @@ Deno.serve(async (req) => {
       worker_id: workerId,
       google_enabled: googleIntegrationEnabled,
       kommo_enabled: kommoIntegrationEnabled,
-      email_worker_enabled: transactionalEmailWorkerEnabled,
+      email_worker_enabled: true,
       expired_unconfirmed_free_visits: Number(expiredFreeVisits ?? 0),
       calendars_reconciled: calendarIds.length,
       claimed: jobs.length,
