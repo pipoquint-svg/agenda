@@ -5,7 +5,7 @@ import {
   GITHUB_WORKER_AUDIENCE,
 } from '../_shared/github-oidc.ts'
 
-const WORKER_TIMEOUT_MS = 20_000
+const WORKER_TIMEOUT_MS = 90_000
 const GITHUB_JWKS = createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'))
 
 function json(body: unknown, status = 200): Response {

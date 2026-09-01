@@ -2,6 +2,11 @@ import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from
 import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken, sha256Hex } from '../_shared/google.ts'
 import { managedEventNeedsRepair, type ManagedAppointmentDesiredState } from '../_shared/managed-event.ts'
 
+const DAY_MS = 24 * 60 * 60 * 1000
+const DEFAULT_BOOKING_HORIZON_DAYS = 365
+const FULL_SYNC_PAST_MARGIN_DAYS = 30
+const FULL_SYNC_FUTURE_MARGIN_DAYS = 30
+
 async function authorize(req: Request): Promise<void> {
   const internal = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
@@ -13,6 +18,29 @@ type EventsPage = {
   items?: Record<string, any>[]
   nextPageToken?: string
   nextSyncToken?: string
+}
+
+type FullSyncWindow = {
+  timeMin: string
+  timeMax: string
+}
+
+function buildFullSyncWindow(horizonDays: number): FullSyncWindow {
+  const now = Date.now()
+  return {
+    timeMin: new Date(now - FULL_SYNC_PAST_MARGIN_DAYS * DAY_MS).toISOString(),
+    timeMax: new Date(now + (horizonDays + FULL_SYNC_FUTURE_MARGIN_DAYS) * DAY_MS).toISOString(),
+  }
+}
+
+function desiredStateOverlapsWindow(desired: ManagedAppointmentDesiredState, window: FullSyncWindow): boolean {
+  if (!desired.start_at || !desired.end_at) return false
+  const start = Date.parse(desired.start_at)
+  const end = Date.parse(desired.end_at)
+  const min = Date.parse(window.timeMin)
+  const max = Date.parse(window.timeMax)
+  if (![start, end, min, max].every(Number.isFinite)) return false
+  return end > min && start < max
 }
 
 async function enqueueRepair(
@@ -37,7 +65,8 @@ async function performSync(
   googleCalendarId: string,
   syncToken: string | null,
   forceFull: boolean,
-): Promise<{ full: boolean; processed: number; nextSyncToken: string; repairs: number }> {
+  fullWindow: FullSyncWindow,
+): Promise<{ full: boolean; processed: number; nextSyncToken: string; repairs: number; fullWindow: FullSyncWindow | null }> {
   const client = adminClient()
   const full = forceFull || !syncToken
   const syncStartedAt = new Date().toISOString()
@@ -56,7 +85,14 @@ async function performSync(
     endpoint.searchParams.set('maxResults', '2500')
     endpoint.searchParams.set('singleEvents', 'true')
     endpoint.searchParams.set('showDeleted', 'true')
-    if (!full && syncToken) endpoint.searchParams.set('syncToken', syncToken)
+    if (full) {
+      // timeMin/timeMax intentionally apply only to full sync. Google does not allow
+      // them together with syncToken on incremental requests.
+      endpoint.searchParams.set('timeMin', fullWindow.timeMin)
+      endpoint.searchParams.set('timeMax', fullWindow.timeMax)
+    } else if (syncToken) {
+      endpoint.searchParams.set('syncToken', syncToken)
+    }
     if (pageToken) endpoint.searchParams.set('pageToken', pageToken)
 
     const page = await googleJson<EventsPage>(endpoint.toString(), accessToken)
@@ -126,7 +162,9 @@ async function performSync(
       })
       if (desiredError || !desiredData) continue
       const desired = desiredData as ManagedAppointmentDesiredState
-      if (desired.desired_action === 'PRESENT') {
+      // A bounded full sync must not interpret managed events outside the bounded
+      // window as missing. Those events are intentionally not requested from Google.
+      if (desired.desired_action === 'PRESENT' && desiredStateOverlapsWindow(desired, fullWindow)) {
         await enqueueRepair(client, desired.appointment_id, desired.version, `missing-${mirror.google_event_id}`)
         repairs += 1
       }
@@ -134,7 +172,7 @@ async function performSync(
   }
 
   if (!nextSyncToken) throw new Error('GOOGLE_NEXT_SYNC_TOKEN_MISSING')
-  return { full, processed, nextSyncToken, repairs }
+  return { full, processed, nextSyncToken, repairs, fullWindow: full ? fullWindow : null }
 }
 
 Deno.serve(async (req) => {
@@ -165,6 +203,17 @@ Deno.serve(async (req) => {
       throw new Error('GOOGLE_CONNECTION_UNHEALTHY')
     }
 
+    const { data: activeServices, error: servicesError } = await client
+      .from('services')
+      .select('maximum_booking_horizon_days')
+      .eq('is_active', true)
+    if (servicesError) throw new Error('GOOGLE_BOOKING_HORIZON_LOOKUP_FAILED')
+    const horizonDays = Math.max(
+      DEFAULT_BOOKING_HORIZON_DAYS,
+      ...(activeServices ?? []).map((service: any) => Number(service.maximum_booking_horizon_days) || 0),
+    )
+    const fullWindow = buildFullSyncWindow(horizonDays)
+
     let accessToken: string
     try {
       const refreshToken = await decryptRefreshToken(connection.refresh_token_ciphertext)
@@ -190,7 +239,14 @@ Deno.serve(async (req) => {
     const runForceFull = forceFull || !syncState?.sync_token || ['NEVER_SYNCED', 'STALE', 'REBUILDING'].includes(syncState?.health_status ?? '')
     let result
     try {
-      result = await performSync(calendar.id, accessToken, calendar.google_calendar_id, syncState?.sync_token ?? null, runForceFull)
+      result = await performSync(
+        calendar.id,
+        accessToken,
+        calendar.google_calendar_id,
+        syncState?.sync_token ?? null,
+        runForceFull,
+        fullWindow,
+      )
     } catch (error) {
       const status = (error as Error & { status?: number }).status
       const message = error instanceof Error ? error.message : 'GOOGLE_SYNC_FAILED'
@@ -241,6 +297,7 @@ Deno.serve(async (req) => {
       mode: result.full ? 'FULL' : 'INCREMENTAL',
       processed: result.processed,
       repairs_enqueued: result.repairs,
+      full_sync_window: result.fullWindow,
       health_status: 'HEALTHY',
     })
   } catch (error) {
