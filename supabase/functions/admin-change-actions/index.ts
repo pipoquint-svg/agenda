@@ -64,14 +64,35 @@ async function stableIdempotencyKey(input: string): Promise<string> {
   return Array.from(digest).map((value) => value.toString(16).padStart(2, '0')).join('')
 }
 
-function refundSnapshot(raw: Record<string, unknown>): Record<string, unknown> {
-  const amount = Number(raw.amount)
+function orderRefundSnapshot(raw: Record<string, unknown>, transactionId: string): Record<string, unknown> {
+  const transactions = raw.transactions && typeof raw.transactions === 'object'
+    ? raw.transactions as Record<string, unknown>
+    : {}
+  const refunds = Array.isArray(transactions.refunds) ? transactions.refunds : []
+  const matched = refunds.find((item) => item && typeof item === 'object' && String((item as Record<string, unknown>).transaction_id ?? '') === transactionId)
+    ?? refunds[0]
+  const refund = matched && typeof matched === 'object' ? matched as Record<string, unknown> : {}
+  const amount = Number(refund.amount)
   return {
-    id: raw.id == null ? null : String(raw.id),
-    payment_id: raw.payment_id == null ? null : String(raw.payment_id),
+    id: refund.id == null ? null : String(refund.id),
+    payment_id: refund.transaction_id == null ? null : String(refund.transaction_id),
     amount: Number.isFinite(amount) ? amount : null,
-    status: raw.status == null ? null : String(raw.status),
-    date_created: raw.date_created == null ? null : String(raw.date_created),
+    status: refund.status == null ? null : String(refund.status),
+    date_created: refund.date_created == null ? null : String(refund.date_created),
+    order_id: raw.id == null ? null : String(raw.id),
+    order_status: raw.status == null ? null : String(raw.status),
+    order_status_detail: raw.status_detail == null ? null : String(raw.status_detail),
+  }
+}
+
+function providerErrorSnapshot(raw: Record<string, unknown>): Record<string, unknown> {
+  const errors = Array.isArray(raw.errors) ? raw.errors : []
+  const cause = Array.isArray(raw.cause) ? raw.cause : []
+  const first = (errors[0] && typeof errors[0] === 'object' ? errors[0] : cause[0] && typeof cause[0] === 'object' ? cause[0] : {}) as Record<string, unknown>
+  return {
+    code: raw.code == null ? (first.code == null ? null : String(first.code)) : String(raw.code),
+    message: raw.message == null ? (first.message == null ? null : String(first.message)) : String(raw.message),
+    status_detail: raw.status_detail == null ? null : String(raw.status_detail),
   }
 }
 
@@ -85,7 +106,8 @@ function providerFinancialMutationRuntime() {
 }
 
 async function mercadoPagoRefund(input: {
-  paymentId: string
+  orderId: string
+  transactionId: string
   amount: number
   fullAvailableAmount: number
   idempotencyKey: string
@@ -95,7 +117,7 @@ async function mercadoPagoRefund(input: {
   const timer = setTimeout(() => controller.abort(), 15000)
   try {
     const fullRefund = Math.abs(input.amount - input.fullAvailableAmount) <= 0.01
-    const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(input.paymentId)}/refunds`, {
+    const response = await fetch(`https://api.mercadopago.com/v1/orders/${encodeURIComponent(input.orderId)}/refund`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${runtime.accessToken}`,
@@ -103,7 +125,9 @@ async function mercadoPagoRefund(input: {
         'content-type': 'application/json',
         'x-idempotency-key': input.idempotencyKey,
       },
-      body: fullRefund ? undefined : JSON.stringify({ amount: input.amount }),
+      body: fullRefund ? undefined : JSON.stringify({
+        transactions: [{ id: input.transactionId, amount: input.amount.toFixed(2) }],
+      }),
       signal: controller.signal,
     })
     const data = await response.json().catch(() => ({})) as Record<string, unknown>
@@ -321,25 +345,44 @@ Deno.serve(async (req) => {
         const availableCash = Number(payment.available_cash)
         if (!Number.isFinite(refundCash) || refundCash <= 0) continue
         if (!Number.isFinite(availableCash) || availableCash < refundCash) throw new Error('REFUND_PLAN_INVALID')
-        const idempotencyKey = await stableIdempotencyKey(`cancel-refund:${policyActionId}:${payment.parent_transaction_id}:${refundCash.toFixed(2)}`)
+
+        const { data: parent, error: parentError } = await client
+          .from('payment_transactions')
+          .select('provider_payment_id, provider_payload_json')
+          .eq('id', payment.parent_transaction_id)
+          .single()
+        if (parentError) throw new Error(parentError.message)
+        const payload = parent?.provider_payload_json && typeof parent.provider_payload_json === 'object'
+          ? parent.provider_payload_json as Record<string, unknown>
+          : {}
+        const orderId = String(parent?.provider_payment_id ?? payload.id ?? '').trim()
+        const transactionId = String(payment.provider_payment_id ?? '').trim()
+        if (!orderId || !transactionId) throw new Error('MERCADO_PAGO_REFUND_IDENTIFIERS_MISSING')
+
+        const idempotencyKey = await stableIdempotencyKey(`cancel-order-refund:${policyActionId}:${payment.parent_transaction_id}:${refundCash.toFixed(2)}`)
         let provider: { status: number; data: Record<string, unknown> }
         try {
-          provider = await mercadoPagoRefund({ paymentId: payment.provider_payment_id, amount: refundCash, fullAvailableAmount: availableCash, idempotencyKey })
+          provider = await mercadoPagoRefund({ orderId, transactionId, amount: refundCash, fullAvailableAmount: availableCash, idempotencyKey })
         } catch (cause) {
           const code = cause instanceof Error ? cause.message.split(':')[0] : 'MERCADO_PAGO_REFUND_PROVIDER_ERROR'
           await notifyRefundFailure(req, { appointmentId: initial.appointment_id, policyActionId, actorAuthUserId: admin.authUserId, errorCode: code, refundAmount: pendingAmount })
           return json({ error: { code: 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE' }, policy_action_id: policyActionId, completed: results }, 503)
         }
-        const snapshot = refundSnapshot(provider.data)
+
         if (provider.status < 200 || provider.status >= 300) {
-          const code = provider.status >= 500 ? 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE' : 'MERCADO_PAGO_REFUND_REJECTED'
+          const temporary = provider.status >= 500 || provider.status === 423 || provider.status === 425 || provider.status === 429
+          const code = temporary ? 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE' : 'MERCADO_PAGO_REFUND_REJECTED'
+          const providerError = providerErrorSnapshot(provider.data)
           await notifyRefundFailure(req, { appointmentId: initial.appointment_id, policyActionId, actorAuthUserId: admin.authUserId, errorCode: code, refundAmount: pendingAmount })
-          return json({ error: { code, provider: { http_status: provider.status, ...snapshot } }, policy_action_id: policyActionId, completed: results }, provider.status >= 500 ? 503 : 422)
+          return json({ error: { code, provider: { http_status: provider.status, ...providerError } }, policy_action_id: policyActionId, completed: results }, temporary ? 503 : 422)
         }
+
+        const snapshot = orderRefundSnapshot(provider.data, transactionId)
         const providerRefundId = typeof snapshot.id === 'string' ? snapshot.id : ''
         const providerPaymentId = typeof snapshot.payment_id === 'string' ? snapshot.payment_id : ''
         const providerAmount = Number(snapshot.amount)
-        if (!providerRefundId || providerPaymentId !== payment.provider_payment_id) {
+        const providerRefundStatus = String(snapshot.status ?? '').toLowerCase()
+        if (!providerRefundId || providerPaymentId !== transactionId) {
           await notifyRefundFailure(req, { appointmentId: initial.appointment_id, policyActionId, actorAuthUserId: admin.authUserId, errorCode: 'MERCADO_PAGO_REFUND_ID_MISMATCH', refundAmount: pendingAmount })
           throw new Error('MERCADO_PAGO_REFUND_ID_MISMATCH')
         }
@@ -347,6 +390,11 @@ Deno.serve(async (req) => {
           await notifyRefundFailure(req, { appointmentId: initial.appointment_id, policyActionId, actorAuthUserId: admin.authUserId, errorCode: 'MERCADO_PAGO_REFUND_AMOUNT_MISMATCH', refundAmount: pendingAmount })
           throw new Error('MERCADO_PAGO_REFUND_AMOUNT_MISMATCH')
         }
+        if (providerRefundStatus && !['processed', 'approved', 'refunded'].includes(providerRefundStatus)) {
+          await notifyRefundFailure(req, { appointmentId: initial.appointment_id, policyActionId, actorAuthUserId: admin.authUserId, errorCode: 'MERCADO_PAGO_REFUND_PROCESSING', refundAmount: pendingAmount })
+          return json({ error: { code: 'MERCADO_PAGO_REFUND_PROCESSING', provider: { http_status: provider.status, ...snapshot } }, policy_action_id: policyActionId, completed: results }, 202)
+        }
+
         const { data: recorded, error: recordError } = await client.rpc('service_record_cancellation_provider_refund', {
           p_policy_action_id: policyActionId,
           p_parent_transaction_id: payment.parent_transaction_id,
