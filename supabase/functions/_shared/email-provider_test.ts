@@ -86,6 +86,27 @@ Deno.test('provider adapter preserves rendered payload and idempotency contract'
   assert(capturedInit?.body === JSON.stringify(payload), 'rendered provider payload changed in transport')
 })
 
+Deno.test('provider adapter canonicalizes legacy manage-booking links before delivery', async () => {
+  let capturedInit: RequestInit | undefined
+  await sendEmailWithProvider({
+    from: 'BlackSheep <agenda@example.test>',
+    to: ['cliente@example.test'],
+    subject: 'Reserva confirmada',
+    text: 'Gerencie: https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=abc123&scope=RESCHEDULE',
+    html: '<a href="https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=abc123&scope=RESCHEDULE">Gerenciar</a>',
+  }, 'notification:test:canonical-manage-link', {
+    apiKey: 'test-key',
+    fetchImpl: (async (_input: string | URL | Request, init?: RequestInit) => {
+      capturedInit = init
+      return new Response(JSON.stringify({ id: 'provider-message-link' }), { status: 200 })
+    }) as typeof fetch,
+  })
+
+  const body = String(capturedInit?.body ?? '')
+  assert(!body.includes('/reserva/gerenciar?token='), 'legacy manage-booking URL reached the provider')
+  assert(body.includes('/gerenciar-reserva#token=abc123&scope=RESCHEDULE'), 'canonical fragment manage-booking URL was not sent')
+})
+
 Deno.test('provider rejection becomes a stable failure code for delivery history', async () => {
   let code = ''
   try {
