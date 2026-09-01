@@ -18,11 +18,18 @@ export type EmailProviderPayload = {
 const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails'
 const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000
 const DEFAULT_NOTIFICATION_FROM_BLACKSHEEP = 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>'
+const LEGACY_MANAGE_PREFIX = 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token='
+const CANONICAL_MANAGE_PREFIX = 'https://www.blacksheepestudiocriativo.com.br/gerenciar-reserva#token='
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim() ?? ''
   if (!value) throw new Error(`MISSING_ENV:${name}`)
   return value
+}
+
+function normalizeReservationManageLinks(value: string | undefined): string | undefined {
+  if (typeof value !== 'string' || !value.includes(LEGACY_MANAGE_PREFIX)) return value
+  return value.split(LEGACY_MANAGE_PREFIX).join(CANONICAL_MANAGE_PREFIX)
 }
 
 export function emailProviderName(): 'RESEND' {
@@ -87,6 +94,12 @@ export async function sendEmailWithProvider(
   if (!payload.subject.trim()) throw new Error('EMAIL_PROVIDER_SUBJECT_REQUIRED')
   if (!idempotencyKey.trim()) throw new Error('EMAIL_PROVIDER_IDEMPOTENCY_KEY_REQUIRED')
 
+  const providerPayload: EmailProviderPayload = {
+    ...payload,
+    text: normalizeReservationManageLinks(payload.text),
+    html: normalizeReservationManageLinks(payload.html),
+  }
+
   const apiKey = options.apiKey?.trim() || requiredEnv('RESEND_API_KEY')
   const fetchImpl = options.fetchImpl ?? fetch
   const controller = new AbortController()
@@ -101,7 +114,7 @@ export async function sendEmailWithProvider(
         'content-type': 'application/json',
         'idempotency-key': idempotencyKey,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(providerPayload),
       signal: controller.signal,
     })
   } catch (error) {
