@@ -147,7 +147,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
     .maybeSingle()
   if (lookupError) throw new Error('NOTIFICATION_DELIVERY_LOG_LOOKUP_FAILED')
 
-  if (existing?.status === 'SENT') {
+  if (existing?.status === 'SENT' || existing?.provider_message_id) {
     return { id: String(existing.id), alreadySent: true, providerMessageId: existing.provider_message_id ?? null }
   }
 
@@ -162,7 +162,10 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
       is_test: input.isTest === true,
       recipient_masked: recipientMasked,
       updated_at: new Date().toISOString(),
-    }).eq('id', existing.id)
+    })
+      .eq('id', existing.id)
+      .neq('status', 'SENT')
+      .is('provider_message_id', null)
     if (error) throw new Error('NOTIFICATION_DELIVERY_LOG_UPDATE_FAILED')
     return { id: String(existing.id), alreadySent: false, providerMessageId: null }
   }
@@ -204,5 +207,8 @@ export async function markNotificationFailed(client: any, logId: string, error: 
     status: 'FAILED',
     last_error_code: code.slice(0, 120),
     updated_at: new Date().toISOString(),
-  }).eq('id', logId)
+  })
+    .eq('id', logId)
+    .neq('status', 'SENT')
+    .is('provider_message_id', null)
 }
