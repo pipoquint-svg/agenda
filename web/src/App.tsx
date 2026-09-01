@@ -81,7 +81,7 @@ export function App() {
   if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
   if (path.startsWith('/admin/demand')) return <DemandCaptureAdmin />
   if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicBookingRoute slug="sabrina" />
-  if (path === '/agendar/blacksheep' || path === '/agenda') return <PublicBookingRoute slug="blacksheep" />
+  if (path === '/agendar/blacksheep' || path === '/agendamento' || path === '/agenda') return <PublicBookingRoute slug="blacksheep" />
   if (path === '/pre-reserva/confirmar' || path === '/confirmar-pre-reserva') return <PreReservationPaymentPage />
   if (path === '/reserva/gerenciar' || path === '/gerenciar-reserva') return <ManageReservation />
   if (path === '/reserva/saldo' || path === '/pagar-saldo') return <BalanceCollectionPage />
