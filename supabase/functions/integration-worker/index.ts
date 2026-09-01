@@ -1,6 +1,8 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 
 const INTERNAL_CALL_TIMEOUT_MS = 15_000
+const GOOGLE_SYNC_TIMEOUT_MS = 45_000
+const GOOGLE_FULL_WINDOW_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
 
 function requireInternal(req: Request): string {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
@@ -23,7 +25,8 @@ async function invokeFunction<T = Record<string, unknown>>(name: string, secret:
   if (!base) throw new Error('MISSING_ENV:SUPABASE_URL')
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), INTERNAL_CALL_TIMEOUT_MS)
+  const timeoutMs = name === 'google-sync' ? GOOGLE_SYNC_TIMEOUT_MS : INTERNAL_CALL_TIMEOUT_MS
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
   let response: Response
   try {
     response = await fetch(`${base}/functions/v1/${name}`, {
@@ -109,12 +112,33 @@ Deno.serve(async (req) => {
       if (mappingsError) throw new Error('GOOGLE_CALENDAR_MAPPING_LOOKUP_FAILED')
       calendarIds = [...new Set((mappings ?? []).map((row: any) => String(row.google_calendar_id)).filter(Boolean))]
       const minuteBucket = Math.floor(Date.now() / 60000)
+      const fullWindowBucket = Math.floor(Date.now() / GOOGLE_FULL_WINDOW_REFRESH_MS)
+
+      const syncStateByCalendar = new Map<string, { last_full_sync_at?: string | null }>()
+      if (calendarIds.length > 0) {
+        const { data: syncStates, error: syncStatesError } = await client
+          .from('google_sync_state')
+          .select('google_calendar_id, last_full_sync_at')
+          .in('google_calendar_id', calendarIds)
+        if (syncStatesError) throw new Error('GOOGLE_SYNC_STATE_LOOKUP_FAILED')
+        for (const state of syncStates ?? []) syncStateByCalendar.set(String(state.google_calendar_id), state)
+      }
 
       for (const calendarId of calendarIds) {
+        const state = syncStateByCalendar.get(calendarId)
+        const lastFullMs = state?.last_full_sync_at ? Date.parse(state.last_full_sync_at) : Number.NaN
+        const fullWindowDue = !Number.isFinite(lastFullMs) || Date.now() - lastFullMs >= GOOGLE_FULL_WINDOW_REFRESH_MS
+        const idempotencyKey = fullWindowDue
+          ? `google-window-full:${calendarId}:${fullWindowBucket}`
+          : `google-reconcile:${calendarId}:${minuteBucket}`
+        const payload = fullWindowDue
+          ? { source: 'PERIODIC_WINDOW_REFRESH', force_full: true, window_bucket: fullWindowBucket }
+          : { source: 'PERIODIC_RECONCILIATION', minute_bucket: minuteBucket }
+
         const { error: enqueueError } = await client.rpc('enqueue_google_calendar_sync', {
           p_google_calendar_id: calendarId,
-          p_idempotency_key: `google-reconcile:${calendarId}:${minuteBucket}`,
-          p_payload_json: { source: 'PERIODIC_RECONCILIATION', minute_bucket: minuteBucket },
+          p_idempotency_key: idempotencyKey,
+          p_payload_json: payload,
         })
         if (enqueueError) throw new Error('GOOGLE_RECONCILIATION_ENQUEUE_FAILED')
       }
@@ -160,15 +184,42 @@ Deno.serve(async (req) => {
       jobs = claimedJobs ?? []
     }
 
+    // A webhook and periodic reconciliation can legitimately enqueue several sync jobs
+    // for the same calendar. Execute one per claimed batch, preferring force_full, and
+    // finish the redundant jobs without issuing competing Google sync requests.
+    const primaryGoogleSyncJob = new Map<string, any>()
+    for (const job of jobs) {
+      if (job.job_type !== 'GOOGLE_CALENDAR_SYNC') continue
+      const key = String(job.entity_id)
+      const current = primaryGoogleSyncJob.get(key)
+      if (!current || (job.payload_json?.force_full === true && current.payload_json?.force_full !== true)) {
+        primaryGoogleSyncJob.set(key, job)
+      }
+    }
+
     let succeeded = 0
     let retried = 0
     let failed = 0
     let discardedStale = 0
+    let coalescedGoogleSyncs = 0
 
     for (const job of jobs) {
       try {
         if (job.job_type === 'GOOGLE_CALENDAR_SYNC') {
           if (!googleIntegrationEnabled) throw new Error('GOOGLE_INTEGRATION_DISABLED')
+          const primary = primaryGoogleSyncJob.get(String(job.entity_id))
+          if (primary?.id !== job.id) {
+            await client.rpc('finish_integration_job', {
+              p_job_id: job.id,
+              p_worker_id: workerId,
+              p_succeeded: true,
+              p_error: null,
+              p_retry_after_seconds: null,
+            })
+            succeeded += 1
+            coalescedGoogleSyncs += 1
+            continue
+          }
           const forceFull = job.payload_json?.force_full === true
           await invokeFunction('google-sync', secret, { google_calendar_id: job.entity_id, force_full: forceFull })
         } else if (job.job_type === 'GOOGLE_APPOINTMENT_SYNC') {
@@ -236,6 +287,7 @@ Deno.serve(async (req) => {
       calendars_reconciled: calendarIds.length,
       claimed: jobs.length,
       succeeded,
+      coalesced_google_syncs: coalescedGoogleSyncs,
       discarded_stale: discardedStale,
       retried,
       failed,
