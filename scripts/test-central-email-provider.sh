@@ -4,6 +4,7 @@ set -euo pipefail
 root='supabase/functions'
 provider_file="$root/_shared/email-provider.ts"
 provider_test_file="$root/_shared/email-provider_test.ts"
+confirmation_file="$root/email-send/platform.ts"
 
 fail_matches() {
   local pattern="$1"
@@ -30,7 +31,7 @@ grep -Fq "return 'RESEND'" "$provider_file" || {
   exit 1
 }
 
-grep -Fq "sendEmailWithProvider" "$root/email-send/index.ts"
+grep -Fq "sendEmailWithProvider" "$confirmation_file"
 grep -Fq "sendEmailWithProvider" "$root/balance-collection-notify-email/index.ts"
 grep -Fq "sendEmailWithProvider" "$root/birthday-email-worker/index.ts"
 grep -Fq "sendEmailWithProvider" "$root/auth-send-email/index.ts"
