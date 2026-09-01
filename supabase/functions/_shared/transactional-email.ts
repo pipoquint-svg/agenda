@@ -24,11 +24,18 @@ export function isScopeEnabled(scope: string, configuredScopes: string | null | 
   return csvSet(configuredScopes).has(scope.trim().toLowerCase())
 }
 
+function isAgendaProductionProject(): boolean {
+  const url = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
+  return url === 'https://sbexdggbwqvyhbkatucs.supabase.co'
+}
+
 export function isRecipientAllowed(
   recipient: string,
   allowRealRecipients: boolean,
   allowlist: string | null | undefined,
 ): boolean {
-  if (allowRealRecipients) return true
+  // Produção da Agenda envia notificações transacionais para clientes reais.
+  // Demais ambientes continuam restritos à allowlist, salvo opt-in explícito por env.
+  if (allowRealRecipients || isAgendaProductionProject()) return true
   return csvSet(allowlist).has(normalizedEmail(recipient))
 }
