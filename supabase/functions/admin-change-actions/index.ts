@@ -147,6 +147,36 @@ async function notifyRefundFailure(req: Request, input: {
   }
 }
 
+async function notifyRefundCompleted(req: Request, input: {
+  appointmentId: string
+  policyActionId: string
+  refundAmount: number
+}): Promise<void> {
+  const baseUrl = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/+$/, '')
+  const internalSecret = Deno.env.get('INTEGRATION_INTERNAL_SECRET') ?? ''
+  const authorization = req.headers.get('authorization') ?? ''
+  if (!baseUrl || !internalSecret || !authorization || !Number.isFinite(input.refundAmount) || input.refundAmount <= 0) return
+  try {
+    const response = await fetch(`${baseUrl}/functions/v1/email-send`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'x-internal-secret': internalSecret,
+      },
+      body: JSON.stringify({
+        reason: 'REFUND_COMPLETED',
+        appointment_id: input.appointmentId,
+        policy_action_id: input.policyActionId,
+        refund_amount: input.refundAmount,
+      }),
+    })
+    if (!response.ok) console.error('[OPERATION_ALERT] REFUND_COMPLETED_NOTIFICATION_FAILED', { status: response.status })
+  } catch (error) {
+    console.error('[OPERATION_ALERT] REFUND_COMPLETED_NOTIFICATION_FAILED', { code: error instanceof Error ? error.message : 'UNKNOWN' })
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -333,7 +363,16 @@ Deno.serve(async (req) => {
       const { data: finalData, error: finalError } = await client.rpc('service_get_cancellation_refund_plan', { p_policy_action_id: policyActionId })
       if (finalError) throw new Error(finalError.message)
       const finalPlan = finalData as RefundPlan
-      return json({ policy_action_id: policyActionId, appointment_id: finalPlan.appointment_id, refund_status: finalPlan.status, refunded_now: results, remaining_refund_cash: finalPlan.remaining_refund_cash, manual_refund_cash: finalPlan.manual_refund_cash, completed: Number(finalPlan.remaining_refund_cash) <= 0.01 })
+      const completed = Number(finalPlan.remaining_refund_cash) <= 0.01
+      const refundedAmount = Number(finalPlan.recorded_refund_cash ?? 0)
+      if (completed && Number.isFinite(refundedAmount) && refundedAmount > 0) {
+        await notifyRefundCompleted(req, {
+          appointmentId: finalPlan.appointment_id,
+          policyActionId,
+          refundAmount: refundedAmount,
+        })
+      }
+      return json({ policy_action_id: policyActionId, appointment_id: finalPlan.appointment_id, refund_status: finalPlan.status, refunded_now: results, remaining_refund_cash: finalPlan.remaining_refund_cash, manual_refund_cash: finalPlan.manual_refund_cash, completed })
     }
 
     throw new Error('ADMIN_CHANGE_ACTION_INVALID')
