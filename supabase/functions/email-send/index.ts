@@ -146,6 +146,116 @@ async function sendRefundFailedNotification(client: any, body: Record<string, un
   }
 }
 
+async function sendRefundCompletedNotification(client: any, body: Record<string, unknown>) {
+  const appointmentId = String(body.appointment_id ?? '').trim()
+  const policyActionId = String(body.policy_action_id ?? '').trim()
+  const refundAmount = numeric(body.refund_amount)
+  if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
+  if (!policyActionId) throw new Error('POLICY_ACTION_ID_REQUIRED')
+  if (!Number.isFinite(refundAmount) || refundAmount <= 0) throw new Error('REFUND_AMOUNT_REQUIRED')
+  if (!isEnabled()) return jsonResponse({ skipped: true, reason: 'TRANSACTIONAL_EMAIL_DISABLED' })
+
+  const { data: appointment, error: appointmentError } = await client
+    .from('appointments')
+    .select('id,public_code,service_id,primary_customer_id')
+    .eq('id', appointmentId)
+    .maybeSingle()
+  if (appointmentError || !appointment) throw new Error('APPOINTMENT_LOOKUP_FAILED')
+  if (!appointment.primary_customer_id) return jsonResponse({ skipped: true, reason: 'EMAIL_CUSTOMER_MISSING' })
+
+  const [{ data: service, error: serviceError }, { data: customer, error: customerError }] = await Promise.all([
+    client.from('services').select('id,operation_scope').eq('id', appointment.service_id).maybeSingle(),
+    client.from('customers').select('id,name,email').eq('id', appointment.primary_customer_id).maybeSingle(),
+  ])
+  if (serviceError || !service) throw new Error('SERVICE_LOOKUP_FAILED')
+  if (customerError || !customer) throw new Error('CUSTOMER_LOOKUP_FAILED')
+
+  const scope = String(service.operation_scope ?? '').trim().toUpperCase()
+  if (!isScopeEnabled(scope, Deno.env.get('TRANSACTIONAL_EMAIL_SCOPES'))) {
+    return jsonResponse({ skipped: true, reason: 'EMAIL_SCOPE_DISABLED', operation_scope: scope })
+  }
+  const sender = notificationSenderForScope(scope)
+  if (!sender) return jsonResponse({ skipped: true, reason: 'EMAIL_SCOPE_SENDER_NOT_CONFIGURED', operation_scope: scope })
+
+  const recipient = normalizedEmail(customer.email)
+  if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    return jsonResponse({ skipped: true, reason: 'EMAIL_RECIPIENT_MISSING_OR_INVALID' })
+  }
+  if (!isRecipientAllowed(recipient, allowRealRecipients(), Deno.env.get('EMAIL_TEST_RECIPIENT_ALLOWLIST'))) {
+    return jsonResponse({ skipped: true, reason: 'EMAIL_RECIPIENT_NOT_ALLOWLISTED', recipient_masked: maskEmail(recipient) })
+  }
+
+  const eventKey = 'REFUND_COMPLETED'
+  const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template_v2', {
+    p_event_key: eventKey,
+    p_channel: 'EMAIL',
+    p_audience: 'CUSTOMER',
+    p_service_id: appointment.service_id,
+  })
+  if (resolverError) throw new Error('NOTIFICATION_TEMPLATE_RESOLUTION_FAILED')
+  const template = (Array.isArray(rows) ? rows[0] : null) as NotificationTemplate | null
+  if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+
+  const { data: operationSettings } = await client.rpc('service_admin_get_operation_settings_v2', {
+    p_operation_scope: scope,
+  })
+  const values: Record<string, string> = {
+    'appointment.public_code': String(appointment.public_code ?? ''),
+    'customer.name': String(customer.name ?? ''),
+    'refund.amount': money(refundAmount),
+    'operation.name': String(operationSettings?.public_name ?? sender.brandName),
+  }
+  const message = renderNotificationMessage(template, values, sender.brandName)
+  const providerIdempotencyKey = `notification:${template.id}:${policyActionId}:EMAIL:CUSTOMER`
+  const delivery = await beginNotificationDelivery(client, {
+    templateId: template.id,
+    eventKey,
+    audience: 'CUSTOMER',
+    appointmentId,
+    customerId: customer.id,
+    recipient,
+    idempotencyKey: providerIdempotencyKey,
+    payloadSnapshot: {
+      template_id: template.id,
+      appointment_id: appointmentId,
+      policy_action_id: policyActionId,
+      refund_amount: refundAmount,
+      operation_scope: scope,
+    },
+  })
+  if (delivery.alreadySent) {
+    return jsonResponse({ skipped: true, reason: 'NOTIFICATION_ALREADY_SENT', provider_message_id: delivery.providerMessageId })
+  }
+
+  const providerPayload: EmailProviderPayload = {
+    from: sender.from,
+    to: [recipient],
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  }
+  if (sender.replyTo) providerPayload.reply_to = sender.replyTo
+
+  try {
+    const providerMessageId = await sendEmailWithProvider(providerPayload, providerIdempotencyKey)
+    await markNotificationSent(client, delivery.id, providerMessageId)
+    return jsonResponse({
+      skipped: false,
+      reason: eventKey,
+      appointment_id: appointmentId,
+      policy_action_id: policyActionId,
+      operation_scope: scope,
+      recipient_masked: maskEmail(recipient),
+      provider: 'RESEND',
+      provider_message_id: providerMessageId,
+      template_id: template.id,
+    })
+  } catch (sendError) {
+    await markNotificationFailed(client, delivery.id, sendError)
+    throw sendError
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
@@ -158,6 +268,9 @@ Deno.serve(async (req) => {
 
     if (reason === 'REFUND_FAILED') {
       return await sendRefundFailedNotification(client, body)
+    }
+    if (reason === 'REFUND_COMPLETED') {
+      return await sendRefundCompletedNotification(client, body)
     }
 
     const appointmentId = String(body.appointment_id ?? '').trim()
