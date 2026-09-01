@@ -107,8 +107,8 @@ select is(
 
 select is(
   (public.get_google_appointment_desired_state('94000000-0000-0000-0000-000000000070')->>'summary'),
-  'Ensaio Gestante',
-  'managed event title uses service snapshot without customer PII'
+  'Ensaio Gestante - Cliente',
+  'managed event title uses service snapshot plus the customer label used operationally'
 );
 
 update public.appointments
