@@ -39,6 +39,7 @@ type CalendarListResponse = {
 }
 
 type UserInfo = { email?: string; id?: string }
+type OwnerType = 'GENERAL' | 'EMPLOYEE'
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim()
@@ -46,17 +47,16 @@ function requiredEnv(name: string): string {
   return value
 }
 
+function uuidOrNull(value: unknown): string | null {
+  const text = typeof value === 'string' ? value.trim() : ''
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text) ? text : null
+}
+
 function successUrl(): string {
   const value = requiredEnv('GOOGLE_OAUTH_SUCCESS_URL')
   const url = new URL(value)
   if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('GOOGLE_OAUTH_SUCCESS_URL_INVALID')
   return url.toString()
-}
-
-function allowedAccountEmail(): string {
-  const value = requiredEnv('GOOGLE_ALLOWED_ACCOUNT_EMAIL').toLowerCase()
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) throw new Error('GOOGLE_ALLOWED_ACCOUNT_EMAIL_INVALID')
-  return value
 }
 
 function redirectResult(base: string, status: 'success' | 'error', code?: string): Response {
@@ -68,15 +68,31 @@ function redirectResult(base: string, status: 'success' | 'error', code?: string
 
 async function start(req: Request): Promise<Response> {
   const { adminId } = await requireAdminPermission(req, 'INTEGRATIONS_MANAGE')
-  allowedAccountEmail()
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>
+  const ownerType: OwnerType = body.owner_type === 'EMPLOYEE' ? 'EMPLOYEE' : 'GENERAL'
+  const employeeId = ownerType === 'EMPLOYEE' ? uuidOrNull(body.employee_id) : null
+  if (ownerType === 'EMPLOYEE' && !employeeId) throw new Error('GOOGLE_EMPLOYEE_ID_REQUIRED')
+
   const destination = successUrl()
   const rawState = randomSecret(32)
   const stateHash = await sha256Hex(rawState)
   const client = adminClient()
+
+  if (employeeId) {
+    const { data: employee, error: employeeError } = await client
+      .from('employees')
+      .select('id,is_active')
+      .eq('id', employeeId)
+      .maybeSingle()
+    if (employeeError || !employee || !employee.is_active) throw new Error('GOOGLE_EMPLOYEE_NOT_ACTIVE')
+  }
+
   const { error } = await client.from('google_oauth_states').insert({
     state_hash: stateHash,
     requested_by_admin_user_id: adminId,
     success_url: destination,
+    owner_type: ownerType,
+    employee_id: employeeId,
     expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   })
   if (error) throw new Error('GOOGLE_OAUTH_STATE_CREATE_FAILED')
@@ -100,17 +116,39 @@ async function callback(url: URL): Promise<Response> {
   if (!code) return redirectResult(destination, 'error', 'GOOGLE_OAUTH_CODE_MISSING')
 
   try {
+    const ownerType: OwnerType = stateData?.owner_type === 'EMPLOYEE' ? 'EMPLOYEE' : 'GENERAL'
+    const employeeId = ownerType === 'EMPLOYEE' ? uuidOrNull(stateData?.employee_id) : null
+    if (ownerType === 'EMPLOYEE' && !employeeId) throw new Error('GOOGLE_OAUTH_OWNER_INVALID')
+
     const tokens = await exchangeAuthorizationCode(code)
     const userInfo = await googleJson<UserInfo>('https://www.googleapis.com/oauth2/v2/userinfo', tokens.access_token)
     if (!userInfo.email) throw new Error('GOOGLE_ACCOUNT_EMAIL_UNAVAILABLE')
     const accountEmail = userInfo.email.trim().toLowerCase()
-    if (accountEmail !== allowedAccountEmail()) throw new Error('GOOGLE_ACCOUNT_NOT_ALLOWED')
 
-    const { data: existing } = await client
+    const { data: existing, error: existingError } = await client
       .from('google_connections')
-      .select('id, refresh_token_ciphertext')
+      .select('id,refresh_token_ciphertext,status,owner_type,employee_id')
       .eq('account_email', accountEmail)
       .maybeSingle()
+    if (existingError) throw new Error('GOOGLE_CONNECTION_LOOKUP_FAILED')
+
+    if (existing?.status === 'ACTIVE') {
+      const sameOwner = existing.owner_type === ownerType
+        && (ownerType === 'GENERAL' || existing.employee_id === employeeId)
+      if (!sameOwner) throw new Error('GOOGLE_ACCOUNT_ALREADY_ASSIGNED')
+    }
+
+    let ownerQuery = client
+      .from('google_connections')
+      .select('id,account_email')
+      .eq('owner_type', ownerType)
+      .eq('status', 'ACTIVE')
+    ownerQuery = ownerType === 'EMPLOYEE'
+      ? ownerQuery.eq('employee_id', employeeId as string)
+      : ownerQuery.is('employee_id', null)
+    const { data: activeOwners, error: ownerError } = await ownerQuery.limit(2)
+    if (ownerError) throw new Error('GOOGLE_OWNER_LOOKUP_FAILED')
+    if ((activeOwners ?? []).some((row) => row.id !== existing?.id)) throw new Error('GOOGLE_OWNER_ALREADY_CONNECTED')
 
     let refreshCiphertext = existing?.refresh_token_ciphertext ?? null
     if (tokens.refresh_token) refreshCiphertext = await encryptRefreshToken(tokens.refresh_token)
@@ -124,6 +162,8 @@ async function callback(url: URL): Promise<Response> {
         refresh_token_ciphertext: refreshCiphertext,
         token_encryption_version: 1,
         scopes: tokens.scope ? tokens.scope.split(' ') : GOOGLE_SCOPES,
+        owner_type: ownerType,
+        employee_id: employeeId,
         status: 'ACTIVE',
         last_error: null,
         updated_at: new Date().toISOString(),
@@ -172,15 +212,26 @@ async function callback(url: URL): Promise<Response> {
 
     const { data: knownCalendars } = await client
       .from('google_calendars')
-      .select('id, google_calendar_id')
+      .select('id,google_calendar_id')
       .eq('google_connection_id', connection.id)
       .eq('is_active', true)
 
     for (const known of knownCalendars ?? []) {
       if (!returnedIds.includes(known.google_calendar_id)) {
-        await client.from('google_calendars').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', known.id)
+        await client.from('google_calendars')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', known.id)
       }
     }
+
+    await client.from('audit_logs').insert({
+      admin_user_id: stateData?.admin_user_id ?? null,
+      entity_type: 'GOOGLE_CONNECTION',
+      entity_id: connection.id,
+      action: 'GOOGLE_ACCOUNT_CONNECTED',
+      after_json: { owner_type: ownerType, employee_id: employeeId, account_email: accountEmail },
+      origin: 'ADMIN',
+    })
 
     return redirectResult(destination, 'success')
   } catch (error) {
