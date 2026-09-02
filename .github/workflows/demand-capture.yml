@@ -17,6 +17,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test historical secret classification
+        run: bash scripts/test-preprod-secret-history-scan.sh
+
       - name: Historical secret scan
         run: |
           set -o pipefail
