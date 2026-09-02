@@ -3,7 +3,7 @@ POLICY|legacy_amelia_bookings|legacy_amelia_bookings_admin_select|PERMISSIVE|{au
 POLICY|legacy_amelia_import_batches|legacy_amelia_import_batches_admin_select|PERMISSIVE|{authenticated}|SELECT|(EXISTS ( SELECT 1 FROM admin_users au WHERE ((au.auth_user_id = ( SELECT auth.uid() AS uid)) AND au.is_active)))|<NULL>
 TABLE|admin_user_permissions|true|false
 TABLE|admin_users|true|false
-TABLE|appointment_access_tokens|false|false
+TABLE|appointment_access_tokens|true|false
 TABLE|appointment_answers|false|false
 TABLE|appointment_authorship_events|true|false
 TABLE|appointment_balance_collections|true|false
@@ -20,8 +20,8 @@ TABLE|appointment_term_acceptances|false|false
 TABLE|appointment_token_events|true|false
 TABLE|appointment_token_network_evidence|true|false
 TABLE|appointment_token_network_purge_runs|true|false
-TABLE|appointments|false|false
-TABLE|audit_logs|false|false
+TABLE|appointments|true|false
+TABLE|audit_logs|true|false
 TABLE|audit_purge_runs|false|false
 TABLE|audit_retention_policy|false|false
 TABLE|availability_exceptions|false|false
@@ -34,7 +34,7 @@ TABLE|booking_page_services|true|false
 TABLE|booking_pages|true|false
 TABLE|categories|false|false
 TABLE|checkout_customer_verifications|true|false
-TABLE|checkout_holds|false|false
+TABLE|checkout_holds|true|false
 TABLE|checkout_hour_package_reservations|false|false
 TABLE|coupon_services|false|false
 TABLE|coupons|false|false
@@ -45,16 +45,16 @@ TABLE|customer_balance_refund_requests|true|false
 TABLE|customer_commercial_terms|false|false
 TABLE|customer_identity_keys|true|false
 TABLE|customer_prebook_authorized_services|false|false
-TABLE|customers|false|false
+TABLE|customers|true|false
 TABLE|demand_capture|true|false
 TABLE|employees|false|false
 TABLE|extra_resources|false|false
 TABLE|extras|false|false
 TABLE|feature_flags|true|false
-TABLE|google_calendar_events|false|false
+TABLE|google_calendar_events|true|false
 TABLE|google_calendar_resources|false|false
 TABLE|google_calendars|false|false
-TABLE|google_connections|false|false
+TABLE|google_connections|true|false
 TABLE|google_oauth_states|false|false
 TABLE|google_sync_state|false|false
 TABLE|google_watch_channels|false|false
@@ -80,9 +80,9 @@ TABLE|operation_service_types|true|false
 TABLE|operation_setting_overrides|true|false
 TABLE|operation_settings|false|false
 TABLE|payment_incidents|false|false
-TABLE|payment_provider_events|false|false
-TABLE|payment_transactions|false|false
-TABLE|pre_reservation_access_tokens|false|false
+TABLE|payment_provider_events|true|false
+TABLE|payment_transactions|true|false
+TABLE|pre_reservation_access_tokens|true|false
 TABLE|pre_reservations|false|false
 TABLE|pricing_rules|false|false
 TABLE|public_rate_limit_buckets|false|false
