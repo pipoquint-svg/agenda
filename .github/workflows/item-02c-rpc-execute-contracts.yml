@@ -1,0 +1,80 @@
+name: Item 2C RPC Execute Contracts
+
+on:
+  push:
+    branches:
+      - fix/item-02c-rpc-execute-contracts
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
+      - 'tests/acl-parity/item02c_acl_overlay.sql'
+      - 'scripts/test-item02c-rpc-execute-contracts.sh'
+      - 'scripts/test-database-core-gates.sh'
+      - 'scripts/test-item02a-database-gates.sh'
+      - 'supabase/tests/database/027_admin_change_policies.test.sql'
+      - 'supabase/tests/database/039_admin_service_audit_hardening.test.sql'
+      - 'supabase/tests/database/042_audit_logs_append_only.test.sql'
+      - 'supabase/tests/database/050_appointment_token_authorship.test.sql'
+      - '.github/workflows/item-02c-rpc-execute-contracts.yml'
+      - '.github/workflows/item-02a-acl-baseline.yml'
+      - 'docs/item-02c-rpc-execute-contracts.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  execute-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Prove exact Item 2C failures before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
+          parked='/tmp/item02c-harden-service-role-execute-contracts.sql'
+          test -f "$migration"
+          mv "$migration" "$parked"
+          restore_migration() {
+            if [[ -f "$parked" ]]; then
+              mv "$parked" "$migration"
+            fi
+          }
+          trap restore_migration EXIT
+
+          supabase db reset
+          bash scripts/test-item02c-rpc-execute-contracts.sh before
+
+          restore_migration
+          trap - EXIT
+
+      - name: Rebuild with Item 2C migration
+        run: supabase db reset
+
+      - name: Prove Item 2C ACL and pgTAP assertions pass
+        run: bash scripts/test-item02c-rpc-execute-contracts.sh after
+
+      - name: Run complete strict database test contract
+        run: bash scripts/test-database-core-gates.sh
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
