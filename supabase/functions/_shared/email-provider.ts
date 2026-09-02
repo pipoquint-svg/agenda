@@ -27,7 +27,9 @@ function requiredEnv(name: string): string {
   return value
 }
 
-function normalizeReservationManageLinks(value: string | undefined): string | undefined {
+export function normalizeReservationManageLinks(value: null): null
+export function normalizeReservationManageLinks(value: string | undefined): string | undefined
+export function normalizeReservationManageLinks(value: string | null | undefined): string | null | undefined {
   if (typeof value !== 'string' || !value.includes(LEGACY_MANAGE_PREFIX)) return value
   return value.split(LEGACY_MANAGE_PREFIX).join(CANONICAL_MANAGE_PREFIX)
 }
