@@ -30,11 +30,14 @@ function optionalEnv(name: string): string {
  * Every provider read and financial mutation uses the official production-scoped
  * Access Token. Financial mutations additionally require ALLOW_REAL_CHARGES.
  *
+ * Local verification is the only exception: APP_ENV=local_verification returns a
+ * non-secret placeholder token and the shared transport intercepts every provider
+ * request in-process. The production branch below remains unchanged.
+ *
  * `accessToken` is accepted only so older call sites remain type-compatible during
  * the deployment cutover. Its value is deliberately ignored and can never authorize
  * a provider request. The environment return type keeps the historical union solely
- * so defensive live/test-event branches continue to type-check; this function still
- * rejects every environment other than `production` at runtime.
+ * so defensive live/test-event branches continue to type-check.
  */
 export function mercadoPagoRuntime(input: {
   environment?: string | null
@@ -43,7 +46,14 @@ export function mercadoPagoRuntime(input: {
   allowRealCharges?: string | null
   creatingCharge?: boolean
 }): MercadoPagoRuntime {
+  const appEnv = optionalEnv('APP_ENV').toLowerCase()
   const environment = clean(input.environment).toLowerCase()
+
+  if (appEnv === 'local_verification') {
+    if (environment !== 'local_verification') throw new Error('MERCADO_PAGO_ENV_INVALID')
+    return { environment: 'sandbox', accessToken: 'LOCAL_ONLY_mercado_pago_access_token' }
+  }
+
   if (environment !== 'production') throw new Error('MERCADO_PAGO_ENV_INVALID')
 
   const accessToken = input.productionAccessToken !== undefined
