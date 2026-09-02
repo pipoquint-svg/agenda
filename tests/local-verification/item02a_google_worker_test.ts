@@ -136,7 +136,8 @@ Deno.test('Phase 2B RLS: Google sync reads connection and mutates calendar mirro
   }, [201])
 
   // Seed one external mirror row using the same service-role path used by internal
-  // workers. A full sync with an empty provider response must actively cancel it,
+  // workers. A confirmed non-all-day event must have a valid interval by schema.
+  // Full sync with an empty provider response must then actively cancel it,
   // proving an observable worker-side write to google_calendar_events behind RLS.
   await requestJson(`${API_URL}/rest/v1/google_calendar_events`, {
     method: 'POST',
@@ -146,6 +147,9 @@ Deno.test('Phase 2B RLS: Google sync reads connection and mutates calendar mirro
       google_event_id: externalEventId,
       status: 'confirmed',
       summary: 'Local Item 2B external mirror',
+      is_all_day: false,
+      start_at: '2035-11-10T10:00:00-03:00',
+      end_at: '2035-11-10T11:00:00-03:00',
       managed_by_agenda: false,
       normalized_payload: { source: 'local_item02b_rls_test' },
     }),
