@@ -1,0 +1,137 @@
+name: Item 2B Sensitive RLS
+
+on:
+  push:
+    branches:
+      - fix/item-02b-sensitive-rls
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260902210000_enable_sensitive_table_rls.sql'
+      - 'supabase/tests/database/141_sensitive_rls_deny_by_default.test.sql'
+      - 'scripts/test-item02b-sensitive-rls.sh'
+      - 'tests/rls-parity/production_rls_baseline.txt'
+      - 'supabase/functions/_shared/local-verification.ts'
+      - 'tests/local-verification/item02a_google_worker_test.ts'
+      - '.github/workflows/item-02b-sensitive-rls.yml'
+      - 'docs/item-02b-sensitive-rls.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sensitive-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Prove exact Item 2B failures before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260902210000_enable_sensitive_table_rls.sql'
+          parked='/tmp/item02b-enable-sensitive-table-rls.sql'
+          test -f "$migration"
+          mv "$migration" "$parked"
+          restore_migration() {
+            if [[ -f "$parked" ]]; then
+              mv "$parked" "$migration"
+            fi
+          }
+          trap restore_migration EXIT
+
+          supabase db reset
+          bash scripts/test-item02b-sensitive-rls.sh before
+
+          restore_migration
+          trap - EXIT
+
+      - name: Rebuild with Item 2B migration
+        run: supabase db reset
+
+      - name: Prove all Item 2B RLS assertions pass
+        run: bash scripts/test-item02b-sensitive-rls.sh after
+
+      - name: Run complete strict database test contract
+        run: bash scripts/test-database-core-gates.sh
+
+      - name: Reset clean database for Google worker RLS E2E
+        run: supabase db reset
+
+      - name: Serve local-only Edge Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-local-verification-env.sh supabase/functions/.env.local-verification.example
+          supabase functions serve \
+            --env-file supabase/functions/.env.local-verification.example \
+            > /tmp/item02b-functions.log 2>&1 &
+          echo $! > /tmp/item02b-functions.pid
+
+          eval "$(supabase status -o env)"
+          ready=false
+          for _ in $(seq 1 60); do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --request OPTIONS \
+              --header "apikey: $ANON_KEY" \
+              "$API_URL/functions/v1/booking-hold" || true)"
+            if [[ "$status" == "200" || "$status" == "204" ]]; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$(cat /tmp/item02b-functions.pid)" >/dev/null 2>&1; then
+              cat /tmp/item02b-functions.log >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != 'true' ]]; then
+            cat /tmp/item02b-functions.log >&2
+            exit 1
+          fi
+
+      - name: Prove Google worker reads and writes behind RLS via service_role
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          export LOCAL_API_URL="$API_URL"
+          export LOCAL_ANON_KEY="$ANON_KEY"
+          export LOCAL_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          deno test \
+            --allow-env=LOCAL_API_URL,LOCAL_ANON_KEY,LOCAL_SERVICE_ROLE_KEY \
+            --allow-net=127.0.0.1:54321,localhost:54321 \
+            tests/local-verification/item02a_google_worker_test.ts
+
+      - name: Show local function log on failure
+        if: failure()
+        run: cat /tmp/item02b-functions.log || true
+
+      - name: Stop local services
+        if: always()
+        run: |
+          if [[ -f /tmp/item02b-functions.pid ]]; then
+            kill "$(cat /tmp/item02b-functions.pid)" >/dev/null 2>&1 || true
+          fi
+          supabase stop --no-backup || true

@@ -86,11 +86,19 @@ async function createAdminSession(): Promise<string> {
   const authUserId = String(created.id ?? created.user?.id ?? '')
   assert(/^[0-9a-f-]{36}$/i.test(authUserId), 'local auth admin must be created')
 
-  await requestJson(`${API_URL}/rest/v1/rpc/qa_register_local_verification_admin`, {
+  // Register the Auth user in the real admin RBAC table using the internal
+  // service-role path. Do not depend on a qa_* RPC that is absent after a clean
+  // migration rebuild and must never be introduced into the production schema.
+  await requestJson(`${API_URL}/rest/v1/admin_users`, {
     method: 'POST',
-    headers: serviceRoleHeaders(),
-    body: JSON.stringify({ p_auth_user_id: authUserId }),
-  })
+    headers: serviceRoleHeaders({ prefer: 'return=minimal' }),
+    body: JSON.stringify({
+      auth_user_id: authUserId,
+      display_name: 'Local Google RLS Admin',
+      role: 'ADMIN',
+      is_active: true,
+    }),
+  }, [201])
 
   const session = await requestJson(`${API_URL}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -102,9 +110,10 @@ async function createAdminSession(): Promise<string> {
   return token
 }
 
-Deno.test('Phase 2A ACL baseline: Google sync worker reads and writes through service_role using only local provider transport', async () => {
+Deno.test('Phase 2B RLS: Google sync reads connection and mutates calendar mirror through audited service-role paths', async () => {
   const connectionId = '99200000-0000-0000-0000-000000000010'
   const calendarId = '99200000-0000-0000-0000-000000000020'
+  const externalEventId = 'LOCAL_ONLY_item02b_external_event'
   const encryptedRefreshToken = await encryptLocalRefreshToken('LOCAL_ONLY_google_refresh_token')
 
   await requestJson(`${API_URL}/rest/v1/google_connections`, {
@@ -134,6 +143,33 @@ Deno.test('Phase 2A ACL baseline: Google sync worker reads and writes through se
     }),
   }, [201])
 
+  // Seed one external mirror row using the same service-role path used by internal
+  // workers. A confirmed non-all-day event must have a valid interval by schema.
+  // Full sync with an empty provider response must then actively cancel it,
+  // proving an observable worker-side write to google_calendar_events behind RLS.
+  await requestJson(`${API_URL}/rest/v1/google_calendar_events`, {
+    method: 'POST',
+    headers: serviceRoleHeaders({ prefer: 'return=minimal' }),
+    body: JSON.stringify({
+      google_calendar_id: calendarId,
+      google_event_id: externalEventId,
+      status: 'confirmed',
+      summary: 'Local Item 2B external mirror',
+      is_all_day: false,
+      start_at: '2035-11-10T10:00:00-03:00',
+      end_at: '2035-11-10T11:00:00-03:00',
+      managed_by_agenda: false,
+      normalized_payload: { source: 'local_item02b_rls_test' },
+    }),
+  }, [201])
+
+  const beforeMirror = await requestJson(
+    `${API_URL}/rest/v1/google_calendar_events?google_calendar_id=eq.${calendarId}&google_event_id=eq.${externalEventId}&select=google_event_id,status,qualification,managed_by_agenda`,
+    { method: 'GET', headers: serviceRoleHeaders() },
+  )
+  assert(Array.isArray(beforeMirror) && beforeMirror.length === 1, `external mirror seed must exist: ${JSON.stringify(beforeMirror)}`)
+  assert(beforeMirror[0].status === 'confirmed', `external mirror must start confirmed: ${JSON.stringify(beforeMirror[0])}`)
+
   const adminToken = await createAdminSession()
   const sync = await requestJson(`${API_URL}/functions/v1/google-sync`, {
     method: 'POST',
@@ -148,7 +184,16 @@ Deno.test('Phase 2A ACL baseline: Google sync worker reads and writes through se
   assert(sync.google_calendar_id === calendarId, `worker must return local calendar id: ${JSON.stringify(sync)}`)
   assert(sync.mode === 'FULL', `worker must execute full local sync: ${JSON.stringify(sync)}`)
   assert(sync.health_status === 'HEALTHY', `worker must finish healthy: ${JSON.stringify(sync)}`)
-  assert(Number(sync.processed) === 0, `empty Google mock must process zero events: ${JSON.stringify(sync)}`)
+  assert(Number(sync.processed) === 0, `empty Google mock must process zero provider events: ${JSON.stringify(sync)}`)
+
+  const afterMirror = await requestJson(
+    `${API_URL}/rest/v1/google_calendar_events?google_calendar_id=eq.${calendarId}&google_event_id=eq.${externalEventId}&select=google_event_id,status,qualification,managed_by_agenda`,
+    { method: 'GET', headers: serviceRoleHeaders() },
+  )
+  assert(Array.isArray(afterMirror) && afterMirror.length === 1, `external mirror must remain queryable: ${JSON.stringify(afterMirror)}`)
+  assert(afterMirror[0].status === 'cancelled', `full-sync worker must cancel unseen external mirror: ${JSON.stringify(afterMirror[0])}`)
+  assert(afterMirror[0].qualification === 'CANCELLED', `full-sync worker must persist cancelled qualification: ${JSON.stringify(afterMirror[0])}`)
+  assert(afterMirror[0].managed_by_agenda === false, `external mirror must remain unmanaged: ${JSON.stringify(afterMirror[0])}`)
 
   const states = await requestJson(
     `${API_URL}/rest/v1/google_sync_state?google_calendar_id=eq.${calendarId}&select=google_calendar_id,sync_token,health_status,last_success_at`,
@@ -158,4 +203,11 @@ Deno.test('Phase 2A ACL baseline: Google sync worker reads and writes through se
   assert(states[0].health_status === 'HEALTHY', `sync state must be healthy: ${JSON.stringify(states[0])}`)
   assert(states[0].sync_token === 'LOCAL_ONLY_sync_token', `mock sync token must be persisted: ${JSON.stringify(states[0])}`)
   assert(Boolean(states[0].last_success_at), `last_success_at must be persisted: ${JSON.stringify(states[0])}`)
+
+  const connections = await requestJson(
+    `${API_URL}/rest/v1/google_connections?id=eq.${connectionId}&select=id,status`,
+    { method: 'GET', headers: serviceRoleHeaders() },
+  )
+  assert(Array.isArray(connections) && connections.length === 1, `Google connection must remain available behind RLS: ${JSON.stringify(connections)}`)
+  assert(connections[0].status === 'ACTIVE', `successful sync must keep Google connection active: ${JSON.stringify(connections[0])}`)
 })
