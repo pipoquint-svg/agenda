@@ -14,18 +14,18 @@ create temporary table _external_buffer_test_services (
 
 with physical_resource as (
   insert into public.resources (name, resource_type, is_active)
-  values ('TEST external buffer studio', 'PHYSICAL', true)
+  values ('TEST external buffer studio ' || gen_random_uuid()::text, 'PHYSICAL', true)
   returning id
 ), person_resource as (
   insert into public.resources (name, resource_type, is_active)
-  values ('TEST external buffer person', 'PERSON', true)
+  values ('TEST external buffer person ' || gen_random_uuid()::text, 'PERSON', true)
   returning id
 ), service_row as (
   insert into public.services (
     name,
     slug,
     base_duration_minutes,
-    price,
+    base_price,
     buffer_before_minutes,
     buffer_after_minutes,
     minimum_people,
@@ -34,8 +34,8 @@ with physical_resource as (
     maximum_booking_horizon_days,
     duration_mode,
     booking_block_minutes,
-    min_duration_blocks,
-    max_duration_blocks,
+    minimum_booking_blocks,
+    maximum_booking_blocks,
     price_per_block,
     is_active
   )
