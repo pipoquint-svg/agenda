@@ -1,6 +1,7 @@
 import { chromium } from '@playwright/test'
 
 const baseUrl = process.env.ADMIN_SMOKE_BASE_URL ?? 'http://127.0.0.1:4173'
+const expectedEnvironment = (process.env.EXPECT_ENVIRONMENT_BANNER ?? '').trim().toLowerCase()
 const routes = [
   '/admin',
   '/admin/dashboard',
@@ -54,6 +55,16 @@ try {
       throw new Error(`${route}: empty administrative surface after render timeout`)
     }
     if (pageErrors.length) throw new Error(`${route}: pageerror: ${pageErrors.join(' | ')}`)
+
+    if (expectedEnvironment) {
+      const banner = page.locator('[data-environment-banner]')
+      if (await banner.count() !== 1) throw new Error(`${route}: environment banner missing`)
+      const marker = (await banner.getAttribute('data-environment-banner'))?.trim().toLowerCase()
+      if (marker !== expectedEnvironment) {
+        throw new Error(`${route}: environment banner mismatch (${marker ?? 'missing'})`)
+      }
+    }
+
     console.log(`ok ${route}`)
   }
 } finally {

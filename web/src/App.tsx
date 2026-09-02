@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactElement } from 'react'
 import { AdminBalancesPage } from './AdminBalancesPage'
 import { AdminDashboard } from './AdminDashboard'
 import { AgendaAdmin } from './AgendaAdmin'
@@ -40,6 +40,33 @@ function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: strin
   return <><DemandCaptureForm brand={brand} campaign={campaign} /><TrackingConsentBanner /></>
 }
 
+function EnvironmentBanner() {
+  const environment = String(import.meta.env.VITE_APP_ENV ?? 'production').trim().toLowerCase()
+  if (!environment || environment === 'production') return null
+  return (
+    <div
+      data-environment-banner={environment}
+      role="status"
+      style={{
+        position: 'fixed',
+        top: 8,
+        right: 8,
+        zIndex: 10000,
+        padding: '6px 10px',
+        borderRadius: 999,
+        background: '#111',
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: '.04em',
+        boxShadow: '0 2px 8px rgba(0,0,0,.2)',
+      }}
+    >
+      AMBIENTE {environment.toUpperCase()} — DADOS DE TESTE
+    </div>
+  )
+}
+
 function applicationPath(): string {
   const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
   let path = window.location.pathname.replace(/\/+$/, '') || '/'
@@ -49,37 +76,38 @@ function applicationPath(): string {
 
 export function App() {
   const path = applicationPath()
+  const adminPage = (content: ReactElement) => <><EnvironmentBanner />{content}</>
 
-  if (path.startsWith('/gestao/recuperar-senha')) return <PasswordRecoveryPage />
-  if (path.startsWith('/gestao/recursos')) return <ResourceAdmin />
-  if (path.startsWith('/gestao/profissionais')) return <EmployeeAdmin />
-  if (path.startsWith('/gestao/configuracoes-avancadas')) return <ServiceSettingsAdmin />
-  if (path.startsWith('/gestao/configuracoes/operacao')) return <OperationSettingsAdmin />
-  if (path === '/gestao/configuracoes') return <GestaoSettingsPage />
-  if (path.startsWith('/gestao/catalogo')) return <ServiceCatalogAdmin />
-  if (path.startsWith('/gestao/agenda')) return <AgendaAdmin />
-  if (path.startsWith('/gestao/clientes')) return <CustomerAdmin />
-  if (path.startsWith('/gestao/pagamentos')) return <AdminBalancesPage />
-  if (path.startsWith('/gestao/cupons')) return <CouponAdmin />
-  if (path.startsWith('/gestao/notificacoes')) return <NotificationsAdmin />
-  if (path.startsWith('/gestao/aniversarios')) return <BirthdaySettingsAdmin />
-  if (path.startsWith('/gestao/saude')) return <OpsHealthAdmin />
-  if (path.startsWith('/gestao/demand')) return <DemandCaptureAdmin />
-  if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return <GestaoEntry />
+  if (path.startsWith('/gestao/recuperar-senha')) return adminPage(<PasswordRecoveryPage />)
+  if (path.startsWith('/gestao/recursos')) return adminPage(<ResourceAdmin />)
+  if (path.startsWith('/gestao/profissionais')) return adminPage(<EmployeeAdmin />)
+  if (path.startsWith('/gestao/configuracoes-avancadas')) return adminPage(<ServiceSettingsAdmin />)
+  if (path.startsWith('/gestao/configuracoes/operacao')) return adminPage(<OperationSettingsAdmin />)
+  if (path === '/gestao/configuracoes') return adminPage(<GestaoSettingsPage />)
+  if (path.startsWith('/gestao/catalogo')) return adminPage(<ServiceCatalogAdmin />)
+  if (path.startsWith('/gestao/agenda')) return adminPage(<AgendaAdmin />)
+  if (path.startsWith('/gestao/clientes')) return adminPage(<CustomerAdmin />)
+  if (path.startsWith('/gestao/pagamentos')) return adminPage(<AdminBalancesPage />)
+  if (path.startsWith('/gestao/cupons')) return adminPage(<CouponAdmin />)
+  if (path.startsWith('/gestao/notificacoes')) return adminPage(<NotificationsAdmin />)
+  if (path.startsWith('/gestao/aniversarios')) return adminPage(<BirthdaySettingsAdmin />)
+  if (path.startsWith('/gestao/saude')) return adminPage(<OpsHealthAdmin />)
+  if (path.startsWith('/gestao/demand')) return adminPage(<DemandCaptureAdmin />)
+  if (path === '/gestao' || path.startsWith('/gestao/dashboard')) return adminPage(<GestaoEntry />)
 
-  if (path.startsWith('/admin/pagamentos')) return <AdminBalancesPage />
-  if (path.startsWith('/admin/cupons')) return <CouponAdmin />
-  if (path.startsWith('/admin/clientes')) return <CustomerAdmin />
-  if (path.startsWith('/admin/funcionarios')) return <EmployeeAdmin />
-  if (path.startsWith('/admin/notificacoes')) return <NotificationsAdmin />
-  if (path.startsWith('/admin/aniversarios')) return <BirthdaySettingsAdmin />
-  if (path.startsWith('/admin/saude')) return <OpsHealthAdmin />
-  if (path === '/admin' || path.startsWith('/admin/dashboard')) return <AdminDashboard />
-  if (path.startsWith('/admin/configuracoes-avancadas')) return <ServiceSettingsAdmin />
-  if (path.startsWith('/admin/configuracoes')) return <OperationSettingsAdmin />
-  if (path.startsWith('/admin/catalogo')) return <ServiceCatalogAdmin />
-  if (path.startsWith('/admin/agenda')) return <AgendaAdmin />
-  if (path.startsWith('/admin/demand')) return <DemandCaptureAdmin />
+  if (path.startsWith('/admin/pagamentos')) return adminPage(<AdminBalancesPage />)
+  if (path.startsWith('/admin/cupons')) return adminPage(<CouponAdmin />)
+  if (path.startsWith('/admin/clientes')) return adminPage(<CustomerAdmin />)
+  if (path.startsWith('/admin/funcionarios')) return adminPage(<EmployeeAdmin />)
+  if (path.startsWith('/admin/notificacoes')) return adminPage(<NotificationsAdmin />)
+  if (path.startsWith('/admin/aniversarios')) return adminPage(<BirthdaySettingsAdmin />)
+  if (path.startsWith('/admin/saude')) return adminPage(<OpsHealthAdmin />)
+  if (path === '/admin' || path.startsWith('/admin/dashboard')) return adminPage(<AdminDashboard />)
+  if (path.startsWith('/admin/configuracoes-avancadas')) return adminPage(<ServiceSettingsAdmin />)
+  if (path.startsWith('/admin/configuracoes')) return adminPage(<OperationSettingsAdmin />)
+  if (path.startsWith('/admin/catalogo')) return adminPage(<ServiceCatalogAdmin />)
+  if (path.startsWith('/admin/agenda')) return adminPage(<AgendaAdmin />)
+  if (path.startsWith('/admin/demand')) return adminPage(<DemandCaptureAdmin />)
   if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep' || path === '/agendamento' || path === '/agenda') return <PublicBookingRoute slug="blacksheep" />
   if (path === '/pre-reserva/confirmar' || path === '/confirmar-pre-reserva') return <PreReservationPaymentPage />

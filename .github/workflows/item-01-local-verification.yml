@@ -1,0 +1,250 @@
+name: Item 1 Local Verification
+
+on:
+  push:
+    branches:
+      - fix/item-01-local-homologation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Prove local safety guard
+        run: |
+          bash scripts/test-local-verification-safety.sh
+          deno test --allow-env supabase/functions/_shared/local-verification_test.ts
+
+      - name: Run existing Edge helper suite
+        run: |
+          deno test supabase/functions/_shared/action-token-security_test.ts
+          deno test supabase/functions/_shared/audit-csv_test.ts
+          deno test --allow-env supabase/functions/_shared/google_test.ts
+          deno test supabase/functions/_shared/github-oidc_test.ts
+          deno test supabase/functions/_shared/kommo_test.ts
+          deno test supabase/functions/_shared/managed-event_test.ts
+          deno test supabase/functions/_shared/mercado-pago_test.ts
+          deno test supabase/functions/_shared/mercado-pago-webhook-signature-regression_test.ts
+          deno test supabase/functions/_shared/mercado-pago-runtime_test.ts
+          deno test supabase/functions/_shared/public-rate-limit_test.ts
+          deno test supabase/functions/_shared/transactional-email_test.ts
+          deno test supabase/functions/_shared/notification-email_test.ts
+          deno test --allow-env supabase/functions/_shared/email-provider_test.ts
+
+      - name: Type-check every Edge Function
+        run: |
+          mapfile -d '' edge_files < <(find supabase/functions -mindepth 2 -maxdepth 2 -name index.ts -print0 | sort -z)
+          if [[ ${#edge_files[@]} -eq 0 ]]; then
+            echo "No Edge Functions found" >&2
+            exit 1
+          fi
+          for file in "${edge_files[@]}"; do
+            deno check "$file"
+          done
+
+      - name: Run existing static gates
+        run: |
+          bash scripts/test-central-email-provider.sh
+          bash scripts/test-unified-notification-platform.sh
+          bash scripts/test-no-kommo-guard-runtime-coupling.sh
+          grep -Fq "client.rpc('expire_due_appointment_holds')" supabase/functions/integration-worker/index.ts
+          grep -Fq "client.rpc('expire_unconfirmed_free_visits')" supabase/functions/integration-worker/index.ts
+          grep -Fq "PAYMENT_AFTER_EXPIRATION" supabase/tests/database/009_payment_state_machine.test.sql
+
+          runtime_file='supabase/functions/_shared/mercado-pago-runtime.ts'
+          grep -Fq "if (environment !== 'production')" "$runtime_file"
+          grep -Fq "optionalEnv('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')" "$runtime_file"
+          grep -Fq "throw new Error('MISSING_ENV:MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN')" "$runtime_file"
+          grep -Fq "throw new Error('REAL_CHARGES_DISABLED')" "$runtime_file"
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Rebuild database from migrations
+        run: supabase db reset
+
+      - name: Validate existing Gestão critical fixture
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -q <<'SQL'
+          begin;
+          \i supabase/fixtures/gestao-critical.sql
+          do $$
+          declare
+            v_result jsonb;
+          begin
+            v_result := public.qa_create_gestao_appointment('2035-01-15 10:00:00-03'::timestamptz);
+            if coalesce(v_result->>'status', '') <> 'CONFIRMED' then
+              raise exception 'GESTAO_CRITICAL_FIXTURE_INVALID: %', v_result;
+            end if;
+          end
+          $$;
+          rollback;
+          SQL
+
+      - name: Run pgTAP database tests
+        run: supabase test db
+
+      - name: Run existing concurrency suite
+        run: |
+          bash scripts/test-concurrency.sh
+          bash scripts/test-pre-reservation-concurrency.sh
+          bash scripts/test-package-concurrency.sh
+          bash scripts/test-rate-limit-concurrency.sh
+
+      - name: Reset disposable stack for action-token HTTP gate
+        run: supabase db reset
+
+      - name: Run existing action-token HTTP gate
+        run: bash scripts/test-action-token-http-ephemeral.sh
+
+      - name: Reset database for Item 1 rental E2E
+        run: supabase db reset
+
+      - name: Load rental-only local fixture
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/fixtures/locacao-local-verification.sql
+
+      - name: Serve all Edge Functions with local-only provider transport
+        run: |
+          set -euo pipefail
+          bash scripts/verify-local-verification-env.sh supabase/functions/.env.local-verification.example
+          eval "$(supabase status -o env)"
+          export LOCAL_API_URL="$API_URL"
+          export LOCAL_ANON_KEY="$ANON_KEY"
+          export LOCAL_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+
+          supabase functions serve \
+            --env-file supabase/functions/.env.local-verification.example \
+            > /tmp/item01-functions.log 2>&1 &
+          serve_pid=$!
+          cleanup() {
+            kill "$serve_pid" >/dev/null 2>&1 || true
+            wait "$serve_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in $(seq 1 60); do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --request OPTIONS \
+              --header "apikey: $ANON_KEY" \
+              "$API_URL/functions/v1/booking-hold" || true)"
+            if [[ "$status" == "200" || "$status" == "204" ]]; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$serve_pid" >/dev/null 2>&1; then
+              cat /tmp/item01-functions.log >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [[ "$ready" != "true" ]]; then
+            cat /tmp/item01-functions.log >&2
+            exit 1
+          fi
+
+          if ! deno test \
+            --allow-env=LOCAL_API_URL,LOCAL_ANON_KEY,LOCAL_SERVICE_ROLE_KEY \
+            --allow-net=127.0.0.1:54321,localhost:54321 \
+            tests/local-verification/item01_e2e_test.ts; then
+            echo '--- local PostgREST payment apply diagnostic ---' >&2
+            deno run \
+              --allow-env=LOCAL_API_URL,LOCAL_SERVICE_ROLE_KEY \
+              --allow-net=127.0.0.1:54321,localhost:54321 \
+              tests/local-verification/payment-apply-postgrest-diagnostic.ts || true
+            cat /tmp/item01-functions.log >&2
+            exit 1
+          fi
+
+      - name: Stop local Supabase
+        if: always()
+        run: |
+          if command -v supabase >/dev/null 2>&1; then
+            supabase stop --no-backup || true
+          fi
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check web
+        run: npm run check
+
+      - name: Build production bundle
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key
+          VITE_MERCADO_PAGO_PUBLIC_KEY: TEST-public-key
+          VITE_APP_ENV: production
+        run: npm run build
+
+      - name: Build local-verification bundle
+        env:
+          VITE_SUPABASE_URL: http://127.0.0.1:54321
+          VITE_SUPABASE_PUBLISHABLE_KEY: local-public-key
+          VITE_MERCADO_PAGO_PUBLIC_KEY: LOCAL_ONLY_public_key
+          VITE_APP_ENV: local_verification
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run admin browser smoke with visible environment marker
+        env:
+          EXPECT_ENVIRONMENT_BANNER: local_verification
+        run: |
+          set -euo pipefail
+          npx vite preview --host 127.0.0.1 --port 4173 > /tmp/agenda-vite-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/admin >/dev/null; then break; fi
+            if [[ "$attempt" -eq 30 ]]; then
+              cat /tmp/agenda-vite-preview.log
+              exit 1
+            fi
+            sleep 1
+          done
+          npm run smoke:admin-browser

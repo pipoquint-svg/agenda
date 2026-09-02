@@ -1,4 +1,7 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { installLocalVerificationTransport } from './local-verification.ts'
+
+installLocalVerificationTransport()
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name)
