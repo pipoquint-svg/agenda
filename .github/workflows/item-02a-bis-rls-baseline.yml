@@ -1,17 +1,12 @@
 name: Item 2A-bis RLS Baseline
 
 on:
-  push:
-    branches:
-      - fix/item-02a-bis-rls-baseline
   pull_request:
     branches: [main]
-    paths:
-      - 'supabase/migrations/20260902190000_reconcile_public_rls_baseline.sql'
-      - 'scripts/rls-inventory.sql'
-      - 'tests/rls-parity/production_rls_baseline.txt'
-      - '.github/workflows/item-02a-bis-rls-baseline.yml'
-      - 'docs/item-02a-bis-rls-baseline.md'
+  push:
+    branches:
+      - main
+      - fix/item-02a-bis-rls-baseline
   workflow_dispatch:
 
 permissions:
@@ -41,7 +36,7 @@ jobs:
       - name: Rebuild strictly from migrations
         run: supabase db reset
 
-      - name: Compare complete public RLS state with production baseline
+      - name: Compare complete public RLS state with authoritative baseline
         shell: bash
         run: |
           set -euo pipefail
@@ -51,6 +46,15 @@ jobs:
           diff -u tests/rls-parity/production_rls_baseline.txt /tmp/local-rls-baseline.txt \
             | tee /tmp/rls-parity.diff
           test ! -s /tmp/rls-parity.diff
+
+      - name: Upload RLS parity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-rls-parity-evidence
+          path: /tmp/rls-parity.diff
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Stop local Supabase
         if: always()
