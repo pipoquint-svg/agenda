@@ -1,0 +1,100 @@
+name: Production Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full 40-character main SHA to deploy
+        required: true
+        type: string
+      deploy_database:
+        description: Apply pending versioned database migrations
+        required: true
+        default: true
+        type: boolean
+      deploy_edge_functions:
+        description: Deploy Edge Functions from the same SHA
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agenda-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require exact main SHA and an explicit deploy scope
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          DEPLOY_DATABASE: ${{ inputs.deploy_database }}
+          DEPLOY_EDGE_FUNCTIONS: ${{ inputs.deploy_edge_functions }}
+        run: |
+          set -euo pipefail
+          test "$EVENT_REF" = 'refs/heads/main'
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_SHA" = "$EVENT_SHA"
+          if [[ "$DEPLOY_DATABASE" != 'true' && "$DEPLOY_EDGE_FUNCTIONS" != 'true' ]]; then
+            echo 'At least one deploy scope must be selected.' >&2
+            exit 1
+          fi
+
+  rebuild:
+    needs: validate-release
+    uses: ./.github/workflows/db-core.yml
+
+  deploy:
+    needs: [validate-release, rebuild]
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: sbexdggbwqvyhbkatucs
+      DEPLOY_DATABASE: ${{ inputs.deploy_database }}
+      DEPLOY_EDGE_FUNCTIONS: ${{ inputs.deploy_edge_functions }}
+    steps:
+      - name: Checkout exact gated SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Verify checkout and deployment credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          if [[ "$DEPLOY_DATABASE" == 'true' ]]; then
+            test -n "$SUPABASE_DB_PASSWORD"
+          fi
+
+      - name: Link production database
+        if: ${{ inputs.deploy_database }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Preview pending database migrations
+        if: ${{ inputs.deploy_database }}
+        run: supabase db push --linked --dry-run
+
+      - name: Apply pending versioned database migrations
+        if: ${{ inputs.deploy_database }}
+        run: supabase db push --linked --yes
+
+      - name: Deploy Edge Functions from gated SHA
+        if: ${{ inputs.deploy_edge_functions }}
+        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF"
