@@ -1,6 +1,7 @@
 name: Database Core
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
   push:
@@ -9,7 +10,7 @@ on:
 jobs:
   core-db:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -127,6 +128,22 @@ jobs:
       - name: Rebuild database from migrations
         run: supabase db reset
 
+      - name: Validate current ACL and RLS contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          DB_URL='postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/acl-parity/item02c_acl_overlay.sql \
+            | tee /tmp/db-core-acl-overlay.log
+          grep -Fxq 'ITEM02C_ACL_OVERLAY_OK' /tmp/db-core-acl-overlay.log
+
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f scripts/rls-inventory.sql \
+            | sed '/^[[:space:]]*$/d' > /tmp/db-core-rls-baseline.txt
+          diff -u tests/rls-parity/production_rls_baseline.txt /tmp/db-core-rls-baseline.txt \
+            | tee /tmp/db-core-rls.diff
+          test ! -s /tmp/db-core-rls.diff
+
       - name: Validate Gestão critical E2E fixture
         run: |
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -q <<'SQL'
@@ -160,9 +177,6 @@ jobs:
       - name: Run distributed rate-limit concurrency test
         run: bash scripts/test-rate-limit-concurrency.sh
 
-      # The HTTP gate intentionally creates action-token/access evidence. Give it a
-      # fresh disposable DB after all authoritative suites so neither side can leak
-      # state into the other. The runner is destroyed immediately afterwards.
       - name: Reset disposable stack for action-token HTTP gate
         run: supabase db reset
 

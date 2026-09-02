@@ -1,0 +1,55 @@
+name: Item 2D Mandatory Deploy Gate
+
+on:
+  push:
+    branches:
+      - fix/item-02d-mandatory-deploy-gate
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/db-core.yml'
+      - '.github/workflows/production-deploy.yml'
+      - '.github/workflows/item-02d-deploy-gate.yml'
+      - 'scripts/test-production-deploy-gate.sh'
+      - 'tests/acl-parity/item02c_acl_overlay.sql'
+      - 'tests/rls-parity/production_rls_baseline.txt'
+      - 'scripts/rls-inventory.sql'
+      - 'scripts/test-database-core-gates.sh'
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - 'docs/item-02d-deploy-gate.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-negative-proofs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Prove deploy contract and fail-closed negative cases
+        run: bash scripts/test-production-deploy-gate.sh
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+  canonical-rebuild:
+    uses: ./.github/workflows/db-core.yml
