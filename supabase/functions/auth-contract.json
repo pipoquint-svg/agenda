@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "project_ref": "sbexdggbwqvyhbkatucs",
+  "production_baseline": {
+    "captured_on": "2026-09-02",
+    "active_total": 63,
+    "verify_jwt_false": 48,
+    "verify_jwt_true": 15,
+    "versioned_active": 58,
+    "production_orphans": 5,
+    "versioned_inactive": 11
+  },
+  "verify_jwt_true_modes": [
+    "gateway_admin"
+  ],
+  "deployable": {
+    "custom_admin": [
+      "admin-agenda",
+      "admin-appointment-actions",
+      "admin-appointment-timeline",
+      "admin-audit-log",
+      "admin-customer-balance",
+      "admin-dashboard",
+      "admin-finance",
+      "admin-finance-minimal",
+      "admin-google",
+      "admin-hour-packages",
+      "admin-integrations",
+      "admin-operation-settings",
+      "admin-pre-reservations",
+      "admin-read-models",
+      "admin-reschedule-actions",
+      "admin-resource-settings",
+      "admin-service-settings",
+      "admin-team-members",
+      "admin-waitlist",
+      "demand-capture-admin"
+    ],
+    "dual_admin_internal": [
+      "google-sync",
+      "google-watch"
+    ],
+    "fastlane_secret": [
+      "google-appointment-fastlane"
+    ],
+    "gateway_admin": [
+      "admin-balance-collections",
+      "admin-birthday-settings",
+      "admin-change-actions",
+      "admin-coupons",
+      "admin-customers",
+      "admin-employees",
+      "admin-notifications",
+      "admin-ops-health",
+      "admin-service-duplicate",
+      "admin-service-payment-policy",
+      "admin-service-public-notice",
+      "admin-special-calendar"
+    ],
+    "github_oidc": [
+      "integration-worker-trigger"
+    ],
+    "google_channel_token": [
+      "google-webhook"
+    ],
+    "google_oauth_state": [
+      "google-oauth"
+    ],
+    "internal_secret": [
+      "balance-collection-notify-email",
+      "balance-collection-provider-cancel",
+      "balance-collection-worker",
+      "birthday-email-worker",
+      "email-send",
+      "google-appointment-sync",
+      "integration-worker",
+      "kommo-sync"
+    ],
+    "mercado_pago_signature": [
+      "mercado-pago-webhook"
+    ],
+    "public_rate_limited": [
+      "appointment-action-access",
+      "appointment-calendar",
+      "balance-collection-access",
+      "booking-checkout",
+      "booking-hold",
+      "booking-submit",
+      "demand-capture",
+      "mercado-pago-payment",
+      "prebook-access",
+      "waitlist-signup"
+    ],
+    "standard_webhooks": [
+      "auth-send-email"
+    ]
+  },
+  "inactive": {
+    "github_oidc": [
+      "birthday-automation-trigger"
+    ],
+    "public_rate_limited": [
+      "payment-preview"
+    ],
+    "retired_tombstone": [
+      "email-e2e-gate",
+      "email-live-status",
+      "email-provider-probe",
+      "kommo-card-provider-gate",
+      "kommo-guard-discovery",
+      "kommo-guard-inspect",
+      "kommo-provider-probe",
+      "kommo-token-sender-once",
+      "mercado-pago-card-staging"
+    ]
+  },
+  "production_orphans": {
+    "admin-contracts-auth-smoke-temp": {
+      "verify_jwt": true,
+      "expected_status": 410
+    },
+    "admin-finance-auth-smoke-temp": {
+      "verify_jwt": true,
+      "expected_status": 410
+    },
+    "guard-kommo-secret-migrate-20260901": {
+      "verify_jwt": false,
+      "expected_status": 410
+    },
+    "mercado-pago-readiness-probe-temp": {
+      "verify_jwt": false,
+      "expected_status": 410
+    },
+    "owner-magiclink-bootstrap-temp": {
+      "verify_jwt": true,
+      "expected_status": 410
+    }
+  }
+}
