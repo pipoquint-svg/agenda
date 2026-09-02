@@ -95,6 +95,18 @@ jobs:
         if: ${{ inputs.deploy_database }}
         run: supabase db push --linked --yes
 
-      - name: Deploy Edge Functions from gated SHA
+      - name: Validate Edge Function auth and deploy allowlist
         if: ${{ inputs.deploy_edge_functions }}
-        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF"
+        run: python3 scripts/edge-auth-contract.py after
+
+      - name: Deploy allowlisted Edge Functions from gated SHA
+        if: ${{ inputs.deploy_edge_functions }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t functions < <(python3 scripts/edge-auth-contract.py list-deployable)
+          test "${#functions[@]}" -gt 0
+          for slug in "${functions[@]}"; do
+            echo "Deploying ${slug}"
+            supabase functions deploy "$slug" --project-ref "$SUPABASE_PROJECT_REF"
+          done

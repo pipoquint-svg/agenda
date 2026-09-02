@@ -32,6 +32,10 @@ verify_jwt = false
 [functions.google-appointment-sync]
 verify_jwt = false
 
+# Fastlane is authenticated by a dedicated server-side secret verified by SQL.
+[functions.google-appointment-fastlane]
+verify_jwt = false
+
 # Admin Google management validates the Supabase bearer token and explicit
 # INTEGRATIONS_VIEW/INTEGRATIONS_MANAGE permissions inside the function.
 [functions.admin-google]
@@ -153,6 +157,18 @@ verify_jwt = false
 [functions.appointment-action-access]
 verify_jwt = false
 
+# Public balance access verifies collection id + customer e-mail behind rate limiting.
+[functions.balance-collection-access]
+verify_jwt = false
+
+# Public waitlist signup is server-authoritative and distributed-rate-limited.
+[functions.waitlist-signup]
+verify_jwt = false
+
+# Public calendar export is read-only, rate-limited and keyed by the reservation public code.
+[functions.appointment-calendar]
+verify_jwt = false
+
 # Admin endpoints validate the Supabase Auth bearer token against admin_users manually.
 # JWT verification is intentionally performed inside the function so CORS preflight and
 # error envelopes remain under the same application boundary.
@@ -189,6 +205,9 @@ verify_jwt = false
 [functions.admin-finance]
 verify_jwt = false
 
+[functions.admin-finance-minimal]
+verify_jwt = false
+
 [functions.admin-customer-balance]
 verify_jwt = false
 
@@ -207,5 +226,10 @@ verify_jwt = false
 [functions.admin-resource-settings]
 verify_jwt = false
 
-[functions.admin-special-calendar]
+[functions.admin-waitlist]
 verify_jwt = false
+
+# Keep the gateway JWT check enabled in production; the function also performs
+# the normal admin/permission checks internally.
+[functions.admin-special-calendar]
+verify_jwt = true

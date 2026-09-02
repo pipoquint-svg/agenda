@@ -28,7 +28,14 @@ grep -Fq 'ref: ${{ github.sha }}' "$deploy_workflow"
 grep -Fq 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' "$deploy_workflow"
 grep -Fq 'supabase db push --linked --dry-run' "$deploy_workflow"
 grep -Fq 'supabase db push --linked --yes' "$deploy_workflow"
-grep -Fq 'supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF"' "$deploy_workflow"
+# Edge Functions must use the canonical Item 3 allowlist. A bare deploy would silently
+# promote every local function directory and can expand the production HTTP surface.
+grep -Fq 'python3 scripts/edge-auth-contract.py list-deployable' "$deploy_workflow"
+grep -Fq 'supabase functions deploy "$slug" --project-ref "$SUPABASE_PROJECT_REF"' "$deploy_workflow"
+if grep -Fq 'supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF"' "$deploy_workflow"; then
+  echo 'Production Edge deploy may not be unrestricted; use the canonical allowlist.' >&2
+  exit 1
+fi
 if grep -Fq -- '--include-seed' "$deploy_workflow"; then
   echo 'Production deploy may not push seed data.' >&2
   exit 1

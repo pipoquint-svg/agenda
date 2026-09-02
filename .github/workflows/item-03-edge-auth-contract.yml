@@ -1,0 +1,33 @@
+name: Item 3 Edge Auth Contract
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - fix/item-03-edge-auth-contract
+
+permissions:
+  contents: read
+
+jobs:
+  edge-auth-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prove exact pre-fix failures
+        run: python3 scripts/edge-auth-contract.py before
+
+      - name: Validate canonical Edge auth/deploy contract
+        run: python3 scripts/edge-auth-contract.py after
+
+      - name: Prove deploy allowlist is non-empty
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t functions < <(python3 scripts/edge-auth-contract.py list-deployable)
+          test "${#functions[@]}" -eq 58
