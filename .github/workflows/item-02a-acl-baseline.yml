@@ -8,7 +8,9 @@ on:
     branches: [main]
     paths:
       - 'supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
+      - 'supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
+      - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'scripts/acl-inventory.sql'
       - 'scripts/test-item02a-database-gates.sh'
       - 'supabase/tests/20260902090500_external_physical_block_post_buffer_test.sql'
@@ -56,14 +58,16 @@ jobs:
         run: |
           set -euo pipefail
           migration='supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
+          item02c='supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
           test -f "$migration"
+          test -f "$item02c"
           mv "$migration" /tmp/item02a-acl-baseline.sql
-          restore_migration() {
-            if [[ -f /tmp/item02a-acl-baseline.sql ]]; then
-              mv /tmp/item02a-acl-baseline.sql "$migration"
-            fi
+          mv "$item02c" /tmp/item02c-acl-overlay.sql
+          restore_migrations() {
+            [[ ! -f /tmp/item02a-acl-baseline.sql ]] || mv /tmp/item02a-acl-baseline.sql "$migration"
+            [[ ! -f /tmp/item02c-acl-overlay.sql ]] || mv /tmp/item02c-acl-overlay.sql "$item02c"
           }
-          trap restore_migration EXIT
+          trap restore_migrations EXIT
 
           supabase db reset
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
@@ -90,13 +94,23 @@ jobs:
             exit 1
           fi
 
-          restore_migration
+          restore_migrations
           trap - EXIT
 
-      - name: Rebuild with versioned production ACL baseline
-        run: supabase db reset
+      - name: Rebuild historical Item 2A ACL baseline without Item 2C overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          item02c='supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
+          parked='/tmp/item02c-acl-overlay.sql'
+          mv "$item02c" "$parked"
+          restore_item02c() { [[ ! -f "$parked" ]] || mv "$parked" "$item02c"; }
+          trap restore_item02c EXIT
+          supabase db reset
+          restore_item02c
+          trap - EXIT
 
-      - name: Prove production-vs-local ACL diff is empty
+      - name: Prove historical production-vs-local ACL diff is empty
         run: |
           set -euo pipefail
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
@@ -124,7 +138,7 @@ jobs:
           test "$anon_exec" -eq 7
           test "$auth_exec" -eq 8
 
-      - name: Prove ACL migration is idempotent
+      - name: Prove ACL baseline migration is idempotent
         run: |
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
@@ -133,6 +147,15 @@ jobs:
             -v ON_ERROR_STOP=1 \
             -f tests/acl-parity/item02a_acl_parity.sql \
             > /tmp/acl-idempotent.log
+
+      - name: Rebuild current ACL contract with Item 2C overlay
+        run: |
+          supabase db reset
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/acl-parity/item02c_acl_overlay.sql \
+            | tee /tmp/item02c-acl-overlay.log
+          grep -Fxq 'ITEM02C_ACL_OVERLAY_OK' /tmp/item02c-acl-overlay.log
 
       - name: Upload before/after ACL evidence
         uses: actions/upload-artifact@v4
@@ -146,6 +169,7 @@ jobs:
             /tmp/acl-after.log
             /tmp/acl-after.diff.tsv
             /tmp/acl-idempotent.log
+            /tmp/item02c-acl-overlay.log
           if-no-files-found: error
           retention-days: 30
 
@@ -167,7 +191,7 @@ jobs:
           rollback;
           SQL
 
-      - name: Run database tests with strict Item 2C expected-failure gate
+      - name: Run database tests with zero expected failures
         run: bash scripts/test-item02a-database-gates.sh
 
       - name: Run concurrency suites
