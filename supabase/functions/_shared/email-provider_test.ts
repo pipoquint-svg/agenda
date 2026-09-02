@@ -1,4 +1,4 @@
-import { notificationSenderForScope, senderForScope, sendEmailWithProvider, type EmailProviderPayload } from './email-provider.ts'
+import { normalizeReservationManageLinks, notificationSenderForScope, senderForScope, sendEmailWithProvider, type EmailProviderPayload } from './email-provider.ts'
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message)
@@ -84,6 +84,21 @@ Deno.test('provider adapter preserves rendered payload and idempotency contract'
   assert(headers.get('idempotency-key') === 'notification:test:1', 'idempotency key was not forwarded')
   assert(headers.get('authorization') === 'Bearer test-key', 'provider authorization header is missing')
   assert(capturedInit?.body === JSON.stringify(payload), 'rendered provider payload changed in transport')
+})
+
+Deno.test('manage-booking link normalization keeps tokens out of the query string', () => {
+  const legacy = 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=abc123&scope=RESCHEDULE'
+  const canonical = 'https://www.blacksheepestudiocriativo.com.br/gerenciar-reserva#token=abc123&scope=RESCHEDULE'
+
+  const text = normalizeReservationManageLinks(`Gerencie: ${legacy}`)
+  assert(text === `Gerencie: ${canonical}`, 'plain-text manage-booking URL was not normalized')
+
+  const html = normalizeReservationManageLinks(`<a href="${legacy}">Gerenciar</a>`)
+  assert(html === `<a href="${canonical}">Gerenciar</a>`, 'HTML manage-booking href was not normalized')
+  assert(!String(text).includes('/reserva/gerenciar?token='), 'legacy manage-booking URL remained in normalized text')
+  assert(!String(html).includes('/reserva/gerenciar?token='), 'legacy manage-booking URL remained in normalized HTML')
+  assert(normalizeReservationManageLinks(null) === null, 'null payload must remain null')
+  assert(normalizeReservationManageLinks(undefined) === undefined, 'undefined payload must remain undefined')
 })
 
 Deno.test('provider adapter canonicalizes legacy manage-booking links before delivery', async () => {
