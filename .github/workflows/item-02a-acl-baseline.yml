@@ -1,0 +1,288 @@
+name: Item 2A Public ACL Baseline
+
+on:
+  push:
+    branches:
+      - fix/item-02a-acl-baseline
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
+      - 'tests/acl-parity/item02a_acl_parity.sql'
+      - 'scripts/acl-inventory.sql'
+      - 'scripts/test-item02a-database-gates.sh'
+      - 'supabase/tests/20260902090500_external_physical_block_post_buffer_test.sql'
+      - 'supabase/tests/database/027_admin_change_policies.test.sql'
+      - 'supabase/tests/database/039_admin_service_audit_hardening.test.sql'
+      - 'supabase/tests/database/042_audit_logs_append_only.test.sql'
+      - 'supabase/tests/database/050_appointment_token_authorship.test.sql'
+      - 'tests/local-verification/item01_e2e_test.ts'
+      - 'tests/local-verification/item02a_google_worker_test.ts'
+      - 'docs/item-02a-acl-baseline.md'
+      - '.github/workflows/item-02a-acl-baseline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Prove ACL parity fails before the baseline migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
+          test -f "$migration"
+          mv "$migration" /tmp/item02a-acl-baseline.sql
+          restore_migration() {
+            if [[ -f /tmp/item02a-acl-baseline.sql ]]; then
+              mv /tmp/item02a-acl-baseline.sql "$migration"
+            fi
+          }
+          trap restore_migration EXIT
+
+          supabase db reset
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f scripts/acl-inventory.sql > /tmp/acl-before.tsv
+
+          set +e
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/acl-parity/item02a_acl_parity.sql \
+            > /tmp/acl-before.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/acl-before.log
+          if [[ $rc -eq 0 ]]; then
+            echo 'ACL parity unexpectedly passed before the baseline migration.' >&2
+            exit 1
+          fi
+          grep -Eq 'ACL_PARITY_(IDENTITY|ROW|SUMMARY)_DIFF_PRESENT' /tmp/acl-before.log
+          grep '^ACL_ROW_DIFF' /tmp/acl-before.log > /tmp/acl-before.diff.tsv || true
+
+          if awk -F '\t' '$1=="ACL" && ($2=="table" || $2=="view" || $2=="sequence") && ($5=="anon" || $5=="authenticated") { found=1 } END { exit(found ? 0 : 1) }' /tmp/acl-before.tsv; then
+            echo 'anon/authenticated unexpectedly have direct relation grants before Phase 2A.' >&2
+            exit 1
+          fi
+
+          restore_migration
+          trap - EXIT
+
+      - name: Rebuild with versioned production ACL baseline
+        run: supabase db reset
+
+      - name: Prove production-vs-local ACL diff is empty
+        run: |
+          set -euo pipefail
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/acl-parity/item02a_acl_parity.sql \
+            | tee /tmp/acl-after.log
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f scripts/acl-inventory.sql > /tmp/acl-after.tsv
+          grep '^ACL_ROW_DIFF' /tmp/acl-after.log > /tmp/acl-after.diff.tsv || true
+          test ! -s /tmp/acl-after.diff.tsv
+
+          grep -F $'ACL_SUMMARY\tfunction\t414\t803\t9cb2b004d96277b79b86fcf8181caee861dbca7628cb3a32218ef765a06cf284' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\tsequence\t2\t12\ta22f76984f935d27010a77efbbe5e0a13a21a2b818cd959edaafc37067a172ea' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\ttable\t105\t1614\tfba3298eb16529b3f223c6def1fe895194534a5883595608923a5ecd0a3c4df4' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\tview\t8\t128\tf09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be' /tmp/acl-after.log
+
+          if awk -F '\t' '$1=="ACL" && ($2=="table" || $2=="view" || $2=="sequence") && ($5=="anon" || $5=="authenticated") { found=1 } END { exit(found ? 0 : 1) }' /tmp/acl-after.tsv; then
+            echo 'anon/authenticated unexpectedly have direct relation grants after Phase 2A.' >&2
+            exit 1
+          fi
+
+          anon_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="anon" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
+          auth_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="authenticated" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
+          test "$anon_exec" -eq 7
+          test "$auth_exec" -eq 8
+
+      - name: Prove ACL migration is idempotent
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/acl-parity/item02a_acl_parity.sql \
+            > /tmp/acl-idempotent.log
+
+      - name: Upload before/after ACL evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: item-02a-acl-diff-evidence
+          path: |
+            /tmp/acl-before.tsv
+            /tmp/acl-before.log
+            /tmp/acl-before.diff.tsv
+            /tmp/acl-after.tsv
+            /tmp/acl-after.log
+            /tmp/acl-after.diff.tsv
+            /tmp/acl-idempotent.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate Gestão critical fixture
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -q <<'SQL'
+          begin;
+          \i supabase/fixtures/gestao-critical.sql
+          do $$
+          declare
+            v_result jsonb;
+          begin
+            v_result := public.qa_create_gestao_appointment('2035-01-15 10:00:00-03'::timestamptz);
+            if coalesce(v_result->>'status', '') <> 'CONFIRMED' then
+              raise exception 'GESTAO_CRITICAL_FIXTURE_INVALID: %', v_result;
+            end if;
+          end
+          $$;
+          rollback;
+          SQL
+
+      - name: Run database tests with strict Item 2C expected-failure gate
+        run: bash scripts/test-item02a-database-gates.sh
+
+      - name: Run concurrency suites
+        run: |
+          bash scripts/test-concurrency.sh
+          bash scripts/test-pre-reservation-concurrency.sh
+          bash scripts/test-package-concurrency.sh
+          bash scripts/test-rate-limit-concurrency.sh
+
+      - name: Reset disposable stack for action-token HTTP gate
+        run: supabase db reset
+
+      - name: Run action-token HTTP gate
+        run: bash scripts/test-action-token-http-ephemeral.sh
+
+      - name: Reset database for local provider E2E
+        run: supabase db reset
+
+      - name: Load rental-only local fixture
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/fixtures/locacao-local-verification.sql
+
+      - name: Run rental payment and Google worker E2E with local-only provider transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-local-verification-env.sh supabase/functions/.env.local-verification.example
+          eval "$(supabase status -o env)"
+          export LOCAL_API_URL="$API_URL"
+          export LOCAL_ANON_KEY="$ANON_KEY"
+          export LOCAL_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+
+          supabase functions serve \
+            --env-file supabase/functions/.env.local-verification.example \
+            > /tmp/item02a-functions.log 2>&1 &
+          serve_pid=$!
+          cleanup() {
+            kill "$serve_pid" >/dev/null 2>&1 || true
+            wait "$serve_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in $(seq 1 60); do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --request OPTIONS \
+              --header "apikey: $ANON_KEY" \
+              "$API_URL/functions/v1/booking-hold" || true)"
+            if [[ "$status" == "200" || "$status" == "204" ]]; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$serve_pid" >/dev/null 2>&1; then
+              cat /tmp/item02a-functions.log >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            cat /tmp/item02a-functions.log >&2
+            exit 1
+          fi
+
+          deno test \
+            --allow-env=LOCAL_API_URL,LOCAL_ANON_KEY,LOCAL_SERVICE_ROLE_KEY \
+            --allow-net=127.0.0.1:54321,localhost:54321 \
+            tests/local-verification/item01_e2e_test.ts \
+            tests/local-verification/item02a_google_worker_test.ts
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check web
+        run: npm run check
+
+      - name: Build production bundle
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key
+          VITE_MERCADO_PAGO_PUBLIC_KEY: TEST-public-key
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run admin browser smoke
+        run: |
+          set -euo pipefail
+          npx vite preview --host 127.0.0.1 --port 4173 > /tmp/agenda-vite-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/admin >/dev/null; then break; fi
+            if [[ "$attempt" -eq 30 ]]; then cat /tmp/agenda-vite-preview.log; exit 1; fi
+            sleep 1
+          done
+          npm run smoke:admin-browser

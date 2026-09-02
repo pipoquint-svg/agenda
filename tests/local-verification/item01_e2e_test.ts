@@ -150,22 +150,6 @@ async function diagnosePaymentApply(accessToken: string): Promise<Record<string,
   })
 }
 
-async function assertAclDriftOnPaymentTransactions(): Promise<void> {
-  const result = await requestJson(
-    `${API_URL}/rest/v1/payment_transactions?select=id&limit=1`,
-    {
-      method: 'GET',
-      headers: serviceRoleHeaders(),
-    },
-    [403],
-  )
-  assert(String(result.code ?? '') === '42501', `Phase 2A ACL drift must return SQLSTATE 42501, got ${JSON.stringify(result)}`)
-  assert(
-    String(result.message ?? '').includes('permission denied for table payment_transactions'),
-    `Phase 2A ACL drift must deny payment_transactions to service_role, got ${JSON.stringify(result)}`,
-  )
-}
-
 async function payPix(accessToken: string, paymentKind: 'MINIMUM' | 'FULL'): Promise<Record<string, any>> {
   try {
     return await requestJson(`${API_URL}/functions/v1/mercado-pago-payment`, {
@@ -266,47 +250,23 @@ Deno.test('Item 1 rental E2E: hold, reservation, checkout, initial balance and c
   assert(cancelled.status === 'CANCELLED', `cancellation must persist, got ${cancelled.status}`)
 })
 
-Deno.test('Phase 2A finding — ACL drift: Pix failure is expected until production grants are versioned', async () => {
-  const booking = await createBooking('2035-11-14T10:00:00-03:00', 'phase-2a-acl-drift')
+Deno.test('Phase 2A ACL baseline: Pix signal and balance succeed against rebuilt production ACL', async () => {
+  const paid = await createBooking('2035-11-15T10:00:00-03:00', 'phase-2a-target')
 
-  let failedAsExpected = false
-  try {
-    await payPix(booking.accessToken, 'MINIMUM')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    assert(
-      message.includes('PAYMENT_STATUS_APPLY_DIAGNOSTIC') && message.includes('QA_DIAGNOSTIC_APPLY_SUCCEEDED'),
-      `Pix must fail only at the PostgREST/ACL boundary tracked by Phase 2A; received: ${message}`,
-    )
-    failedAsExpected = true
-  }
-  assert(failedAsExpected, 'Phase 2A is not complete while Pix unexpectedly succeeds against divergent local ACL')
-  await assertAclDriftOnPaymentTransactions()
-})
+  const minimum = await payPix(paid.accessToken, 'MINIMUM')
+  assert(minimum.provider?.status === 'approved', `minimum Pix must be approved by local mock: ${JSON.stringify(minimum)}`)
 
-// TODO(Phase 2A): remove `ignore: true` only after the complete production-vs-local
-// public-schema ACL diff is empty. No RLS change belongs to this transition.
-Deno.test({
-  name: 'TODO(Phase 2A): Pix signal and balance succeed after ACL baseline is exactly reproduced',
-  ignore: true,
-  fn: async () => {
-    const paid = await createBooking('2035-11-15T10:00:00-03:00', 'phase-2a-target')
+  const afterMinimum = await paymentContext(paid.accessToken)
+  const remaining = Number(afterMinimum.financial?.contract_balance)
+  assert(remaining > 0 && remaining < 180, `minimum payment must leave a positive balance, got ${remaining}`)
+  assert(closeTo(remaining, 90), `50% minimum must leave 90, got ${remaining}`)
 
-    const minimum = await payPix(paid.accessToken, 'MINIMUM')
-    assert(minimum.provider?.status === 'approved', `minimum Pix must be approved by local mock: ${JSON.stringify(minimum)}`)
+  const full = await payPix(paid.accessToken, 'FULL')
+  assert(full.provider?.status === 'approved', 'balance Pix must be approved by local mock')
 
-    const afterMinimum = await paymentContext(paid.accessToken)
-    const remaining = Number(afterMinimum.financial?.contract_balance)
-    assert(remaining > 0 && remaining < 180, `minimum payment must leave a positive balance, got ${remaining}`)
-    assert(closeTo(remaining, 90), `50% minimum must leave 90, got ${remaining}`)
-
-    const full = await payPix(paid.accessToken, 'FULL')
-    assert(full.provider?.status === 'approved', 'balance Pix must be approved by local mock')
-
-    const afterFull = await paymentContext(paid.accessToken)
-    assert(closeTo(Number(afterFull.financial?.contract_balance), 0), 'balance must be fully settled')
-    assert(afterFull.appointment?.appointment_status === 'CONFIRMED', 'appointment must be confirmed after payment')
-  },
+  const afterFull = await paymentContext(paid.accessToken)
+  assert(closeTo(Number(afterFull.financial?.contract_balance), 0), 'balance must be fully settled')
+  assert(afterFull.appointment?.appointment_status === 'CONFIRMED', 'appointment must be confirmed after payment')
 })
 
 Deno.test('Item 7 known defect is isolated: NO_SHOW fails exactly because the RPC is absent', async () => {
