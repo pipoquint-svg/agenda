@@ -9,7 +9,7 @@ import {
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type, x-appointment-token, x-request-id, x-client-info',
+  'access-control-allow-headers': 'authorization, apikey, content-type, x-appointment-token, x-request-id, x-client-info',
   'access-control-allow-methods': 'POST, OPTIONS',
   'cache-control': 'no-store, max-age=0',
 }
