@@ -1,5 +1,6 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
+import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
   actionAccessRemainingDelay,
   isActionOperationAllowed,
@@ -20,6 +21,34 @@ const operations = new Set([
   'CANCEL_PREVIEW', 'EXECUTE_CANCEL',
   'RESCHEDULE_SLOTS', 'RESCHEDULE_CREATE_HOLD', 'EXECUTE_RESCHEDULE',
 ])
+
+type RefundPlanPayment = {
+  parent_transaction_id: string
+  provider_payment_id: string
+  method: string
+  available_cash: number | string
+  refund_cash: number | string
+}
+
+type RefundPlan = {
+  policy_action_id: string
+  appointment_id: string
+  status: string
+  target_cash_amount: number | string
+  recorded_refund_cash: number | string
+  remaining_refund_cash: number | string
+  mercado_pago_available_cash: number | string
+  manual_refund_cash: number | string
+  payments: RefundPlanPayment[]
+}
+
+type RefundAttempt = {
+  completed: boolean
+  processing: boolean
+  remaining_refund_cash: number
+  refunded_amount: number
+  code: string | null
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -103,6 +132,222 @@ function financialRescheduleConsequence(value: Record<string, unknown>): boolean
 async function minimumDelay(startedAt: number): Promise<void> {
   const remaining = actionAccessRemainingDelay(startedAt)
   if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining))
+}
+
+async function stableIdempotencyKey(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input)
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(digest).map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function orderRefundSnapshot(raw: Record<string, unknown>, transactionId: string): Record<string, unknown> {
+  const transactions = raw.transactions && typeof raw.transactions === 'object'
+    ? raw.transactions as Record<string, unknown>
+    : {}
+  const refunds = Array.isArray(transactions.refunds) ? transactions.refunds : []
+  const matched = refunds.find((item) => item && typeof item === 'object' && String((item as Record<string, unknown>).transaction_id ?? '') === transactionId)
+    ?? refunds[0]
+  const refund = matched && typeof matched === 'object' ? matched as Record<string, unknown> : {}
+  const amount = Number(refund.amount)
+  return {
+    id: refund.id == null ? null : String(refund.id),
+    payment_id: refund.transaction_id == null ? null : String(refund.transaction_id),
+    amount: Number.isFinite(amount) ? amount : null,
+    status: refund.status == null ? null : String(refund.status),
+    date_created: refund.date_created == null ? null : String(refund.date_created),
+    order_id: raw.id == null ? null : String(raw.id),
+    order_status: raw.status == null ? null : String(raw.status),
+    order_status_detail: raw.status_detail == null ? null : String(raw.status_detail),
+  }
+}
+
+function providerFinancialMutationRuntime() {
+  return mercadoPagoRuntime({
+    environment: Deno.env.get('MERCADO_PAGO_ENV'),
+    productionAccessToken: Deno.env.get('MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN'),
+    allowRealCharges: Deno.env.get('ALLOW_REAL_CHARGES'),
+    creatingCharge: true,
+  })
+}
+
+async function mercadoPagoRefund(input: {
+  orderId: string
+  transactionId: string
+  amount: number
+  fullAvailableAmount: number
+  idempotencyKey: string
+}): Promise<{ status: number; data: Record<string, unknown> }> {
+  const runtime = providerFinancialMutationRuntime()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const fullRefund = Math.abs(input.amount - input.fullAvailableAmount) <= 0.01
+    const response = await fetch(`https://api.mercadopago.com/v1/orders/${encodeURIComponent(input.orderId)}/refund`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${runtime.accessToken}`,
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'x-idempotency-key': input.idempotencyKey,
+      },
+      body: fullRefund ? undefined : JSON.stringify({
+        transactions: [{ id: input.transactionId, amount: input.amount.toFixed(2) }],
+      }),
+      signal: controller.signal,
+    })
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>
+    return { status: response.status, data }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function notifyRefundCompleted(input: {
+  appointmentId: string
+  policyActionId: string
+  refundAmount: number
+}): Promise<void> {
+  const baseUrl = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/+$/, '')
+  const internalSecret = Deno.env.get('INTEGRATION_INTERNAL_SECRET') ?? ''
+  if (!baseUrl || !internalSecret || input.refundAmount <= 0) return
+  try {
+    const response = await fetch(`${baseUrl}/functions/v1/email-send`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-internal-secret': internalSecret,
+      },
+      body: JSON.stringify({
+        reason: 'REFUND_COMPLETED',
+        appointment_id: input.appointmentId,
+        policy_action_id: input.policyActionId,
+        refund_amount: input.refundAmount,
+      }),
+    })
+    if (!response.ok) console.error('[OPERATION_ALERT] CLIENT_REFUND_COMPLETED_NOTIFICATION_FAILED', { status: response.status })
+  } catch {
+    console.error('[OPERATION_ALERT] CLIENT_REFUND_COMPLETED_NOTIFICATION_FAILED')
+  }
+}
+
+async function processClientRefund(client: ReturnType<typeof adminClient>, policyActionId: string): Promise<RefundAttempt> {
+  const { data: initialData, error: initialError } = await client.rpc('service_get_cancellation_refund_plan', {
+    p_policy_action_id: policyActionId,
+  })
+  if (initialError) {
+    console.error('[OPERATION_ALERT] CLIENT_REFUND_PLAN_FAILED', { policy_action_id: policyActionId })
+    return { completed: false, processing: false, remaining_refund_cash: 0, refunded_amount: 0, code: 'REFUND_PLAN_FAILED' }
+  }
+
+  const initial = initialData as RefundPlan
+  const results: Array<Record<string, unknown>> = []
+  let providerCode: string | null = null
+  let processing = false
+
+  for (const payment of initial.payments ?? []) {
+    const refundCash = numeric(payment.refund_cash)
+    const availableCash = numeric(payment.available_cash)
+    if (refundCash <= 0) continue
+    if (availableCash + 0.01 < refundCash) {
+      providerCode = 'REFUND_PLAN_INVALID'
+      break
+    }
+
+    const { data: parent, error: parentError } = await client
+      .from('payment_transactions')
+      .select('provider_payment_id, provider_payload_json')
+      .eq('id', payment.parent_transaction_id)
+      .single()
+    if (parentError) {
+      providerCode = 'REFUND_PAYMENT_LOOKUP_FAILED'
+      break
+    }
+
+    const payload = parent?.provider_payload_json && typeof parent.provider_payload_json === 'object'
+      ? parent.provider_payload_json as Record<string, unknown>
+      : {}
+    const orderId = String(parent?.provider_payment_id ?? payload.id ?? '').trim()
+    const transactionId = String(payment.provider_payment_id ?? '').trim()
+    if (!orderId || !transactionId) {
+      providerCode = 'MERCADO_PAGO_REFUND_IDENTIFIERS_MISSING'
+      break
+    }
+
+    const idempotencyKey = await stableIdempotencyKey(`client-cancel-order-refund:${policyActionId}:${payment.parent_transaction_id}:${refundCash.toFixed(2)}`)
+    let provider: { status: number; data: Record<string, unknown> }
+    try {
+      provider = await mercadoPagoRefund({ orderId, transactionId, amount: refundCash, fullAvailableAmount: availableCash, idempotencyKey })
+    } catch {
+      providerCode = 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE'
+      break
+    }
+
+    if (provider.status < 200 || provider.status >= 300) {
+      providerCode = provider.status >= 500 || provider.status === 423 || provider.status === 425 || provider.status === 429
+        ? 'MERCADO_PAGO_REFUND_TEMPORARY_FAILURE'
+        : 'MERCADO_PAGO_REFUND_REJECTED'
+      break
+    }
+
+    const snapshot = orderRefundSnapshot(provider.data, transactionId)
+    const providerRefundId = typeof snapshot.id === 'string' ? snapshot.id : ''
+    const providerPaymentId = typeof snapshot.payment_id === 'string' ? snapshot.payment_id : ''
+    const providerAmount = Number(snapshot.amount)
+    const providerRefundStatus = String(snapshot.status ?? '').toLowerCase()
+
+    if (!providerRefundId || providerPaymentId !== transactionId) {
+      providerCode = 'MERCADO_PAGO_REFUND_ID_MISMATCH'
+      break
+    }
+    if (!Number.isFinite(providerAmount) || Math.abs(providerAmount - refundCash) > 0.01) {
+      providerCode = 'MERCADO_PAGO_REFUND_AMOUNT_MISMATCH'
+      break
+    }
+    if (providerRefundStatus && !['processed', 'approved', 'refunded'].includes(providerRefundStatus)) {
+      providerCode = 'MERCADO_PAGO_REFUND_PROCESSING'
+      processing = true
+      break
+    }
+
+    const { data: recorded, error: recordError } = await client.rpc('service_record_cancellation_provider_refund', {
+      p_policy_action_id: policyActionId,
+      p_parent_transaction_id: payment.parent_transaction_id,
+      p_provider_refund_id: providerRefundId,
+      p_cash_amount: refundCash,
+      p_provider_payload_json: snapshot,
+    })
+    if (recordError) {
+      providerCode = 'REFUND_RECORD_FAILED'
+      break
+    }
+    results.push(recorded as Record<string, unknown>)
+  }
+
+  const { data: finalData, error: finalError } = await client.rpc('service_get_cancellation_refund_plan', {
+    p_policy_action_id: policyActionId,
+  })
+  if (finalError) {
+    return { completed: false, processing, remaining_refund_cash: numeric(initial.remaining_refund_cash), refunded_amount: numeric(initial.recorded_refund_cash), code: providerCode ?? 'REFUND_PLAN_REFRESH_FAILED' }
+  }
+
+  const finalPlan = finalData as RefundPlan
+  const completed = numeric(finalPlan.remaining_refund_cash) <= 0.01
+  const refundedAmount = numeric(finalPlan.recorded_refund_cash)
+  if (completed && refundedAmount > 0) {
+    await notifyRefundCompleted({
+      appointmentId: finalPlan.appointment_id,
+      policyActionId,
+      refundAmount: refundedAmount,
+    })
+  }
+
+  return {
+    completed,
+    processing,
+    remaining_refund_cash: numeric(finalPlan.remaining_refund_cash),
+    refunded_amount: refundedAmount,
+    code: completed ? null : providerCode,
+  }
 }
 
 Deno.serve(async (req) => {
@@ -281,6 +526,13 @@ Deno.serve(async (req) => {
         return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
       if (body.confirmed !== true) throw new Error('CANCEL_CONFIRMATION_REQUIRED')
+
+      const settlementChoice = String(body.settlement_choice ?? '').trim().toUpperCase()
+      if (!['REFUND', 'CUSTOMER_BALANCE'].includes(settlementChoice)) {
+        await minimumDelay(startedAt)
+        return json({ error: { code: 'ACTION_REQUEST_INVALID' } }, 400)
+      }
+
       const { data: verified, error: verifyError } = await client.rpc('service_verify_appointment_action_email', {
         p_token_id: tokenId,
         p_email: email,
@@ -294,8 +546,9 @@ Deno.serve(async (req) => {
         return json({ error: { code: 'ACTION_VERIFICATION_FAILED' }, data: { verified: false } }, 400)
       }
 
-      const { data: cancellation, error: cancellationError } = await client.rpc('service_client_cancel_appointment_evidenced', {
+      const { data: cancellation, error: cancellationError } = await client.rpc('service_client_cancel_appointment_evidenced_v2', {
         p_token_id: tokenId,
+        p_settlement_choice: settlementChoice,
         p_reason: text(body.reason, 500),
         p_requested_at: accessedAt,
         p_ip: ip,
@@ -304,8 +557,33 @@ Deno.serve(async (req) => {
         p_session_id: text(body.session_id, 200),
       })
       if (cancellationError) throw new Error(cancellationError.message)
+
+      const result = cancellation && typeof cancellation === 'object'
+        ? cancellation as Record<string, unknown>
+        : {}
+      const policyActionId = String(result.policy_action_id ?? '').trim()
+      const returnableAmount = numeric(result.returnable_amount)
+
+      if (settlementChoice === 'CUSTOMER_BALANCE' && returnableAmount > 0.005) {
+        result.message = 'Sua reserva foi cancelada. O valor devolvível foi mantido como crédito BlackSheep.'
+        await minimumDelay(startedAt)
+        return json({ data: result })
+      }
+
+      if (settlementChoice === 'REFUND' && returnableAmount > 0.005 && policyActionId) {
+        const refund = await processClientRefund(client, policyActionId)
+        result.refund = refund
+        result.message = refund.completed
+          ? 'Sua reserva foi cancelada e o estorno foi processado.'
+          : refund.processing
+            ? 'Sua reserva foi cancelada. O estorno foi solicitado e está em processamento pelo meio de pagamento.'
+            : 'Sua reserva foi cancelada. O estorno ficou pendente de confirmação do meio de pagamento.'
+      } else {
+        result.message = 'Sua reserva foi cancelada.'
+      }
+
       await minimumDelay(startedAt)
-      return json({ data: cancellation })
+      return json({ data: result })
     }
 
     if (body.confirmed !== true) throw new Error('RESCHEDULE_CONFIRMATION_REQUIRED')
