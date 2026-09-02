@@ -72,10 +72,16 @@ def local_function_dirs() -> list[str]:
 
 def source_text(slug: str) -> str:
     root = FUNCTIONS_DIR / slug
-    for candidate in (root / "index.ts", root / "source" / "index.ts"):
-        if candidate.is_file():
-            return candidate.read_text(encoding="utf-8")
-    raise RuntimeError(f"FUNCTION_SOURCE_MISSING:{slug}")
+    runtime_files = sorted(
+        path
+        for path in root.rglob("*.ts")
+        if path.is_file()
+        and not path.name.endswith("_test.ts")
+        and not path.name.endswith(".test.ts")
+    )
+    if not runtime_files:
+        raise RuntimeError(f"FUNCTION_SOURCE_MISSING:{slug}")
+    return "\n".join(path.read_text(encoding="utf-8") for path in runtime_files)
 
 
 def parse_config(config_text: str) -> dict:
