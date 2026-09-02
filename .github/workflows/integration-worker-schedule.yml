@@ -4,9 +4,6 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/integration-worker-schedule.yml'
 
 permissions:
   contents: read
