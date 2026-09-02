@@ -145,8 +145,8 @@ jobs:
           rollback;
           SQL
 
-      - name: Run pgTAP database tests
-        run: supabase test db
+      - name: Run database test contract
+        run: bash scripts/test-database-core-gates.sh
 
       - name: Run Gate A concurrency test
         run: bash scripts/test-concurrency.sh
