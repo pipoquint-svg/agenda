@@ -1,0 +1,175 @@
+name: Item 2A Schema Parity Prerequisite
+
+on:
+  push:
+    branches: [fix/item-02a-schema-parity-prereq]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260902130000_reconcile_birth_date_foundation_schema_parity.sql'
+      - 'supabase/tests/database/122_customer_birth_date_reconciliation.test.sql'
+      - 'tests/schema-parity/item02a_birth_date_foundation_parity.sql'
+      - '.github/workflows/item-02a-schema-parity-prereq.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Prove parity test fails before the migration
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260902130000_reconcile_birth_date_foundation_schema_parity.sql'
+          mv "$migration" /tmp/item02a-schema-parity.sql
+          supabase db reset
+          set +e
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/schema-parity/item02a_birth_date_foundation_parity.sql \
+            > /tmp/item02a-before.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/item02a-before.log
+          if [[ $rc -eq 0 ]]; then
+            echo 'Parity test unexpectedly passed before the repair migration.' >&2
+            exit 1
+          fi
+          grep -Fq 'SCHEMA_PARITY_RESIDUE_PRESENT' /tmp/item02a-before.log
+          mv /tmp/item02a-schema-parity.sql "$migration"
+
+      - name: Rebuild with the repair migration
+        run: supabase db reset
+
+      - name: Prove parity test passes after the migration
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/schema-parity/item02a_birth_date_foundation_parity.sql
+
+      - name: Prove migration is idempotent
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260902130000_reconcile_birth_date_foundation_schema_parity.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f tests/schema-parity/item02a_birth_date_foundation_parity.sql
+
+      - name: Validate Gestão critical fixture
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -q <<'SQL'
+          begin;
+          \i supabase/fixtures/gestao-critical.sql
+          do $$
+          declare
+            v_result jsonb;
+          begin
+            v_result := public.qa_create_gestao_appointment('2035-01-15 10:00:00-03'::timestamptz);
+            if coalesce(v_result->>'status', '') <> 'CONFIRMED' then
+              raise exception 'GESTAO_CRITICAL_FIXTURE_INVALID: %', v_result;
+            end if;
+          end
+          $$;
+          rollback;
+          SQL
+
+      - name: Run pgTAP database tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          inherited_non_tap='supabase/tests/20260902090500_external_physical_block_post_buffer_test.sql'
+          quarantine="/tmp/$(basename "$inherited_non_tap")"
+          test -f "$inherited_non_tap"
+
+          restore_inherited_non_tap() {
+            if [[ -f "$quarantine" ]]; then
+              mv "$quarantine" "$inherited_non_tap"
+            fi
+          }
+          trap restore_inherited_non_tap EXIT
+
+          mv "$inherited_non_tap" "$quarantine"
+          supabase test db
+
+          restore_inherited_non_tap
+          trap - EXIT
+
+      - name: Run concurrency suites
+        run: |
+          bash scripts/test-concurrency.sh
+          bash scripts/test-pre-reservation-concurrency.sh
+          bash scripts/test-package-concurrency.sh
+          bash scripts/test-rate-limit-concurrency.sh
+
+      - name: Reset disposable stack for action-token HTTP gate
+        run: supabase db reset
+
+      - name: Run action-token HTTP gate
+        run: bash scripts/test-action-token-http-ephemeral.sh
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check web
+        run: npm run check
+
+      - name: Build production bundle
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key
+          VITE_MERCADO_PAGO_PUBLIC_KEY: TEST-public-key
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run admin browser smoke
+        run: |
+          set -euo pipefail
+          npx vite preview --host 127.0.0.1 --port 4173 > /tmp/agenda-vite-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/admin >/dev/null; then break; fi
+            if [ "$attempt" -eq 30 ]; then cat /tmp/agenda-vite-preview.log; exit 1; fi
+            sleep 1
+          done
+          npm run smoke:admin-browser
