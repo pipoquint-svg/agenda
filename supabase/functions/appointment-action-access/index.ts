@@ -273,7 +273,7 @@ async function processClientRefund(client: ReturnType<typeof adminClient>, polic
       break
     }
 
-    const idempotencyKey = await stableIdempotencyKey(`client-cancel-order-refund:${policyActionId}:${payment.parent_transaction_id}:${refundCash.toFixed(2)}`)
+    const idempotencyKey = await stableIdempotencyKey(`cancel-order-refund:${policyActionId}:${payment.parent_transaction_id}:${refundCash.toFixed(2)}`)
     let provider: { status: number; data: Record<string, unknown> }
     try {
       provider = await mercadoPagoRefund({ orderId, transactionId, amount: refundCash, fullAvailableAmount: availableCash, idempotencyKey })
