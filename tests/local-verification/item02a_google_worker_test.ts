@@ -86,11 +86,19 @@ async function createAdminSession(): Promise<string> {
   const authUserId = String(created.id ?? created.user?.id ?? '')
   assert(/^[0-9a-f-]{36}$/i.test(authUserId), 'local auth admin must be created')
 
-  await requestJson(`${API_URL}/rest/v1/rpc/qa_register_local_verification_admin`, {
+  // Register the Auth user in the real admin RBAC table using the internal
+  // service-role path. Do not depend on a qa_* RPC that is absent after a clean
+  // migration rebuild and must never be introduced into the production schema.
+  await requestJson(`${API_URL}/rest/v1/admin_users`, {
     method: 'POST',
-    headers: serviceRoleHeaders(),
-    body: JSON.stringify({ p_auth_user_id: authUserId }),
-  })
+    headers: serviceRoleHeaders({ prefer: 'return=minimal' }),
+    body: JSON.stringify({
+      auth_user_id: authUserId,
+      display_name: 'Local Google RLS Admin',
+      role: 'ADMIN',
+      is_active: true,
+    }),
+  }, [201])
 
   const session = await requestJson(`${API_URL}/auth/v1/token?grant_type=password`, {
     method: 'POST',
