@@ -1,1 +1,0 @@
-Temporary note: regression test for external physical resource post-buffer is in 20260902090500_external_physical_block_post_buffer_test.sql.
