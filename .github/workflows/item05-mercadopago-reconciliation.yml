@@ -19,5 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - name: Verify Item 5 reconciliation contract
         run: python3 scripts/test-item05-mercadopago-reconciliation.py
+      - name: Prove convergence without webhook or client interaction
+        run: deno test supabase/functions/mercado-pago-reconcile/logic_test.ts
