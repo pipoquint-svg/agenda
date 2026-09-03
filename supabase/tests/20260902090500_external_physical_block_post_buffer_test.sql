@@ -1,5 +1,7 @@
 begin;
 
+select plan(4);
+
 -- Regression coverage for asymmetric buffering around external studio blocks.
 -- Expected behavior with a 30-minute service post-buffer:
 --   external 14:00-15:00 occupies PHYSICAL studio capacity until 15:30;
@@ -88,25 +90,16 @@ select
   'physical-event'
 from _external_buffer_test_services;
 
-do $test$
-declare
-  v_range tstzrange;
-begin
-  select ra.occupied_range
-  into v_range
-  from public.resource_allocations ra
-  where ra.external_source = 'TEST'
-    and ra.external_event_id = 'physical-event';
-
-  if lower(v_range) <> '2026-09-03 14:00:00-03'::timestamptz then
-    raise exception 'external physical lower bound changed unexpectedly: %', v_range;
-  end if;
-
-  if upper(v_range) <> '2026-09-03 15:30:00-03'::timestamptz then
-    raise exception 'external physical post-buffer missing: %', v_range;
-  end if;
-end;
-$test$;
+select ok(
+  (
+    select lower(ra.occupied_range) = '2026-09-03 14:00:00-03'::timestamptz
+       and upper(ra.occupied_range) = '2026-09-03 15:30:00-03'::timestamptz
+    from public.resource_allocations ra
+    where ra.external_source = 'TEST'
+      and ra.external_event_id = 'physical-event'
+  ),
+  'external PHYSICAL block keeps its lower bound and applies one 30-minute post-buffer'
+);
 
 -- Metadata/status-only update must not stack a second buffer.
 update public.resource_allocations
@@ -114,21 +107,15 @@ set reason = 'metadata-only change'
 where external_source = 'TEST'
   and external_event_id = 'physical-event';
 
-do $test$
-declare
-  v_upper timestamptz;
-begin
-  select upper(ra.occupied_range)
-  into v_upper
-  from public.resource_allocations ra
-  where ra.external_source = 'TEST'
-    and ra.external_event_id = 'physical-event';
-
-  if v_upper <> '2026-09-03 15:30:00-03'::timestamptz then
-    raise exception 'external physical buffer stacked on metadata update: %', v_upper;
-  end if;
-end;
-$test$;
+select ok(
+  (
+    select upper(ra.occupied_range) = '2026-09-03 15:30:00-03'::timestamptz
+    from public.resource_allocations ra
+    where ra.external_source = 'TEST'
+      and ra.external_event_id = 'physical-event'
+  ),
+  'metadata-only update does not stack another external PHYSICAL post-buffer'
+);
 
 -- A Google-style reconciliation update writes the raw range again. The trigger
 -- must normalize it back to 15:30, not to 16:00.
@@ -141,21 +128,15 @@ set occupied_range = tstzrange(
 where external_source = 'TEST'
   and external_event_id = 'physical-event';
 
-do $test$
-declare
-  v_upper timestamptz;
-begin
-  select upper(ra.occupied_range)
-  into v_upper
-  from public.resource_allocations ra
-  where ra.external_source = 'TEST'
-    and ra.external_event_id = 'physical-event';
-
-  if v_upper <> '2026-09-03 15:30:00-03'::timestamptz then
-    raise exception 'external physical buffer was not idempotent on raw-range reconciliation: %', v_upper;
-  end if;
-end;
-$test$;
+select ok(
+  (
+    select upper(ra.occupied_range) = '2026-09-03 15:30:00-03'::timestamptz
+    from public.resource_allocations ra
+    where ra.external_source = 'TEST'
+      and ra.external_event_id = 'physical-event'
+  ),
+  'raw-range reconciliation remains idempotent for the external PHYSICAL post-buffer'
+);
 
 -- PERSON allocation must remain exactly on the external event range.
 insert into public.resource_allocations (
@@ -177,21 +158,17 @@ select
   'person-event'
 from _external_buffer_test_services;
 
-do $test$
-declare
-  v_range tstzrange;
-begin
-  select ra.occupied_range
-  into v_range
-  from public.resource_allocations ra
-  where ra.external_source = 'TEST'
-    and ra.external_event_id = 'person-event';
+select ok(
+  (
+    select lower(ra.occupied_range) = '2026-09-03 14:00:00-03'::timestamptz
+       and upper(ra.occupied_range) = '2026-09-03 15:00:00-03'::timestamptz
+    from public.resource_allocations ra
+    where ra.external_source = 'TEST'
+      and ra.external_event_id = 'person-event'
+  ),
+  'PERSON external block remains exactly on the raw Google interval'
+);
 
-  if lower(v_range) <> '2026-09-03 14:00:00-03'::timestamptz
-     or upper(v_range) <> '2026-09-03 15:00:00-03'::timestamptz then
-    raise exception 'PERSON external block should remain raw: %', v_range;
-  end if;
-end;
-$test$;
+select * from finish();
 
 rollback;
