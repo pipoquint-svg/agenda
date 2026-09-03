@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(15);
+select plan(18);
 
 select ok(
   not exists (
@@ -49,6 +49,17 @@ select ok(
 select ok(
   position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.set_checkout_hold_recovery_contact(text,text,boolean)'::regprocedure)) > 0,
   'stale recovery mutation calls fail closed'
+);
+
+select ok(
+  position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.public_bind_checkout_customer(text,text,text,text,text,boolean)'::regprocedure)) > 0,
+  'customer binding explicitly fails closed when recovery is requested'
+);
+
+select ok(
+  lower(pg_get_function_arguments('public.public_bind_checkout_customer(text,text,text,text,text,boolean)'::regprocedure))
+    like '%p_recovery_enabled boolean default false%',
+  'customer binding defaults recovery to false'
 );
 
 insert into public.resources (id, name, resource_type)
@@ -129,6 +140,20 @@ insert into public.checkout_holds (
   '{}'::jsonb
 );
 
+insert into public.resource_allocations (
+  resource_id,
+  checkout_hold_id,
+  allocation_type,
+  status,
+  occupied_range
+) values (
+  '95000000-0000-0000-0000-000000000001',
+  '95000000-0000-0000-0000-000000000050',
+  'CHECKOUT_HOLD',
+  'HELD',
+  tstzrange(now() + interval '1 day', now() + interval '1 day 1 hour', '[)')
+);
+
 select is(
   (select recovery_enabled from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
   false,
@@ -148,6 +173,13 @@ select ok(
 select ok(
   not has_function_privilege('anon','public.get_checkout_hold_resume_context(text)','EXECUTE'),
   'anonymous clients cannot resolve retired recovery links'
+);
+
+select throws_ok(
+  $$select public.public_bind_checkout_customer('checkout-recovery-token','Recovery Customer','recovery.customer@example.com','48999991234',null::text,true)$$,
+  'P0001',
+  'CHECKOUT_RECOVERY_RETIRED',
+  'customer binding cannot re-enable retired recovery'
 );
 
 update public.checkout_holds

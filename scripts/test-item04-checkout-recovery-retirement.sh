@@ -49,7 +49,20 @@ with findings(ord, finding, present) as (
         and pg_get_function_identity_arguments(p.oid)='p_checkout_hold_token text, p_phone text, p_enabled boolean'
         and p.prosrc not ilike '%CHECKOUT_RECOVERY_RETIRED%'
     )),
-    (9, 'RETIREMENT_CONSTRAINT_MISSING', not exists (
+    (9, 'PUBLIC_BIND_DEFAULT_TRUE', exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname='public_bind_checkout_customer'
+        and pg_get_function_identity_arguments(p.oid)='p_checkout_hold_token text, p_name text, p_email text, p_phone text, p_tax_id text, p_recovery_enabled boolean'
+        and lower(pg_get_function_arguments(p.oid)) like '%p_recovery_enabled boolean default true%'
+    )),
+    (10, 'PUBLIC_BIND_RECOVERY_LIVE', exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname='public_bind_checkout_customer'
+        and pg_get_function_identity_arguments(p.oid)='p_checkout_hold_token text, p_name text, p_email text, p_phone text, p_tax_id text, p_recovery_enabled boolean'
+        and p.prosrc ilike '%recovery_enabled = p_recovery_enabled%'
+        and p.prosrc not ilike '%CHECKOUT_RECOVERY_RETIRED%'
+    )),
+    (11, 'RETIREMENT_CONSTRAINT_MISSING', not exists (
       select 1 from pg_constraint
       where conrelid='public.checkout_holds'::regclass
         and conname='checkout_holds_recovery_retired_check'
@@ -77,10 +90,10 @@ run_tap() {
     cat "$log" >&2
     exit 1
   fi
-  grep -Fxq '1..15' "$log" || { echo 'Unexpected TAP plan; expected 1..15.' >&2; cat "$log" >&2; exit 1; }
+  grep -Fxq '1..18' "$log" || { echo 'Unexpected TAP plan; expected 1..18.' >&2; cat "$log" >&2; exit 1; }
   test_count="$(grep -Ec '^(ok|not ok) [0-9]+ - ' "$log" || true)"
   failure_count="$(grep -Ec '^not ok ' "$log" || true)"
-  if [[ "$test_count" -ne 15 || "$failure_count" -ne 0 ]]; then
+  if [[ "$test_count" -ne 18 || "$failure_count" -ne 0 ]]; then
     echo "Item 4 TAP contract failed: tests=$test_count failures=$failure_count." >&2
     cat "$log" >&2
     exit 1
@@ -99,6 +112,8 @@ if [[ "$MODE" == 'before' ]]; then
     'EXPIRY_DEFAULT_PRESENT'
     'RESUME_RPC_PLAINTEXT_LOOKUP'
     'RECOVERY_SETTER_LIVE'
+    'PUBLIC_BIND_DEFAULT_TRUE'
+    'PUBLIC_BIND_RECOVERY_LIVE'
     'RETIREMENT_CONSTRAINT_MISSING'
   )
   if [[ ${#actual[@]} -ne ${#expected[@]} ]]; then
@@ -112,7 +127,7 @@ if [[ "$MODE" == 'before' ]]; then
       exit 1
     fi
   done
-  echo 'Item 4 before gate passed: exactly nine plaintext/retirement failures reproduced.'
+  echo 'Item 4 before gate passed: exactly eleven plaintext/retirement failures reproduced.'
   exit 0
 fi
 
@@ -142,9 +157,12 @@ where not exists (
       )
   and position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.get_checkout_hold_resume_context(text)'::regprocedure)) > 0
   and position('recovery_public_token' in pg_get_functiondef('public.get_checkout_hold_resume_context(text)'::regprocedure)) = 0
-  and position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.set_checkout_hold_recovery_contact(text,text,boolean)'::regprocedure)) > 0;
+  and position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.set_checkout_hold_recovery_contact(text,text,boolean)'::regprocedure)) > 0
+  and position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.public_bind_checkout_customer(text,text,text,text,text,boolean)'::regprocedure)) > 0
+  and lower(pg_get_function_arguments('public.public_bind_checkout_customer(text,text,text,text,text,boolean)'::regprocedure))
+        like '%p_recovery_enabled boolean default false%';
 SQL
 
 run_tap
 
-echo 'Item 4 after gate passed: plaintext capability removed and retired checkout flow remains fail-closed.'
+echo 'Item 4 after gate passed: plaintext capability removed, bind defaults false, and retired checkout recovery fails closed.'

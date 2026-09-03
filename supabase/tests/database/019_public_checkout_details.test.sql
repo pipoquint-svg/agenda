@@ -40,9 +40,9 @@ select is(jsonb_array_length((select payload->'fields' from checkout_context)),1
 select is(jsonb_array_length((select payload->'terms' from checkout_context)),1,'checkout context exposes the current service terms');
 
 create temporary table customer_bind as
-select public.public_bind_checkout_customer((select payload->>'checkout_hold_token' from checkout_hold),'Cliente Checkout','cliente.checkout@example.com','(48) 99999-1234','529.982.247-25',true) as payload;
+select public.public_bind_checkout_customer((select payload->>'checkout_hold_token' from checkout_hold),'Cliente Checkout','cliente.checkout@example.com','(48) 99999-1234','529.982.247-25',false) as payload;
 select ok((select (payload->>'customer_bound')::boolean from customer_bind),'customer is bound to the active hold');
-select is((select recovery_phone from public.checkout_holds where id=((select payload->>'checkout_hold_id' from checkout_hold))::uuid),'5548999991234','validated phone is immediately available for minimal hold recovery');
+select ok((select recovery_phone is null and recovery_enabled = false from public.checkout_holds where id=((select payload->>'checkout_hold_id' from checkout_hold))::uuid),'normal checkout keeps retired recovery disabled');
 select is((select regexp_replace(c.cpf_cnpj,'\D','','g') from public.customers c join public.checkout_holds ch on ch.primary_customer_id=c.id where ch.id=((select payload->>'checkout_hold_id' from checkout_hold))::uuid),'52998224725','native booking stores the validated CPF instead of leaving it blank');
 select throws_ok($$select public.validate_checkout_answers('96000000-0000-0000-0000-000000000005','[{"service_field_id":"96000000-0000-0000-0000-000000000007","value":123}]'::jsonb)$$,'P0001','INVALID_SERVICE_ANSWER_VALUE','service-field type validation rejects a number for a DATE field');
 select ok(not has_function_privilege('anon','public.service_submit_public_checkout(text,text,uuid[],jsonb,inet,text)','EXECUTE'),'anonymous clients cannot call the server-only submit primitive');

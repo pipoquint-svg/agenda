@@ -41,13 +41,12 @@ select throws_ok($$select public.public_get_checkout_context((select payload->>'
 update public.checkout_holds set status='PROMOTED',expires_at=now()+interval '10 minutes' where id=((select payload->>'checkout_hold_id' from hold_b))::uuid;
 select throws_ok($$select public.public_get_checkout_context((select payload->>'checkout_hold_token' from hold_b))$$,'P0001','CHECKOUT_HOLD_NOT_ACTIVE','promoted hold token cannot replay');
 
-update public.checkout_holds set status='EXPIRED',created_at=now()-interval '10 minutes',expires_at=now()-interval '1 minute',recovery_public_token='recovery-adversarial-token-aaaaaaaaaaaaaaaa',recovery_token_expires_at=now()+interval '1 day' where id=((select payload->>'checkout_hold_id' from hold_b))::uuid;
+update public.checkout_holds set status='EXPIRED',created_at=now()-interval '10 minutes',expires_at=now()-interval '1 minute' where id=((select payload->>'checkout_hold_id' from hold_b))::uuid;
 update public.resource_allocations set status='EXPIRED' where checkout_hold_id=((select payload->>'checkout_hold_id' from hold_b))::uuid;
-select throws_ok($$select public.get_checkout_hold_resume_context('recovery-adversarial-token-bbbbbbbbbbbbbbbb')$$,'P0001','RECOVERY_TOKEN_INVALID_OR_EXPIRED','random recovery token is generic');
-select is(public.get_checkout_hold_resume_context('recovery-adversarial-token-aaaaaaaaaaaaaaaa')->>'hold_status','EXPIRED','recovery resolves expired context only');
-select is((select count(*)::integer from public.resource_allocations where checkout_hold_id=((select payload->>'checkout_hold_id' from hold_b))::uuid and status in ('HELD','AWAITING_PAYMENT','CONFIRMED')),0,'recovery does not reactivate allocation');
-update public.checkout_holds set recovery_token_expires_at=now()-interval '1 second' where id=((select payload->>'checkout_hold_id' from hold_b))::uuid;
-select throws_ok($$select public.get_checkout_hold_resume_context('recovery-adversarial-token-aaaaaaaaaaaaaaaa')$$,'P0001','RECOVERY_TOKEN_INVALID_OR_EXPIRED','expired recovery token matches unknown error');
+select throws_ok($$select public.get_checkout_hold_resume_context('recovery-adversarial-token-bbbbbbbbbbbbbbbb')$$,'P0001','CHECKOUT_RECOVERY_RETIRED','random legacy recovery bearer fails closed');
+select throws_ok($$select public.get_checkout_hold_resume_context('recovery-adversarial-token-aaaaaaaaaaaaaaaa')$$,'P0001','CHECKOUT_RECOVERY_RETIRED','former valid-shaped recovery bearer cannot resume checkout');
+select is((select count(*)::integer from public.resource_allocations where checkout_hold_id=((select payload->>'checkout_hold_id' from hold_b))::uuid and status in ('HELD','AWAITING_PAYMENT','CONFIRMED')),0,'retired recovery does not reactivate allocation');
+select throws_ok($$select public.set_checkout_hold_recovery_contact((select payload->>'checkout_hold_token' from hold_b),'48999990000',true)$$,'P0001','CHECKOUT_RECOVERY_RETIRED','recovery mutation cannot resurrect an expired hold');
 
 insert into public.customers (id,name,email,phone,cpf_cnpj) values
  ('99000000-0000-0000-0000-000000000020','Customer A','a@example.com','48999990001','52998224725'),
