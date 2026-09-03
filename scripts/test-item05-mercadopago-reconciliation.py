@@ -7,9 +7,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RECONCILER = ROOT / "supabase/functions/mercado-pago-reconcile/index.ts"
+LOGIC = ROOT / "supabase/functions/mercado-pago-reconcile/logic.ts"
+LOGIC_TEST = ROOT / "supabase/functions/mercado-pago-reconcile/logic_test.ts"
 TRIGGER = ROOT / "supabase/functions/integration-worker-trigger/index.ts"
 MANIFEST = ROOT / "supabase/functions/auth-contract.json"
 CONFIG = ROOT / "supabase/config.toml"
+WORKFLOW = ROOT / ".github/workflows/item05-mercadopago-reconciliation.yml"
 
 
 def require(condition: bool, code: str, errors: list[str]) -> None:
@@ -20,8 +23,16 @@ def require(condition: bool, code: str, errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     require(RECONCILER.exists(), "RECONCILER_MISSING", errors)
+    require(LOGIC.exists(), "RECONCILIATION_LOGIC_MISSING", errors)
+    require(LOGIC_TEST.exists(), "RECONCILIATION_BEHAVIOR_TEST_MISSING", errors)
+
+    source = ""
     if RECONCILER.exists():
-        source = RECONCILER.read_text(encoding="utf-8")
+        source += RECONCILER.read_text(encoding="utf-8")
+    if LOGIC.exists():
+        source += "\n" + LOGIC.read_text(encoding="utf-8")
+
+    if source:
         require("x-internal-secret" in source, "INTERNAL_AUTH_MISSING", errors)
         require("MERCADO_PAGO_PRODUCTION_ACCESS_TOKEN" in source or "mercadoPagoRuntime" in source, "PROVIDER_RUNTIME_MISSING", errors)
         require("https://api.mercadopago.com/v1/orders/${" in source, "ORDER_LOOKUP_MISSING", errors)
@@ -33,10 +44,13 @@ def main() -> int:
         require(".not('provider_payment_id', 'is', null)" in source, "PROVIDER_ID_FILTER_MISSING", errors)
         require("RECONCILE_MIN_AGE_MS" in source, "STALE_AGE_GUARD_MISSING", errors)
         require("RECONCILE_LIMIT" in source and ".limit(RECONCILE_LIMIT)" in source, "BOUNDED_BATCH_MISSING", errors)
+        require("RECONCILE_CONCURRENCY" in source, "CONCURRENCY_BOUND_MISSING", errors)
         require("assertMercadoPagoPaymentMatchesIntent" in source, "INTENT_VALIDATION_MISSING", errors)
         require("service_quarantine_provider_payment_mismatch" in source, "MISMATCH_QUARANTINE_MISSING", errors)
         require("apply_provider_payment_status" in source, "STATE_MACHINE_REUSE_MISSING", errors)
-        require("status: 502" in source or ", 502" in source, "FAILURE_NOT_OBSERVABLE", errors)
+        require("transaction_status" in source, "STATE_MACHINE_RESULT_NOT_READ", errors)
+        require("reconcile:${snapshot.id}" in source, "DETERMINISTIC_EVENT_KEY_MISSING", errors)
+        require(", 502" in source, "FAILURE_NOT_OBSERVABLE", errors)
 
     trigger = TRIGGER.read_text(encoding="utf-8")
     require("'mercado-pago-reconcile'" in trigger, "SCHEDULER_WIRING_MISSING", errors)
@@ -51,6 +65,10 @@ def main() -> int:
 
     config = CONFIG.read_text(encoding="utf-8")
     require("[functions.mercado-pago-reconcile]\nverify_jwt = false" in config, "CONFIG_AUTH_MISSING", errors)
+
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    require("denoland/setup-deno" in workflow, "DENO_SETUP_MISSING", errors)
+    require("deno test supabase/functions/mercado-pago-reconcile/logic_test.ts" in workflow, "BEHAVIOR_TEST_NOT_WIRED", errors)
 
     if errors:
         for error in errors:
