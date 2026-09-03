@@ -1,0 +1,18 @@
+name: Item 16 pgTAP Plan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - 'test/item16-pgtap-plan'
+
+jobs:
+  item16-pgtap-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Require explicit TAP plan and no harness quarantine
+        run: bash scripts/test-item16-pgtap-plan.sh
