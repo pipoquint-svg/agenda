@@ -17,6 +17,11 @@ on:
         required: true
         default: true
         type: boolean
+      reconcile_migration_history:
+        description: One-time fail-closed production migration-history baseline before Item 4
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -37,6 +42,7 @@ jobs:
           EVENT_REF: ${{ github.ref }}
           DEPLOY_DATABASE: ${{ inputs.deploy_database }}
           DEPLOY_EDGE_FUNCTIONS: ${{ inputs.deploy_edge_functions }}
+          RECONCILE_MIGRATION_HISTORY: ${{ inputs.reconcile_migration_history }}
         run: |
           set -euo pipefail
           test "$EVENT_REF" = 'refs/heads/main'
@@ -44,6 +50,10 @@ jobs:
           test "$EXPECTED_SHA" = "$EVENT_SHA"
           if [[ "$DEPLOY_DATABASE" != 'true' && "$DEPLOY_EDGE_FUNCTIONS" != 'true' ]]; then
             echo 'At least one deploy scope must be selected.' >&2
+            exit 1
+          fi
+          if [[ "$RECONCILE_MIGRATION_HISTORY" == 'true' && "$DEPLOY_DATABASE" != 'true' ]]; then
+            echo 'Migration-history reconciliation requires deploy_database=true.' >&2
             exit 1
           fi
 
@@ -61,6 +71,7 @@ jobs:
       SUPABASE_PROJECT_REF: sbexdggbwqvyhbkatucs
       DEPLOY_DATABASE: ${{ inputs.deploy_database }}
       DEPLOY_EDGE_FUNCTIONS: ${{ inputs.deploy_edge_functions }}
+      RECONCILE_MIGRATION_HISTORY: ${{ inputs.reconcile_migration_history }}
     steps:
       - name: Checkout exact gated SHA
         uses: actions/checkout@v4
@@ -86,6 +97,14 @@ jobs:
       - name: Link production database
         if: ${{ inputs.deploy_database }}
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Reconcile legacy production migration history
+        if: ${{ inputs.deploy_database && inputs.reconcile_migration_history }}
+        run: python3 scripts/production_migration_history_baseline.py apply --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Verify only Item 4 is pending after migration-history reconciliation
+        if: ${{ inputs.deploy_database && inputs.reconcile_migration_history }}
+        run: python3 scripts/production_migration_history_baseline.py verify-ready --project-ref "$SUPABASE_PROJECT_REF"
 
       - name: Preview pending database migrations
         if: ${{ inputs.deploy_database }}
