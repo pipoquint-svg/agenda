@@ -1,0 +1,41 @@
+name: Item 4 Migration History Baseline
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/production_migration_history_baseline.py'
+      - 'scripts/test-production-migration-history-baseline.sh'
+      - 'docs/audit/production-migration-history-2026-09-03.tsv'
+      - '.github/workflows/production-deploy.yml'
+      - '.github/workflows/item-04-production-migration-history-baseline.yml'
+      - 'supabase/migrations/**'
+  push:
+    branches:
+      - main
+      - fix/item-04-production-migration-history-baseline
+    paths:
+      - 'scripts/production_migration_history_baseline.py'
+      - 'scripts/test-production-migration-history-baseline.sh'
+      - 'docs/audit/production-migration-history-2026-09-03.tsv'
+      - '.github/workflows/production-deploy.yml'
+      - '.github/workflows/item-04-production-migration-history-baseline.yml'
+      - 'supabase/migrations/**'
+
+permissions:
+  contents: read
+
+jobs:
+  migration-history-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact tested SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Compile reconciler
+        run: python3 -m py_compile scripts/production_migration_history_baseline.py
+
+      - name: Validate migration-history manifest, state machine, and deploy ordering
+        run: bash scripts/test-production-migration-history-baseline.sh
