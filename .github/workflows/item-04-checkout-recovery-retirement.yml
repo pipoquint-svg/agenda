@@ -1,0 +1,73 @@
+name: Item 4 Checkout Recovery Retirement
+
+on:
+  push:
+    branches:
+      - fix/item-04-retire-checkout-recovery-token
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260902233000_retire_checkout_recovery_plaintext.sql'
+      - 'supabase/tests/database/015_short_hold_recovery.test.sql'
+      - 'scripts/test-item04-checkout-recovery-retirement.sh'
+      - '.github/workflows/item-04-checkout-recovery-retirement.yml'
+      - 'docs/item-04-checkout-recovery-retirement.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkout-recovery-retirement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Prove exact Item 4 failures before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260902233000_retire_checkout_recovery_plaintext.sql'
+          parked='/tmp/item04-retire-checkout-recovery-plaintext.sql'
+          test -f "$migration"
+          mv "$migration" "$parked"
+          restore_migration() {
+            if [[ -f "$parked" ]]; then
+              mv "$parked" "$migration"
+            fi
+          }
+          trap restore_migration EXIT
+
+          supabase db reset
+          bash scripts/test-item04-checkout-recovery-retirement.sh before
+
+          restore_migration
+          trap - EXIT
+
+      - name: Rebuild with Item 4 migration
+        run: supabase db reset
+
+      - name: Prove Item 4 retirement contract passes
+        run: bash scripts/test-item04-checkout-recovery-retirement.sh after
+
+      - name: Run complete strict database test contract
+        run: bash scripts/test-database-core-gates.sh
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
