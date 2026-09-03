@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-02",
-    "active_total": 63,
-    "verify_jwt_false": 48,
+    "active_total": 64,
+    "verify_jwt_false": 49,
     "verify_jwt_true": 15,
-    "versioned_active": 58,
+    "versioned_active": 59,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -74,7 +74,8 @@
       "email-send",
       "google-appointment-sync",
       "integration-worker",
-      "kommo-sync"
+      "kommo-sync",
+      "mercado-pago-reconcile"
     ],
     "mercado_pago_signature": [
       "mercado-pago-webhook"
