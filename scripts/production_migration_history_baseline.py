@@ -24,7 +24,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NoReturn
 
 EXPECTED_PROJECT_REF = "sbexdggbwqvyhbkatucs"
 BASELINE_CUTOFF = "20260902214000"
@@ -53,7 +53,7 @@ class Plan:
     intermediate: frozenset[str]
 
 
-def _fail(message: str) -> "NoReturn":  # type: ignore[name-defined]
+def _fail(message: str) -> NoReturn:
     raise BaselineError(message)
 
 
@@ -200,12 +200,14 @@ def classify_state(current: set[str], plan: Plan) -> str:
         )
     if frozen == plan.final:
         return "final"
-    # Apply phase may be interrupted after any subset of additions.
-    if plan.initial <= frozen <= plan.intermediate:
-        return "apply"
-    # Revert phase may be interrupted after any subset of legacy removals.
+    # Once every canonical baseline version is present, we are in the removal
+    # phase even when every legacy row is still present (the full intermediate
+    # set). Check this before the broader apply-phase subset relation.
     if plan.final <= frozen <= plan.intermediate:
         return "revert"
+    # Apply phase may be interrupted after any subset of canonical additions.
+    if plan.initial <= frozen <= plan.intermediate:
+        return "apply"
     unexpected_added = sorted(frozen - plan.intermediate)
     unexpectedly_missing = sorted((plan.initial & plan.final) - frozen)
     _fail(
@@ -245,8 +247,11 @@ def command_audit_local() -> None:
     plan = build_plan(local, manifest)
     describe(plan)
     # Prove the state machine accepts only the intended progression.
-    if classify_state(set(plan.initial), plan) != "apply" and plan.to_apply:
+    initial_state = classify_state(set(plan.initial), plan)
+    if plan.to_apply and initial_state != "apply":
         _fail("initial state classification failed")
+    if not plan.to_apply and initial_state not in {"revert", "final"}:
+        _fail("initial state classification failed without additions")
     if classify_state(set(plan.intermediate), plan) not in {"revert", "final"}:
         _fail("intermediate state classification failed")
     if classify_state(set(plan.final), plan) != "final":
