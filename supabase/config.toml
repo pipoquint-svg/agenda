@@ -91,6 +91,11 @@ verify_jwt = false
 [functions.integration-worker]
 verify_jwt = false
 
+# Internal Mercado Pago reconciliation reads existing Orders only and reapplies their
+# authoritative status through the existing payment state machine.
+[functions.mercado-pago-reconcile]
+verify_jwt = false
+
 # Internal rental-balance worker and its provider/email adapters authenticate with
 # x-internal-secret. They are called server-to-server and do not carry a Supabase JWT.
 [functions.balance-collection-worker]

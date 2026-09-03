@@ -1,0 +1,28 @@
+name: Item 5 Mercado Pago Reconciliation
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/mercado-pago-reconcile/**'
+      - 'supabase/functions/integration-worker-trigger/**'
+      - 'supabase/functions/auth-contract.json'
+      - 'supabase/config.toml'
+      - 'scripts/test-item05-mercadopago-reconciliation.py'
+      - '.github/workflows/item05-mercadopago-reconciliation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  item05-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Verify Item 5 reconciliation contract
+        run: python3 scripts/test-item05-mercadopago-reconciliation.py
+      - name: Prove convergence without webhook or client interaction
+        run: deno test supabase/functions/mercado-pago-reconcile/logic_test.ts
