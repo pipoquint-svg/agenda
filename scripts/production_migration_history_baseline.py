@@ -144,7 +144,11 @@ def parse_remote_versions(text: str) -> set[str]:
         parts = line.split("|")
         if len(parts) < 2:
             continue
-        remote = parts[1].strip()
+        # Supabase CLI 2.111.0 renders migration-list cells wrapped in
+        # Markdown-style backticks even in plain captured output. Normalize
+        # only those outer delimiters; the strict 14-digit validation below
+        # still rejects headers, blanks, timestamps, and arbitrary text.
+        remote = parts[1].strip().strip("`").strip()
         if REMOTE_VERSION_RE.fullmatch(remote):
             versions.add(remote)
     if not versions:

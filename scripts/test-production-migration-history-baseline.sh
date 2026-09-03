@@ -24,6 +24,22 @@ sample = '''
 '''
 assert module.parse_remote_versions(sample) == {'20260827094437'}
 
+# Regression: Supabase CLI 2.111.0 in GitHub Actions renders the migration list
+# as an ASCII pipe table and wraps cells in Markdown-style backticks. This is
+# the exact shape that blocked Production Deploy run 33763716359 before any
+# migration repair or db push could execute.
+sample_cli_2111 = '''
+   Local            | Remote           | Time (UTC)
+  ------------------|------------------|-----------------------
+   `20260821160000` | `20260821160000` | `2026-08-21 16:00:00`
+   ` `              | `20260827094437` | `2026-08-27 09:44:37`
+   `20260902233000` | ` `              | `2026-09-02 23:30:00`
+'''
+assert module.parse_remote_versions(sample_cli_2111) == {
+    '20260821160000',
+    '20260827094437',
+}
+
 # State-machine resume contract: additions may be partially completed, then
 # legacy removals may be partially completed, but foreign states fail closed.
 initial = {'20260101000000', '20260101000010'}
