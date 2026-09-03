@@ -10,6 +10,7 @@ import {
 const RECONCILE_JOB_TYPE = 'MERCADO_PAGO_RECONCILE'
 const RECONCILE_ENTITY_TYPE = 'PAYMENT_TRANSACTION'
 const RECONCILE_LIMIT = 10
+const RECONCILE_DISCOVERY_LIMIT = 50
 const RECONCILE_CONCURRENCY = 5
 const RECONCILE_MIN_AGE_MS = 2 * 60 * 1000
 const RECONCILE_BUCKET_MS = 5 * 60 * 1000
@@ -88,7 +89,7 @@ Deno.serve(async (req) => {
       .not('provider_payment_id', 'is', null)
       .lte('updated_at', staleBefore)
       .order('updated_at', { ascending: true })
-      .limit(RECONCILE_LIMIT)
+      .limit(RECONCILE_DISCOVERY_LIMIT)
     if (candidateError) throw new Error('MERCADO_PAGO_RECONCILE_CANDIDATE_LOOKUP_FAILED')
 
     const candidates = (rawCandidates ?? []) as ReconcileCandidate[]
@@ -116,7 +117,9 @@ Deno.serve(async (req) => {
       for (const job of openJobs ?? []) activeJobs.add(String(job.entity_id))
     }
 
-    const enqueueCandidates = candidates.filter((candidate) => !quarantined.has(candidate.id) && !activeJobs.has(candidate.id))
+    const enqueueCandidates = candidates
+      .filter((candidate) => !quarantined.has(candidate.id) && !activeJobs.has(candidate.id))
+      .slice(0, RECONCILE_LIMIT)
     let enqueued = 0
     if (enqueueCandidates.length > 0) {
       const bucket = Math.floor(Date.now() / RECONCILE_BUCKET_MS)
