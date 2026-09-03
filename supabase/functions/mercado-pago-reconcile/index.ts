@@ -1,24 +1,15 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
-  assertMercadoPagoPaymentMatchesIntent,
-  mercadoPagoPaymentStorageSnapshot,
-  normalizeMercadoPagoPaymentStatus,
-  sanitizeMercadoPagoPayment,
-} from '../_shared/mercado-pago.ts'
+  reconcileMercadoPagoCandidate,
+  safeReconcileCode,
+  type ReconcileCandidate,
+} from './logic.ts'
 
-const RECONCILE_LIMIT = 20
+const RECONCILE_LIMIT = 10
+const RECONCILE_CONCURRENCY = 5
 const RECONCILE_MIN_AGE_MS = 2 * 60 * 1000
 const PROVIDER_TIMEOUT_MS = 15_000
-
-type Candidate = {
-  id: string
-  appointment_id: string
-  cash_amount: number | string
-  method: 'PIX' | 'CARD'
-  provider_payment_id: string
-  updated_at: string
-}
 
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
@@ -57,11 +48,6 @@ async function getOrder(orderId: string): Promise<Record<string, unknown>> {
   }
 }
 
-function safeCode(error: unknown): string {
-  const raw = error instanceof Error ? error.message : 'MERCADO_PAGO_RECONCILE_FAILED'
-  return raw.split(':')[0].replace(/[^A-Z0-9_]/gi, '_').slice(0, 120)
-}
-
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
@@ -81,55 +67,70 @@ Deno.serve(async (req) => {
       .limit(RECONCILE_LIMIT)
     if (error) throw new Error('MERCADO_PAGO_RECONCILE_CANDIDATE_LOOKUP_FAILED')
 
-    const candidates = (data ?? []) as Candidate[]
+    const candidates = (data ?? []) as ReconcileCandidate[]
     let succeeded = 0
     let changed = 0
     const failures: Array<{ transaction_id: string; code: string }> = []
 
-    for (const candidate of candidates) {
-      try {
-        const order = await getOrder(candidate.provider_payment_id)
-        const snapshot = sanitizeMercadoPagoPayment(order)
-        const storedSnapshot = mercadoPagoPaymentStorageSnapshot(snapshot)
-
-        try {
-          if (snapshot.id !== candidate.provider_payment_id) throw new Error('MERCADO_PAGO_PAYMENT_ID_MISMATCH')
-          assertMercadoPagoPaymentMatchesIntent(snapshot, {
-            transactionId: candidate.id,
-            cashAmount: candidate.cash_amount,
-            method: candidate.method,
-          })
-        } catch (validationError) {
-          const reason = safeCode(validationError)
-          const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
-            p_transaction_id: candidate.id,
-            p_provider_payment_id: snapshot.id || candidate.provider_payment_id,
-            p_reason: reason,
-            p_payload_json: storedSnapshot,
-          })
-          if (quarantineError) throw new Error('PAYMENT_MISMATCH_QUARANTINE_FAILED')
-          throw new Error('MERCADO_PAGO_PAYMENT_VALIDATION_FAILED')
-        }
-
-        const normalized = normalizeMercadoPagoPaymentStatus(snapshot.raw_status ?? snapshot.status)
+    const deps = {
+      getOrder,
+      quarantine: async (input: {
+        transactionId: string
+        providerPaymentId: string
+        reason: string
+        payload: Record<string, unknown>
+      }) => {
+        const { error: quarantineError } = await client.rpc('service_quarantine_provider_payment_mismatch', {
+          p_transaction_id: input.transactionId,
+          p_provider_payment_id: input.providerPaymentId,
+          p_reason: input.reason,
+          p_payload_json: input.payload,
+        })
+        if (quarantineError) throw new Error('PAYMENT_MISMATCH_QUARANTINE_FAILED')
+      },
+      apply: async (input: {
+        transactionId: string
+        providerPaymentId: string
+        normalizedStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
+        eventKey: string
+        payload: Record<string, unknown>
+        paidAt: string | null
+      }) => {
         const { data: applied, error: applyError } = await client.rpc('apply_provider_payment_status', {
-          p_transaction_id: candidate.id,
-          p_provider_payment_id: snapshot.id,
-          p_normalized_status: normalized,
-          p_event_key: `reconcile:${snapshot.id}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`,
-          p_payload_json: storedSnapshot,
-          p_paid_at: snapshot.date_approved,
+          p_transaction_id: input.transactionId,
+          p_provider_payment_id: input.providerPaymentId,
+          p_normalized_status: input.normalizedStatus,
+          p_event_key: input.eventKey,
+          p_payload_json: input.payload,
+          p_paid_at: input.paidAt,
         })
         if (applyError) throw new Error('PAYMENT_STATUS_APPLY_FAILED')
-        const state = applied && typeof applied === 'object' ? applied as Record<string, unknown> : {}
-        if (String(state.status ?? 'PENDING') !== 'PENDING') changed += 1
-        succeeded += 1
-      } catch (error) {
-        const code = safeCode(error)
-        failures.push({ transaction_id: candidate.id, code })
+        return applied
+      },
+    }
+
+    for (let offset = 0; offset < candidates.length; offset += RECONCILE_CONCURRENCY) {
+      const batch = candidates.slice(offset, offset + RECONCILE_CONCURRENCY)
+      const results = await Promise.all(batch.map(async (candidate) => {
+        try {
+          const result = await reconcileMercadoPagoCandidate(candidate, deps)
+          return { candidate, result, error: null as unknown }
+        } catch (error) {
+          return { candidate, result: null, error }
+        }
+      }))
+
+      for (const entry of results) {
+        if (!entry.error && entry.result) {
+          succeeded += 1
+          if (entry.result.changed) changed += 1
+          continue
+        }
+        const code = safeReconcileCode(entry.error)
+        failures.push({ transaction_id: entry.candidate.id, code })
         console.error('[OPERATION_ALERT] MERCADO_PAGO_RECONCILE_FAILED', {
-          transaction_id: candidate.id,
-          provider_order_id: candidate.provider_payment_id,
+          transaction_id: entry.candidate.id,
+          provider_order_id: entry.candidate.provider_payment_id,
           code,
         })
       }
@@ -146,7 +147,7 @@ Deno.serve(async (req) => {
     if (failures.length > 0) return jsonResponse(body, 502)
     return jsonResponse(body)
   } catch (error) {
-    const code = safeCode(error)
+    const code = safeReconcileCode(error)
     console.error('[OPERATION_ALERT] MERCADO_PAGO_RECONCILE_ABORTED', { code })
     return errorResponse(error, code === 'INTERNAL_AUTH_REQUIRED' ? 401 : 500)
   }
