@@ -2,7 +2,65 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(10);
+select plan(18);
+
+select ok(
+  not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'checkout_holds'
+      and column_name = 'recovery_public_token'
+  ),
+  'checkout holds no longer store a readable recovery capability'
+);
+
+select ok(
+  exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'checkout_holds'
+      and column_name = 'recovery_token_expires_at'
+      and is_nullable = 'YES'
+      and column_default is null
+  ),
+  'retired recovery expiry has no automatic capability lifetime'
+);
+
+select ok(
+  exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.checkout_holds'::regclass
+      and conname = 'checkout_holds_recovery_retired_check'
+      and convalidated
+      and pg_get_constraintdef(oid) ilike '%recovery_enabled%false%'
+  ),
+  'checkout holds are structurally prevented from re-enabling retired recovery'
+);
+
+select ok(
+  position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.get_checkout_hold_resume_context(text)'::regprocedure)) > 0
+  and position('recovery_public_token' in pg_get_functiondef('public.get_checkout_hold_resume_context(text)'::regprocedure)) = 0,
+  'stale recovery resume calls fail closed without a plaintext lookup'
+);
+
+select ok(
+  position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.set_checkout_hold_recovery_contact(text,text,boolean)'::regprocedure)) > 0,
+  'stale recovery mutation calls fail closed'
+);
+
+select ok(
+  position('CHECKOUT_RECOVERY_RETIRED' in pg_get_functiondef('public.public_bind_checkout_customer(text,text,text,text,text,boolean)'::regprocedure)) > 0,
+  'customer binding explicitly fails closed when recovery is requested'
+);
+
+select ok(
+  lower(pg_get_function_arguments('public.public_bind_checkout_customer(text,text,text,text,text,boolean)'::regprocedure))
+    like '%p_recovery_enabled boolean default false%',
+  'customer binding defaults recovery to false'
+);
 
 insert into public.resources (id, name, resource_type)
 values ('95000000-0000-0000-0000-000000000001', 'RECOVERY RESOURCE', 'PERSON');
@@ -60,9 +118,7 @@ insert into public.checkout_holds (
   pricing_version,
   duration_minutes,
   resource_ids,
-  quote_snapshot,
-  recovery_public_token,
-  recovery_token_expires_at
+  quote_snapshot
 ) values (
   '95000000-0000-0000-0000-000000000050',
   encode(digest('checkout-recovery-token', 'sha256'), 'hex'),
@@ -81,9 +137,7 @@ insert into public.checkout_holds (
   'recovery-v1',
   60,
   array['95000000-0000-0000-0000-000000000001'::uuid],
-  '{}'::jsonb,
-  'resume-recovery-token',
-  now() + interval '7 days'
+  '{}'::jsonb
 );
 
 insert into public.resource_allocations (
@@ -103,17 +157,29 @@ insert into public.resource_allocations (
 select is(
   (select recovery_enabled from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
   false,
-  'new holds do not opt into direct WhatsApp recovery'
+  'new holds cannot opt into retired recovery'
+);
+
+select ok(
+  (select recovery_token_expires_at is null from public.checkout_holds where id = '95000000-0000-0000-0000-000000000050'),
+  'new holds receive no automatic recovery expiry'
 );
 
 select ok(
   not has_function_privilege('anon','public.set_checkout_hold_recovery_contact(text,text,boolean)','EXECUTE'),
-  'anonymous clients cannot enable retired direct recovery'
+  'anonymous clients cannot mutate retired recovery'
 );
 
 select ok(
   not has_function_privilege('anon','public.get_checkout_hold_resume_context(text)','EXECUTE'),
   'anonymous clients cannot resolve retired recovery links'
+);
+
+select throws_ok(
+  $$select public.public_bind_checkout_customer('checkout-recovery-token','Recovery Customer','recovery.customer@example.com','48999991234',null::text,true)$$,
+  'P0001',
+  'CHECKOUT_RECOVERY_RETIRED',
+  'customer binding cannot re-enable retired recovery'
 );
 
 update public.checkout_holds
@@ -151,23 +217,10 @@ select ok(
   'hold does not record a retired recovery enqueue'
 );
 
-select public.expire_due_checkout_holds();
-
-select is(
-  (
-    select count(*)::integer
-    from public.integration_jobs
-    where entity_id = '95000000-0000-0000-0000-000000000050'
-      and job_type = 'CHECKOUT_HOLD_EXPIRED_RECOVERY'
-  ),
-  0,
-  'repeated expiry remains free of direct WhatsApp recovery jobs'
-);
-
 select is(
   (select is_active from public.message_templates where template_key = 'checkout_hold_expired_recovery'),
   false,
-  'legacy WhatsApp recovery template is inactive'
+  'legacy WhatsApp recovery template remains inactive'
 );
 
 select ok(
