@@ -57,7 +57,13 @@ Deno.serve(async (req) => {
     const internalSecret = requiredEnv('INTEGRATION_INTERNAL_SECRET')
     const integration = await invokeWorker(base, internalSecret, 'integration-worker')
     const balance = await invokeWorker(base, internalSecret, 'balance-collection-worker')
-    return json({ ok: true, integration_worker: integration.result, balance_worker: balance.result })
+    const mercadoPagoReconcile = await invokeWorker(base, internalSecret, 'mercado-pago-reconcile')
+    return json({
+      ok: true,
+      integration_worker: integration.result,
+      balance_worker: balance.result,
+      mercado_pago_reconcile: mercadoPagoReconcile.result,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'GITHUB_OIDC_INVALID'
     console.error('Integration worker trigger rejected', { code: message.split(':')[0] })
