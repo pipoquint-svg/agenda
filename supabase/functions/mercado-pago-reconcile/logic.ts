@@ -41,6 +41,10 @@ export function safeReconcileCode(error: unknown): string {
   return raw.split(':')[0].replace(/[^A-Z0-9_]/gi, '_').slice(0, 120)
 }
 
+export function reconcileRetryDelaySeconds(attempt: number): number | null {
+  return [30, 120, 600, 1800][attempt - 1] ?? null
+}
+
 export async function reconcileMercadoPagoCandidate(
   candidate: ReconcileCandidate,
   deps: ReconcileDependencies,
