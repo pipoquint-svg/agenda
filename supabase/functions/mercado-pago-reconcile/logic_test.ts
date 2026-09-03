@@ -1,4 +1,8 @@
-import { reconcileMercadoPagoCandidate, type ReconcileCandidate } from './logic.ts'
+import {
+  reconcileMercadoPagoCandidate,
+  reconcileRetryDelaySeconds,
+  type ReconcileCandidate,
+} from './logic.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -56,7 +60,7 @@ Deno.test('lost webhook converges pending local payment to approved provider sta
   assert(quarantineCalls === 0, 'valid provider state must not be quarantined')
 })
 
-Deno.test('pending provider state remains pending and is safe to retry later', async () => {
+Deno.test('pending provider state remains pending and is safe for the next polling cycle', async () => {
   const result = await reconcileMercadoPagoCandidate(candidate, {
     getOrder: async () => orderFor(candidate, 'created'),
     quarantine: async () => { throw new Error('unexpected quarantine') },
@@ -84,4 +88,12 @@ Deno.test('provider mismatch is quarantined and never applied', async () => {
   assert(thrown === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED', 'mismatch must fail closed')
   assert(quarantined === 1, 'mismatch must be quarantined exactly once')
   assert(applied === 0, 'mismatched provider state must never reach the financial state machine')
+})
+
+Deno.test('transient reconciliation errors use bounded integration-job backoff', () => {
+  assert(reconcileRetryDelaySeconds(1) === 30, 'attempt 1 backoff mismatch')
+  assert(reconcileRetryDelaySeconds(2) === 120, 'attempt 2 backoff mismatch')
+  assert(reconcileRetryDelaySeconds(3) === 600, 'attempt 3 backoff mismatch')
+  assert(reconcileRetryDelaySeconds(4) === 1800, 'attempt 4 backoff mismatch')
+  assert(reconcileRetryDelaySeconds(5) === null, 'attempt 5 must be terminal for this job')
 })
