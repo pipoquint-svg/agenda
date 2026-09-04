@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/item-01-local-homologation
+      - fix/item-a-no-show
   workflow_dispatch:
 
 permissions:

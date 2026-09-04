@@ -237,4 +237,36 @@ $$;
 revoke all on function public.qa_diagnose_local_payment_apply(text) from public, anon, authenticated;
 grant execute on function public.qa_diagnose_local_payment_apply(text) to service_role;
 
+
+
+-- Item A test-only evidence reader. This exists only in the disposable local stack
+-- and does not widen production access to appointment_authorship_events.
+create or replace function public.qa_get_no_show_evidence(p_appointment_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((
+    select jsonb_build_object(
+      'action', e.action,
+      'origin', e.origin,
+      'admin_user_id', e.admin_user_id,
+      'reason', e.reason,
+      'has_ip', e.ip_address is not null,
+      'has_user_agent', nullif(btrim(e.user_agent), '') is not null,
+      'has_request_id', nullif(btrim(e.request_id), '') is not null
+    )
+    from public.appointment_authorship_events e
+    where e.appointment_id = p_appointment_id
+      and e.action = 'APPOINTMENT_NO_SHOW'
+    order by e.occurred_at desc
+    limit 1
+  ), '{}'::jsonb);
+$$;
+
+revoke all on function public.qa_get_no_show_evidence(uuid) from public, anon, authenticated;
+grant execute on function public.qa_get_no_show_evidence(uuid) to service_role;
+
 commit;

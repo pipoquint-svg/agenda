@@ -269,36 +269,100 @@ Deno.test('Phase 2A ACL baseline: Pix signal and balance succeed against rebuilt
   assert(afterFull.appointment?.appointment_status === 'CONFIRMED', 'appointment must be confirmed after payment')
 })
 
-Deno.test('Item 7 known defect is isolated: NO_SHOW fails exactly because the RPC is absent', async () => {
-  const booking = await createBooking('2035-11-12T10:00:00-03:00', 'no-show-known-failure')
+Deno.test('Item A: NO_SHOW preserves debt, creates no refund or credit, and records evidenced authorship', async () => {
+  const booking = await createBooking('2035-11-12T10:00:00-03:00', 'item-a-no-show')
+  await payPix(booking.accessToken, 'MINIMUM')
+
+  const serviceHeaders = serviceRoleHeaders()
+  const beforeFinancial = await requestJson(`${API_URL}/rest/v1/rpc/get_appointment_financial_summary`, {
+    method: 'POST',
+    headers: serviceHeaders,
+    body: JSON.stringify({ p_appointment_id: booking.appointmentId }),
+  })
+  const balanceBefore = Number(beforeFinancial.contract_balance)
+  assert(closeTo(balanceBefore, 90), `NO_SHOW fixture must start with 90 open, got ${balanceBefore}`)
+
+  const beforeRefunds = await requestJson(
+    `${API_URL}/rest/v1/payment_transactions?appointment_id=eq.${encodeURIComponent(booking.appointmentId)}&transaction_type=eq.REFUND&select=id`,
+    { method: 'GET', headers: serviceHeaders },
+  )
+  const beforeCredits = await requestJson(
+    `${API_URL}/rest/v1/customer_balance_movements?appointment_id=eq.${encodeURIComponent(booking.appointmentId)}&select=id`,
+    { method: 'GET', headers: serviceHeaders },
+  )
+  assert(Array.isArray(beforeRefunds), 'refund baseline must be a list')
+  assert(Array.isArray(beforeCredits), 'credit baseline must be a list')
+
+  await requestJson(
+    `${API_URL}/rest/v1/appointments?id=eq.${encodeURIComponent(booking.appointmentId)}`,
+    {
+      method: 'PATCH',
+      headers: serviceHeaders,
+      body: JSON.stringify({
+        start_at: '2025-01-15T10:00:00-03:00',
+        end_at: '2025-01-15T11:00:00-03:00',
+        core_start_at: '2025-01-15T10:00:00-03:00',
+        core_end_at: '2025-01-15T11:00:00-03:00',
+      }),
+    },
+    [204],
+  )
+
   const adminToken = await createAdminSession()
-  const result = await adminChange(adminToken, {
+  const changed = await adminChange(adminToken, {
     action: 'NO_SHOW',
     appointment_id: booking.appointmentId,
-    reason: 'Expected failure for Item 7',
-  }, [400])
-  const code = String(result.error?.code ?? '')
-  assert(
-    code.includes('service_admin_mark_appointment_no_show_evidenced'),
-    `NO_SHOW must fail only on missing Item 7 RPC; received: ${code}`,
-  )
-})
+    reason: 'Item A controlled local no-show evidence',
+  })
+  assert(changed.status === 'NO_SHOW', `NO_SHOW endpoint must succeed, got ${JSON.stringify(changed)}`)
 
-// TODO(Item 7): remove `ignore: true` when
-// public.service_admin_mark_appointment_no_show_evidenced is implemented/aligned.
-// Item 7 is not complete while this expected-failure marker exists.
-Deno.test({
-  name: 'TODO(Item 7): NO_SHOW succeeds and persists NO_SHOW once missing RPC is restored',
-  ignore: true,
-  fn: async () => {
-    const booking = await createBooking('2035-11-13T10:00:00-03:00', 'no-show-item-7-target')
-    const adminToken = await createAdminSession()
-    await adminChange(adminToken, {
-      action: 'NO_SHOW',
-      appointment_id: booking.appointmentId,
-      reason: 'Item 7 target behavior',
-    })
-    const appointment = await readAppointment(booking.appointmentId)
-    assert(appointment.status === 'NO_SHOW', `Item 7 target status must be NO_SHOW, got ${appointment.status}`)
-  },
+  const appointment = await readAppointment(booking.appointmentId)
+  assert(appointment.status === 'NO_SHOW', `status must be NO_SHOW, got ${appointment.status}`)
+
+  const afterRefunds = await requestJson(
+    `${API_URL}/rest/v1/payment_transactions?appointment_id=eq.${encodeURIComponent(booking.appointmentId)}&transaction_type=eq.REFUND&select=id`,
+    { method: 'GET', headers: serviceHeaders },
+  )
+  assert(Array.isArray(afterRefunds), 'refund result must be a list')
+  assert(afterRefunds.length === beforeRefunds.length, 'NO_SHOW must not create a refund transaction')
+
+  const afterCredits = await requestJson(
+    `${API_URL}/rest/v1/customer_balance_movements?appointment_id=eq.${encodeURIComponent(booking.appointmentId)}&select=id`,
+    { method: 'GET', headers: serviceHeaders },
+  )
+  assert(Array.isArray(afterCredits), 'credit result must be a list')
+  assert(afterCredits.length === beforeCredits.length, 'NO_SHOW must not create customer credit')
+
+  const afterFinancial = await requestJson(`${API_URL}/rest/v1/rpc/get_appointment_financial_summary`, {
+    method: 'POST',
+    headers: serviceHeaders,
+    body: JSON.stringify({ p_appointment_id: booking.appointmentId }),
+  })
+  const balanceAfter = Number(afterFinancial.contract_balance)
+  assert(balanceAfter > 0, 'NO_SHOW balance must remain due')
+  assert(closeTo(balanceAfter, balanceBefore), `NO_SHOW balance changed from ${balanceBefore} to ${balanceAfter}`)
+
+  const auditRows = await requestJson(
+    `${API_URL}/rest/v1/audit_logs?entity_id=eq.${encodeURIComponent(booking.appointmentId)}&action=eq.APPOINTMENT_NO_SHOW&select=admin_user_id,origin,action,after_json`,
+    { method: 'GET', headers: serviceHeaders },
+  )
+  assert(Array.isArray(auditRows) && auditRows.length === 1, 'NO_SHOW must create exactly one audit log')
+  assert(/^[0-9a-f-]{36}$/i.test(String(auditRows[0].admin_user_id ?? '')), 'audit log must identify the admin author')
+  assert(auditRows[0].origin === 'ADMIN', 'audit log origin must be ADMIN')
+  assert(
+    auditRows[0].after_json?.financial_rule === 'SERVICE_PERFORMED_NO_REFUND_NO_CREDIT_BALANCE_DUE_REMAINS',
+    'audit log must record the no-refund/no-credit/open-balance rule',
+  )
+
+  const evidence = await requestJson(`${API_URL}/rest/v1/rpc/qa_get_no_show_evidence`, {
+    method: 'POST',
+    headers: serviceHeaders,
+    body: JSON.stringify({ p_appointment_id: booking.appointmentId }),
+  })
+  assert(evidence.action === 'APPOINTMENT_NO_SHOW', 'authorship event action must identify NO_SHOW')
+  assert(evidence.origin === 'ADMIN_UI', 'authorship event origin must identify the administrative screen')
+  assert(/^[0-9a-f-]{36}$/i.test(String(evidence.admin_user_id ?? '')), 'authorship event must identify the admin author')
+  assert(evidence.has_ip === true, 'authorship event must retain IP evidence')
+  assert(evidence.has_user_agent === true, 'authorship event must retain user-agent evidence')
+  assert(evidence.has_request_id === true, 'authorship event must retain request evidence')
 })
