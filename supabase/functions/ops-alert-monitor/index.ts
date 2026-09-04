@@ -5,7 +5,7 @@ import {
   GITHUB_OIDC_ISSUER,
   GITHUB_OPS_ALERT_AUDIENCE,
 } from '../_shared/github-oidc.ts'
-import { runOpsAlertCycle } from '../_shared/ops-alerts.ts'
+import { resolveOpsAlertRecipient, runOpsAlertCycle } from '../_shared/ops-alerts.ts'
 import { adminClient } from '../_shared/supabase.ts'
 
 const GITHUB_JWKS = createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'))
@@ -22,14 +22,6 @@ function bearerToken(req: Request): string {
   const match = header.match(/^Bearer\s+(.+)$/i)
   if (!match) throw new Error('GITHUB_OIDC_REQUIRED')
   return match[1]
-}
-
-function alertRecipient(): string {
-  const value = Deno.env.get('OPS_ALERT_RECIPIENT_EMAIL')?.trim()
-    || Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim()
-    || ''
-  if (!value || !value.includes('@')) throw new Error('OPS_ALERT_RECIPIENT_MISSING')
-  return value
 }
 
 async function sha256(value: string): Promise<string> {
@@ -49,7 +41,11 @@ Deno.serve(async (req) => {
 
     const sender = notificationSenderForScope('BLACKSHEEP')
     if (!sender) throw new Error('OPS_ALERT_SENDER_MISSING')
-    const recipient = alertRecipient()
+    const recipient = resolveOpsAlertRecipient({
+      dedicatedRecipient: Deno.env.get('OPS_ALERT_RECIPIENT_EMAIL'),
+      replyTo: sender.replyTo,
+      sender: sender.from,
+    })
     const now = new Date()
     const result = await runOpsAlertCycle(adminClient(), {
       now,

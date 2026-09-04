@@ -4,6 +4,7 @@ export const OPS_INTEGRATION_FAILURE_THRESHOLD = 3
 
 const MINUTE_MS = 60_000
 const CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,79}$/
+const EMAIL_ADDRESS_PATTERN = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/
 
 export type OpsIncidentCategory =
   | 'PAYMENT_STUCK'
@@ -42,6 +43,12 @@ export type OpsAlertState = {
 }
 
 export type OpsAlertEmail = { subject: string; text: string; html: string }
+
+export type OpsAlertRecipientSources = {
+  dedicatedRecipient?: string | null
+  replyTo?: string | null
+  sender?: string | null
+}
 
 type QueryResult<T> = PromiseLike<{ data: T | null; error: { message?: string; code?: string } | null }>
 type OpsClient = {
@@ -87,6 +94,22 @@ export function sanitizeOpsCode(value: unknown): string {
   const raw = typeof value === 'string' ? value.trim() : ''
   const prefix = raw.includes(':') ? raw.slice(0, raw.indexOf(':')).trim() : raw
   return CODE_PATTERN.test(prefix) ? prefix : 'UNCLASSIFIED_ERROR'
+}
+
+function extractEmailAddress(value: string | null | undefined): string | null {
+  const raw = value?.trim() ?? ''
+  if (!raw || raw.includes('\r') || raw.includes('\n')) return null
+  const namedAddress = raw.match(/^[^<>]*<([^<>]+)>$/)?.[1]?.trim()
+  const candidate = namedAddress ?? raw
+  return EMAIL_ADDRESS_PATTERN.test(candidate) ? candidate : null
+}
+
+export function resolveOpsAlertRecipient(sources: OpsAlertRecipientSources): string {
+  for (const value of [sources.dedicatedRecipient, sources.replyTo, sources.sender]) {
+    const address = extractEmailAddress(value)
+    if (address) return address
+  }
+  throw new Error('OPS_ALERT_RECIPIENT_MISSING')
 }
 
 export function buildOpsIncidents(snapshot: OpsSnapshot, now = new Date()): OpsIncident[] {

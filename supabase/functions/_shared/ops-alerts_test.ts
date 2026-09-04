@@ -85,4 +85,19 @@ Deno.test('Item C resolves the operational recipient from the canonical sender w
     sender: 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>',
   })
   assert(recipient === 'agenda@blacksheepestudiocriativo.com.br', `unexpected recipient: ${recipient}`)
+
+  const dedicated = resolveOpsAlertRecipient({
+    dedicatedRecipient: 'operacoes@example.test',
+    replyTo: 'respostas@example.test',
+    sender: 'BlackSheep <agenda@example.test>',
+  })
+  assert(dedicated === 'operacoes@example.test', 'dedicated recipient must have priority')
+
+  let rejected = false
+  try {
+    resolveOpsAlertRecipient({ sender: 'agenda@example.test\nBcc: attacker@example.test' })
+  } catch (error) {
+    rejected = error instanceof Error && error.message === 'OPS_ALERT_RECIPIENT_MISSING'
+  }
+  assert(rejected, 'header-injection recipient must be rejected')
 })
