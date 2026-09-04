@@ -66,7 +66,9 @@ Deno.test('Item C sanitizes codes and alert content contains no supplied PII, to
     '4111111111111111',
     '9876.54',
   ]
-  assert(sanitizeOpsCode(`rpc failed ${sentinels.join(' ')}`) === 'RPC_FAILED_CLIENTE_SECRETO_EXAMPLE_TEST_5511999999999_TOK_SUPER_SECRET_123', 'sanitization contract drifted')
+  const sanitized = sanitizeOpsCode(`rpc failed ${sentinels.join(' ')}`)
+  assert(sanitized === 'UNCLASSIFIED_ERROR', 'free-form errors must collapse to a non-sensitive code')
+  for (const sentinel of sentinels) assert(!sanitized.includes(sentinel), `sanitized code leaked: ${sentinel}`)
 
   const rendered = renderOpsAlertEmail(buildOpsIncidents(completeSnapshot(), NOW), NOW)
   const body = `${rendered.subject}\n${rendered.text}\n${rendered.html}`

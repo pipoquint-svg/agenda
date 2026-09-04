@@ -188,6 +188,11 @@ jobs:
             exit 1
           fi
 
+          deno test \
+            --allow-env=LOCAL_API_URL,LOCAL_SERVICE_ROLE_KEY \
+            --allow-net=127.0.0.1:54321,localhost:54321 \
+            tests/local-verification/item_c_ops_alert_e2e_test.ts
+
       - name: Stop local Supabase
         if: always()
         run: |
