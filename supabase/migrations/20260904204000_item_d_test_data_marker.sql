@@ -80,7 +80,8 @@ create trigger trg_appointments_propagate_test_marker
 after update of is_test on public.appointments
 for each row execute function public.service_propagate_appointment_test_marker();
 
--- Exact audited pre-opening appointment set. A clean/local rebuild has zero of these IDs.
+-- Exact audited pre-opening appointment set re-read from production immediately
+-- before this migration was finalized. A clean/local rebuild has zero of these IDs.
 -- A partial match is always unsafe and aborts the migration.
 do $$
 declare
@@ -89,16 +90,16 @@ begin
   select count(*)::integer into v_found
   from public.appointments
   where id = any(array[
-    'bb9d9d3e-6a51-4d43-86c5-9ab925da9dc4'::uuid,
-    '92d350d7-ea63-40ea-aae0-e2431ae3e341'::uuid,
-    '2da971ae-66f8-4bf8-8599-24a014c2bfa2'::uuid,
-    'b52f0103-5815-4f5c-9900-ca09fff86a96'::uuid,
-    '69f1ee55-b56f-4881-bc92-9cfe1c4e77fb'::uuid,
-    '69b0e54e-2b6d-4506-a89a-1ed96ab03452'::uuid,
-    '99d3e40b-4470-4eab-a541-6b90dbbbe31f'::uuid,
-    '57186cdb-9c2b-45de-ac03-ee55fdbfff05'::uuid,
-    'd052a506-39e8-4cad-905f-b14fb87dc866'::uuid,
-    '7439ea01-28fb-4a73-8b2a-dca4880b5409'::uuid
+    '2459b897-4b81-4186-bc4a-284f275a76df'::uuid,
+    'da207b65-88b8-41ce-999b-f3263b1d31ed'::uuid,
+    '0fcbed97-3f4f-4ea4-a803-74efce86d24b'::uuid,
+    'ae412689-cce7-43ea-9461-560764d3cc91'::uuid,
+    '44fc4f56-d49b-40be-934a-6f3edc928853'::uuid,
+    '46cd279b-922f-4392-9d34-8adbee5906b2'::uuid,
+    '4e2a9e52-1399-4139-8463-b593f219f8b2'::uuid,
+    '1b531f34-630f-4619-8824-a891866d7236'::uuid,
+    '6fc4914f-36b2-4b22-a592-1cf8c0bb7c91'::uuid,
+    'bd8647e0-d586-459f-aadf-39f78dc71749'::uuid
   ]);
 
   if v_found not in (0,10) then
@@ -109,16 +110,16 @@ begin
     update public.appointments
        set is_test = true
      where id = any(array[
-      'bb9d9d3e-6a51-4d43-86c5-9ab925da9dc4'::uuid,
-      '92d350d7-ea63-40ea-aae0-e2431ae3e341'::uuid,
-      '2da971ae-66f8-4bf8-8599-24a014c2bfa2'::uuid,
-      'b52f0103-5815-4f5c-9900-ca09fff86a96'::uuid,
-      '69f1ee55-b56f-4881-bc92-9cfe1c4e77fb'::uuid,
-      '69b0e54e-2b6d-4506-a89a-1ed96ab03452'::uuid,
-      '99d3e40b-4470-4eab-a541-6b90dbbbe31f'::uuid,
-      '57186cdb-9c2b-45de-ac03-ee55fdbfff05'::uuid,
-      'd052a506-39e8-4cad-905f-b14fb87dc866'::uuid,
-      '7439ea01-28fb-4a73-8b2a-dca4880b5409'::uuid
+      '2459b897-4b81-4186-bc4a-284f275a76df'::uuid,
+      'da207b65-88b8-41ce-999b-f3263b1d31ed'::uuid,
+      '0fcbed97-3f4f-4ea4-a803-74efce86d24b'::uuid,
+      'ae412689-cce7-43ea-9461-560764d3cc91'::uuid,
+      '44fc4f56-d49b-40be-934a-6f3edc928853'::uuid,
+      '46cd279b-922f-4392-9d34-8adbee5906b2'::uuid,
+      '4e2a9e52-1399-4139-8463-b593f219f8b2'::uuid,
+      '1b531f34-630f-4619-8824-a891866d7236'::uuid,
+      '6fc4914f-36b2-4b22-a592-1cf8c0bb7c91'::uuid,
+      'bd8647e0-d586-459f-aadf-39f78dc71749'::uuid
     ]);
   end if;
 end;
