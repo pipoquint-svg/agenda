@@ -6,6 +6,7 @@ python3 scripts/production_migration_history_baseline.py audit-local
 python3 - <<'PY'
 import importlib.util
 import sys
+import tempfile
 from pathlib import Path
 
 path = Path('scripts/production_migration_history_baseline.py')
@@ -39,6 +40,22 @@ assert module.parse_remote_versions(sample_cli_2111) == {
     '20260821160000',
     '20260827094437',
 }
+
+# Regression found while preparing PR #393: the Item 4 verifier must preserve
+# migration-chain integrity without freezing Item 4 as the final migration.
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    for name in (
+        f'{module.BASELINE_CUTOFF}_baseline.sql',
+        f'{module.TARGET_VERSION}_item4.sql',
+        '20260903000000_after_item4.sql',
+        '20260904000054_item_a_restore_no_show.sql',
+    ):
+        (root / name).write_text('-- test\n', encoding='utf-8')
+    versions = module.read_local_versions(root)
+    assert module.TARGET_VERSION in versions
+    assert '20260903000000' in versions
+    assert '20260904000054' in versions
 
 # State-machine resume contract: additions may be partially completed, then
 # legacy removals may be partially completed, but foreign states fail closed.
