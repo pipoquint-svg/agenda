@@ -110,9 +110,9 @@ jobs:
           grep '^ACL_ROW_DIFF' /tmp/acl-after.log > /tmp/acl-after.diff.tsv || true
           test ! -s /tmp/acl-after.diff.tsv
 
-          grep -F $'ACL_SUMMARY\tfunction\t415\t800\te117d0693ec6bee7118a61d950f73e3aace623f01372d57e1189a70249b7702a' /tmp/acl-after.log
-          grep -F $'ACL_SUMMARY\tsequence\t2\t12\ta22f76984f935d27010a77efbbe5e0a13a21a2b818cd959edaafc37067a172ea' /tmp/acl-after.log
-          grep -F $'ACL_SUMMARY\ttable\t105\t1614\tfba3298eb16529b3f223c6def1fe895194534a5883595608923a5ecd0a3c4df4' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\tfunction\t416\t802\t1bdbca6d53dc8c880446cb69b6c3f439c79acbacbb65eaa60d79e06fc810fc01' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\tsequence\t3\t15\tae67d7f57fc8786c476d71d39252720bc9a2bdc650696ff198556de85cc64294' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\ttable\t107\t1634\t29e28820938fa434b31793f0a66609b62829fc65a27d188f45ae3d59dbef5cdc' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\tview\t8\t128\tf09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be' /tmp/acl-after.log
 
           if awk -F '\t' '$1=="ACL" && ($2=="table" || $2=="view" || $2=="sequence") && ($5=="anon" || $5=="authenticated") { found=1 } END { exit(found ? 0 : 1) }' /tmp/acl-after.tsv; then
