@@ -1,0 +1,133 @@
+name: Pre-Cutover Production Backup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agenda-pre-cutover-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Backup Agenda Produção
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: sbexdggbwqvyhbkatucs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Verify backup credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_DB_PASSWORD"
+          test "$SUPABASE_PROJECT_REF" = "sbexdggbwqvyhbkatucs"
+
+      - name: Link production database
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Create backup metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p backup
+          {
+            echo "project_ref=$SUPABASE_PROJECT_REF"
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "commit=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "created_at_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > backup/METADATA.txt
+
+      - name: Dump database roles
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db dump \
+            --linked \
+            -f backup/roles.sql \
+            --role-only
+
+      - name: Dump database schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db dump \
+            --linked \
+            -f backup/schema.sql
+
+      - name: Dump database data
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db dump \
+            --linked \
+            -f backup/data.sql \
+            --use-copy \
+            --data-only \
+            -x "storage.buckets_vectors" \
+            -x "storage.vector_indexes"
+
+      - name: Dump migration history schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db dump \
+            --linked \
+            -f backup/migrations_schema.sql \
+            --schema supabase_migrations
+
+      - name: Dump migration history data
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db dump \
+            --linked \
+            -f backup/migrations_data.sql \
+            --use-copy \
+            --data-only \
+            --schema supabase_migrations
+
+      - name: Verify backup files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s backup/roles.sql
+          test -s backup/schema.sql
+          test -s backup/data.sql
+          test -s backup/migrations_schema.sql
+          test -s backup/migrations_data.sql
+          sha256sum backup/*.sql backup/METADATA.txt > backup/SHA256SUMS.txt
+
+      - name: Package backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf agenda-production-pre-cutover-${GITHUB_RUN_ID}.tar.gz backup
+
+      - name: Upload protected backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agenda-production-pre-cutover-${{ github.run_id }}
+          path: agenda-production-pre-cutover-${{ github.run_id }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
