@@ -1,5 +1,6 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
+import { recordOpsEdgeFailure } from '../_shared/ops-alerts.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -95,12 +96,14 @@ Deno.serve(async (req) => {
     return response({ hold: data }, 201)
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CHECKOUT_HOLD_CREATE_FAILED'
-    const publicCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|BOOKING_PAGE_REQUIRED|SERVICE_REQUIRED|SERVICE_EMPLOYEE_REQUIRED|REQUESTED_START_REQUIRED|INVALID_PEOPLE_COUNT|INVALID_DURATION_BLOCKS|INVALID_CONTRACTED_MINUTES|AMBIGUOUS_DURATION_CONTRACT|LEGACY_DURATION_CONTRACT_EXPIRED|ATTRIBUTION_INVALID|BOOKING_PAGE_NOT_FOUND|SERVICE_NOT_AVAILABLE|SERVICE_EMPLOYEE_NOT_AVAILABLE|INVALID_BOOKING_SELECTION|SLOT_NOT_AVAILABLE|SLOT_NO_LONGER_AVAILABLE|RESOURCE_NOT_AVAILABLE|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING)/)?.[1] ?? code.split(':')[0]
+    const knownCode = code.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|BOOKING_PAGE_REQUIRED|SERVICE_REQUIRED|SERVICE_EMPLOYEE_REQUIRED|REQUESTED_START_REQUIRED|INVALID_PEOPLE_COUNT|INVALID_DURATION_BLOCKS|INVALID_CONTRACTED_MINUTES|AMBIGUOUS_DURATION_CONTRACT|LEGACY_DURATION_CONTRACT_EXPIRED|ATTRIBUTION_INVALID|BOOKING_PAGE_NOT_FOUND|SERVICE_NOT_AVAILABLE|SERVICE_EMPLOYEE_NOT_AVAILABLE|INVALID_BOOKING_SELECTION|SLOT_NOT_AVAILABLE|SLOT_NO_LONGER_AVAILABLE|RESOURCE_NOT_AVAILABLE|INVALID_EXTRA_SELECTION|REQUIRED_EXTRA_MISSING)/)?.[1]
+    const publicCode = knownCode ?? code.split(':')[0]
     const status = publicCode === 'RATE_LIMITED' ? 429
       : publicCode === 'RATE_LIMIT_BACKEND_FAILED' ? 503
       : publicCode === 'SLOT_NOT_AVAILABLE' || publicCode === 'SLOT_NO_LONGER_AVAILABLE' || publicCode === 'RESOURCE_NOT_AVAILABLE' ? 409
       : publicCode === 'LEGACY_DURATION_CONTRACT_EXPIRED' ? 410
       : 400
+    await recordOpsEdgeFailure(adminClient, 'booking-hold', publicCode, status, !knownCode)
     return response({ error: { code: publicCode } }, status)
   }
 })

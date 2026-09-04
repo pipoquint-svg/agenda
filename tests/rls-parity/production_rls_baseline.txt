@@ -79,6 +79,8 @@ TABLE|notification_template_versions|true|false
 TABLE|operation_service_types|true|false
 TABLE|operation_setting_overrides|true|false
 TABLE|operation_settings|false|false
+TABLE|ops_alert_states|true|false
+TABLE|ops_edge_failure_events|true|false
 TABLE|payment_incidents|false|false
 TABLE|payment_provider_events|true|false
 TABLE|payment_transactions|true|false

@@ -113,6 +113,9 @@ verify_jwt = false
 [functions.integration-worker-trigger]
 verify_jwt = false
 
+[functions.ops-alert-monitor]
+verify_jwt = false
+
 # Public HTTP boundary for the isolated birthday scheduler. Supabase JWT verification is disabled
 # because this endpoint validates a dedicated GitHub Actions OIDC audience
 # and pins the exact birthday workflow before invoking the idempotent SQL runtime.

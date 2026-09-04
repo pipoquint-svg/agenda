@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-02",
-    "active_total": 64,
-    "verify_jwt_false": 49,
+    "captured_on": "2026-09-04",
+    "active_total": 65,
+    "verify_jwt_false": 50,
     "verify_jwt_true": 15,
-    "versioned_active": 59,
+    "versioned_active": 60,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -58,7 +58,8 @@
       "admin-special-calendar"
     ],
     "github_oidc": [
-      "integration-worker-trigger"
+      "integration-worker-trigger",
+      "ops-alert-monitor"
     ],
     "google_channel_token": [
       "google-webhook"

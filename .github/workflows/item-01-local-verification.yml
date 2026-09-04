@@ -1,5 +1,5 @@
 name: Item 1 Local Verification
-# Items A and B reuse this full local-stack gate.
+# Items A, B and C reuse this full local-stack gate.
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - fix/item-01-local-homologation
       - fix/item-a-no-show
       - fix/item-b-nfse-payment-methods
+      - feat/item-c-ops-alerts
   workflow_dispatch:
 
 permissions:
@@ -45,6 +46,7 @@ jobs:
           deno test supabase/functions/_shared/public-rate-limit_test.ts
           deno test supabase/functions/_shared/transactional-email_test.ts
           deno test supabase/functions/_shared/notification-email_test.ts
+          deno test supabase/functions/_shared/ops-alerts_test.ts
           deno test --allow-env supabase/functions/_shared/email-provider_test.ts
 
       - name: Type-check every Edge Function
@@ -185,6 +187,11 @@ jobs:
             cat /tmp/item01-functions.log >&2
             exit 1
           fi
+
+          deno test \
+            --allow-env=LOCAL_API_URL,LOCAL_SERVICE_ROLE_KEY \
+            --allow-net=127.0.0.1:54321,localhost:54321 \
+            tests/local-verification/item_c_ops_alert_e2e_test.ts
 
       - name: Stop local Supabase
         if: always()

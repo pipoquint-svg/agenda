@@ -89,11 +89,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 415 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=415 actual=%', v_public_function_count;
+  if v_public_function_count <> 416 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=416 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 361 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=361 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 362 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=362 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

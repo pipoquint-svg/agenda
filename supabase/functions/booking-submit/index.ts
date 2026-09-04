@@ -1,6 +1,7 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 import { sendPreReservationCreatedEmail } from '../_shared/prebook-email.ts'
+import { recordOpsEdgeFailure } from '../_shared/ops-alerts.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -50,5 +51,5 @@ Deno.serve(async(req)=>{
    }
   }
   return response({ok:true,appointment})
- }catch(error){const code=error instanceof Error?error.message:'CHECKOUT_SUBMIT_FAILED';const publicCode=code.split(':')[0];const neutral=['ONLINE_BOOKING_NOT_AVAILABLE','FREE_VISIT_NOT_AVAILABLE'].includes(publicCode)?'ONLINE_BOOKING_NOT_AVAILABLE':publicCode;const status=neutral==='RATE_LIMITED'?429:neutral==='RATE_LIMIT_BACKEND_FAILED'?503:neutral==='CHECKOUT_HOLD_NOT_ACTIVE'?409:neutral==='ONLINE_BOOKING_NOT_AVAILABLE'?403:400;return response({error:{code:neutral}},status)}
+ }catch(error){const code=error instanceof Error?error.message:'CHECKOUT_SUBMIT_FAILED';const publicCode=code.split(':')[0];const neutral=['ONLINE_BOOKING_NOT_AVAILABLE','FREE_VISIT_NOT_AVAILABLE'].includes(publicCode)?'ONLINE_BOOKING_NOT_AVAILABLE':publicCode;const status=neutral==='RATE_LIMITED'?429:neutral==='RATE_LIMIT_BACKEND_FAILED'?503:neutral==='CHECKOUT_HOLD_NOT_ACTIVE'?409:neutral==='ONLINE_BOOKING_NOT_AVAILABLE'?403:400;await recordOpsEdgeFailure(adminClient,'booking-submit',neutral,status,publicCode==='CHECKOUT_SUBMIT_FAILED');return response({error:{code:neutral}},status)}
 })

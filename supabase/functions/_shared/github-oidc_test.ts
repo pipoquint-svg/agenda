@@ -1,4 +1,4 @@
-import { assertGitHubBirthdayClaims, assertGitHubWorkerClaims } from './github-oidc.ts'
+import { assertGitHubBirthdayClaims, assertGitHubOpsAlertClaims, assertGitHubWorkerClaims } from './github-oidc.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -22,6 +22,13 @@ function validBirthdayPayload(): Record<string, unknown> {
   }
 }
 
+function validOpsAlertPayload(): Record<string, unknown> {
+  return {
+    ...validWorkerPayload(),
+    workflow_ref: 'pipoquint-svg/agenda/.github/workflows/ops-alert-schedule.yml@refs/heads/main',
+  }
+}
+
 Deno.test('GitHub OIDC worker claims accept only the pinned scheduled workflow', () => {
   assertGitHubWorkerClaims(validWorkerPayload())
   assertGitHubWorkerClaims({ ...validWorkerPayload(), event_name: 'workflow_dispatch' })
@@ -30,6 +37,11 @@ Deno.test('GitHub OIDC worker claims accept only the pinned scheduled workflow',
 Deno.test('GitHub OIDC birthday claims accept only the pinned birthday workflow', () => {
   assertGitHubBirthdayClaims(validBirthdayPayload())
   assertGitHubBirthdayClaims({ ...validBirthdayPayload(), event_name: 'workflow_dispatch' })
+})
+
+Deno.test('GitHub OIDC ops alert claims accept only the pinned ops workflow', () => {
+  assertGitHubOpsAlertClaims(validOpsAlertPayload())
+  assertGitHubOpsAlertClaims({ ...validOpsAlertPayload(), event_name: 'workflow_dispatch' })
 })
 
 Deno.test('GitHub OIDC worker claims reject another repository id', () => {
@@ -49,6 +61,8 @@ Deno.test('GitHub OIDC claims reject another workflow, ref, or event', () => {
     [assertGitHubWorkerClaims, { ...validWorkerPayload(), event_name: 'pull_request' }],
     [assertGitHubBirthdayClaims, validWorkerPayload()],
     [assertGitHubWorkerClaims, validBirthdayPayload()],
+    [assertGitHubOpsAlertClaims, validWorkerPayload()],
+    [assertGitHubWorkerClaims, validOpsAlertPayload()],
   ] as const) {
     let rejected = false
     try {

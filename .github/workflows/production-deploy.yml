@@ -17,6 +17,11 @@ on:
         required: true
         default: true
         type: boolean
+      edge_function_subset:
+        description: Optional comma-separated allowlisted Edge slugs; blank deploys the full allowlist
+        required: false
+        default: ''
+        type: string
       reconcile_migration_history:
         description: One-time fail-closed production migration-history baseline before Item 4
         required: true
@@ -42,6 +47,7 @@ jobs:
           EVENT_REF: ${{ github.ref }}
           DEPLOY_DATABASE: ${{ inputs.deploy_database }}
           DEPLOY_EDGE_FUNCTIONS: ${{ inputs.deploy_edge_functions }}
+          EDGE_FUNCTION_SUBSET: ${{ inputs.edge_function_subset }}
           RECONCILE_MIGRATION_HISTORY: ${{ inputs.reconcile_migration_history }}
         run: |
           set -euo pipefail
@@ -54,6 +60,14 @@ jobs:
           fi
           if [[ "$RECONCILE_MIGRATION_HISTORY" == 'true' && "$DEPLOY_DATABASE" != 'true' ]]; then
             echo 'Migration-history reconciliation requires deploy_database=true.' >&2
+            exit 1
+          fi
+          if [[ -n "$EDGE_FUNCTION_SUBSET" && "$DEPLOY_EDGE_FUNCTIONS" != 'true' ]]; then
+            echo 'edge_function_subset requires deploy_edge_functions=true.' >&2
+            exit 1
+          fi
+          if [[ -n "$EDGE_FUNCTION_SUBSET" && ! "$EDGE_FUNCTION_SUBSET" =~ ^[a-z0-9,-]+$ ]]; then
+            echo 'edge_function_subset contains an invalid character.' >&2
             exit 1
           fi
 
@@ -71,6 +85,7 @@ jobs:
       SUPABASE_PROJECT_REF: sbexdggbwqvyhbkatucs
       DEPLOY_DATABASE: ${{ inputs.deploy_database }}
       DEPLOY_EDGE_FUNCTIONS: ${{ inputs.deploy_edge_functions }}
+      EDGE_FUNCTION_SUBSET: ${{ inputs.edge_function_subset }}
       RECONCILE_MIGRATION_HISTORY: ${{ inputs.reconcile_migration_history }}
     steps:
       - name: Checkout exact gated SHA
@@ -123,7 +138,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t functions < <(python3 scripts/edge-auth-contract.py list-deployable)
+          mapfile -t allowlisted < <(python3 scripts/edge-auth-contract.py list-deployable)
+          test "${#allowlisted[@]}" -gt 0
+
+          if [[ -n "$EDGE_FUNCTION_SUBSET" ]]; then
+            IFS=',' read -r -a requested <<< "$EDGE_FUNCTION_SUBSET"
+            functions=()
+            for slug in "${requested[@]}"; do
+              if ! printf '%s\n' "${allowlisted[@]}" | grep -Fxq "$slug"; then
+                echo "Edge Function is not deployable by contract: $slug" >&2
+                exit 1
+              fi
+              if [[ " ${functions[*]-} " != *" $slug "* ]]; then
+                functions+=("$slug")
+              fi
+            done
+          else
+            functions=("${allowlisted[@]}")
+          fi
           test "${#functions[@]}" -gt 0
           for slug in "${functions[@]}"; do
             echo "Deploying ${slug}"
