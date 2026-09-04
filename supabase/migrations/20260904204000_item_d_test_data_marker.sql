@@ -17,7 +17,12 @@ comment on column public.payment_transactions.is_test is
 comment on column public.customer_balance_movements.is_test is
   'Inherited from appointment on insert. Ledger rows remain immutable and are never rewritten only to classify a test.';
 
-create or replace function public.service_inherit_test_marker_from_appointment()
+-- Item D trigger helpers are intentionally outside public so the already-closed
+-- Item 2C public ACL/function-count contract remains unchanged.
+create schema if not exists agenda_internal;
+revoke all on schema agenda_internal from public, anon, authenticated, service_role;
+
+create or replace function agenda_internal.inherit_test_marker_from_appointment()
 returns trigger
 language plpgsql
 security definer
@@ -42,21 +47,21 @@ begin
 end;
 $$;
 
-revoke all on function public.service_inherit_test_marker_from_appointment() from public, anon, authenticated, service_role;
+revoke all on function agenda_internal.inherit_test_marker_from_appointment() from public, anon, authenticated, service_role;
 
 drop trigger if exists trg_payment_transactions_inherit_test_marker on public.payment_transactions;
 create trigger trg_payment_transactions_inherit_test_marker
 before insert or update of appointment_id, is_test on public.payment_transactions
-for each row execute function public.service_inherit_test_marker_from_appointment();
+for each row execute function agenda_internal.inherit_test_marker_from_appointment();
 
 -- customer_balance_movements is an immutable financial ledger. Its marker is fixed
 -- at INSERT time from the parent appointment and is never propagated by UPDATE.
 drop trigger if exists trg_customer_balance_movements_inherit_test_marker on public.customer_balance_movements;
 create trigger trg_customer_balance_movements_inherit_test_marker
 before insert on public.customer_balance_movements
-for each row execute function public.service_inherit_test_marker_from_appointment();
+for each row execute function agenda_internal.inherit_test_marker_from_appointment();
 
-create or replace function public.service_propagate_appointment_test_marker()
+create or replace function agenda_internal.propagate_appointment_test_marker()
 returns trigger
 language plpgsql
 security definer
@@ -73,12 +78,12 @@ begin
 end;
 $$;
 
-revoke all on function public.service_propagate_appointment_test_marker() from public, anon, authenticated, service_role;
+revoke all on function agenda_internal.propagate_appointment_test_marker() from public, anon, authenticated, service_role;
 
 drop trigger if exists trg_appointments_propagate_test_marker on public.appointments;
 create trigger trg_appointments_propagate_test_marker
 after update of is_test on public.appointments
-for each row execute function public.service_propagate_appointment_test_marker();
+for each row execute function agenda_internal.propagate_appointment_test_marker();
 
 -- Exact audited pre-opening appointment set re-read from production immediately
 -- before this migration was finalized. A clean/local rebuild has zero of these IDs.
