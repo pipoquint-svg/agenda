@@ -116,6 +116,7 @@ async function fetchRowsByDateField(
     const { data, error } = await client
       .from('payment_transactions')
       .select('id,appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,payment_discount_amount,cash_amount,parent_transaction_id,paid_at,created_by_admin_id,notes,created_at,updated_at,idempotency_key,requested_percentage,policy_action_id,payment_purpose,balance_collection_id')
+      .eq('is_test', false)
       .gte(field, from)
       .lt(field, to)
       .order(field, { ascending: true })
@@ -217,7 +218,6 @@ async function financeSummary(req: Request, url: URL): Promise<Response> {
       pendingChargeCash += cash
     }
   }
-
   const { data: balanceReport, error: balanceError } = await client.rpc('service_finance_customer_balance_report', {
     p_from: period.from,
     p_to: period.to,
