@@ -133,6 +133,11 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql
+          # Later restricted objects must reapply their own ACL after the older
+          # dynamic baseline, otherwise that baseline would widen their grants.
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260904141814_item_c_ops_alert_foundation.sql
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f tests/acl-parity/item02a_acl_parity.sql \

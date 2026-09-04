@@ -1,6 +1,6 @@
 -- Item C: sanitized operational alert evidence and deduplication state.
 
-create table public.ops_edge_failure_events (
+create table if not exists public.ops_edge_failure_events (
   id bigint generated always as identity primary key,
   function_name text not null check (function_name in (
     'booking-hold',
@@ -13,10 +13,10 @@ create table public.ops_edge_failure_events (
   occurred_at timestamptz not null default now()
 );
 
-create index ops_edge_failure_events_occurred_idx
+create index if not exists ops_edge_failure_events_occurred_idx
   on public.ops_edge_failure_events (occurred_at desc);
 
-create table public.ops_alert_states (
+create table if not exists public.ops_alert_states (
   fingerprint text primary key check (fingerprint ~ '^[A-Z0-9_:]{3,240}$'),
   category text not null check (category in (
     'PAYMENT_STUCK',
@@ -37,7 +37,7 @@ create table public.ops_alert_states (
   updated_at timestamptz not null default now()
 );
 
-create index ops_alert_states_active_idx
+create index if not exists ops_alert_states_active_idx
   on public.ops_alert_states (last_seen_at desc)
   where resolved_at is null;
 
