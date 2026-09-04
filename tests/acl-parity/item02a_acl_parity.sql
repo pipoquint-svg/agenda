@@ -126,6 +126,21 @@ where grantee='service_role'
   and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN')
   and object_kind='table';
 
+-- Item C alert state is internal and least-privileged. Edge evidence is append-only
+-- through a SECURITY DEFINER RPC; the monitor may only read it. Deduplication state
+-- permits the monitor to read, insert and update, but never delete or truncate.
+delete from acl_expected
+where grantee='service_role'
+  and object_identity='public.ops_edge_failure_events'
+  and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN')
+  and object_kind='table';
+
+delete from acl_expected
+where grantee='service_role'
+  and object_identity='public.ops_alert_states'
+  and privilege_type in ('DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN')
+  and object_kind='table';
+
 -- Sequences.
 insert into acl_expected
 select 'sequence',format('%I.%I',n.nspname,c.relname),'postgres',role_name,'postgres',privilege_type,false
@@ -134,6 +149,11 @@ join pg_namespace n on n.oid=c.relnamespace
 cross join (values ('postgres'),('service_role')) roles(role_name)
 cross join (values ('SELECT'),('UPDATE'),('USAGE')) privs(privilege_type)
 where n.nspname='public' and c.relkind='S';
+
+delete from acl_expected
+where object_kind='sequence'
+  and object_identity='public.ops_edge_failure_events_id_seq'
+  and grantee='service_role';
 
 -- Functions: current production postgres + service_role EXECUTE, with explicit exceptions.
 insert into acl_expected
