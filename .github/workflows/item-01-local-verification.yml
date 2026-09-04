@@ -1,4 +1,5 @@
 name: Item 1 Local Verification
+# Item A reuses this full local-stack gate.
 
 on:
   push:
