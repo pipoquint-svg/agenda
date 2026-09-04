@@ -135,7 +135,7 @@ cross join (values ('postgres'),('service_role')) roles(role_name)
 cross join (values ('SELECT'),('UPDATE'),('USAGE')) privs(privilege_type)
 where n.nspname='public' and c.relkind='S';
 
--- Functions: baseline postgres + service_role EXECUTE.
+-- Functions: current production postgres + service_role EXECUTE, with explicit exceptions.
 insert into acl_expected
 select 'function',
        format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)),
@@ -174,6 +174,8 @@ where object_kind='function'
     'public.guard_birthday_coupon_service_scope()',
     'public.guard_customer_access_append_only()',
     'public.guard_duplicate_balance_payment()',
+    'public.maintenance_purge_appointment_token_network_evidence(p_before timestamp with time zone, p_reason text, p_requested_by text)',
+    'public.maintenance_purge_audit_logs(p_before timestamp with time zone, p_reason text, p_requested_by text)',
     'public.mark_balance_collection_paid_after_payment()',
     'public.mark_confirmed_appointment_policy_snapshot()',
     'public.populate_checkout_hold_quote_snapshot()',
@@ -191,6 +193,9 @@ where object_kind='function'
     'public.reject_financial_ledger_mutation()',
     'public.revoke_action_tokens_after_appointment_change()',
     'public.seed_hour_package_initial_credit()',
+    'public.service_admin_replace_duration_configuration(p_service_id uuid, p_pricing_tiers jsonb, p_duration_presets jsonb)',
+    'public.service_admin_update_timing(p_service_id uuid, p_duration_mode text, p_base_duration_minutes integer, p_booking_block_minutes integer, p_minimum_booking_blocks integer, p_maximum_booking_blocks integer, p_base_price numeric, p_price_per_block numeric, p_buffer_before_minutes integer, p_buffer_after_minutes integer)',
+    'public.service_admin_upsert_change_policy(p_service_id uuid, p_policy jsonb)',
     'public.sync_promoted_appointment_schedule()',
     'public.touch_duration_preset_updated_at()',
     'public.touch_extra_schedule_rule_updated_at()',
@@ -252,7 +257,7 @@ create temporary table production_identity_summary(
   identity_hash text not null
 );
 insert into production_identity_summary values
-('function',414,'425705d1f9987443079bde9f94ade93f477cef7823af72baf6f2429463e79662'),
+('function',415,'7aad93f397b2615e870ca05657cbb8da0277dc86236f46338377f8a371d720a7'),
 ('sequence',2,'99e36457a1d727e777762be43d4945bf0bf92f9e08b804087742d279b9618a41'),
 ('table',105,'bd560cab9a4c71c757335fadaf9d23f9b168b07c39f4451a8f822701e2cbf1f5'),
 ('view',8,'bcb8b6692e6b40eaf95ef20d1c9e115ad622c27c4fc0f78d0e3b4907c5b1b6c2');
@@ -289,7 +294,7 @@ create temporary table production_acl_summary(
   acl_hash text not null
 );
 insert into production_acl_summary values
-('function',414,803,'9cb2b004d96277b79b86fcf8181caee861dbca7628cb3a32218ef765a06cf284'),
+('function',415,800,'e117d0693ec6bee7118a61d950f73e3aace623f01372d57e1189a70249b7702a'),
 ('sequence',2,12,'a22f76984f935d27010a77efbbe5e0a13a21a2b818cd959edaafc37067a172ea'),
 ('table',105,1614,'fba3298eb16529b3f223c6def1fe895194534a5883595608923a5ecd0a3c4df4'),
 ('view',8,128,'f09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be');

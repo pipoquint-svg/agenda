@@ -1,9 +1,11 @@
 name: Item 1 Local Verification
+# Item A reuses this full local-stack gate.
 
 on:
   push:
     branches:
       - fix/item-01-local-homologation
+      - fix/item-a-no-show
   workflow_dispatch:
 
 permissions:

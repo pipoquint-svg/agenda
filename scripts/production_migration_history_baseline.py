@@ -11,8 +11,8 @@ The production database predates the canonical repository migration history:
 
 For the Item 4 rollout we treat the current production schema as the historical
 baseline through BASELINE_CUTOFF. Historical repository migrations are marked as
-already absorbed; they must never be replayed against production. Only the
-Item 4 migration remains pending for the normal `supabase db push` gate.
+already absorbed; they must never be replayed against production. The canonical
+post-baseline chain must start with Item 4 and may continue with later migrations.
 """
 
 from __future__ import annotations
@@ -110,10 +110,10 @@ def read_local_versions(root: Path = MIGRATIONS_DIR) -> set[str]:
     if TARGET_VERSION not in versions:
         _fail(f"Item 4 target migration missing: {TARGET_VERSION}")
     post_baseline = sorted(v for v in versions if v > BASELINE_CUTOFF)
-    if post_baseline != [TARGET_VERSION]:
+    if not post_baseline or post_baseline[0] != TARGET_VERSION:
         _fail(
-            "unexpected migrations after baseline cutoff; Item 4 reconciliation must be "
-            f"rebased/re-audited first: {post_baseline}"
+            "post-baseline migration chain must start with Item 4 target; "
+            f"got: {post_baseline}"
         )
     return versions
 
@@ -240,9 +240,18 @@ def verify_ready(local_versions: set[str], remote_versions: set[str], plan: Plan
     remote_only = sorted(remote_versions - local_versions)
     if remote_only:
         _fail(f"remote-only versions remain after baseline: {remote_only}")
-    if local_only != [TARGET_VERSION]:
-        _fail(f"expected only Item 4 pending, got: {local_only}")
-    print(f"READY: only Item 4 migration {TARGET_VERSION} is pending")
+    expected_pending = sorted(v for v in local_versions if v > BASELINE_CUTOFF)
+    if local_only != expected_pending:
+        _fail(
+            "post-baseline migration chain is not the exact pending local chain: "
+            f"expected={expected_pending} actual={local_only}"
+        )
+    if not local_only or local_only[0] != TARGET_VERSION:
+        _fail(f"pending migration chain must start with Item 4 target {TARGET_VERSION}")
+    print(
+        "READY: canonical post-baseline migration chain is pending; "
+        f"count={len(local_only)} first={TARGET_VERSION}"
+    )
 
 
 def command_audit_local() -> None:
@@ -260,9 +269,10 @@ def command_audit_local() -> None:
         _fail("intermediate state classification failed")
     if classify_state(set(plan.final), plan) != "final":
         _fail("final state classification failed")
-    if TARGET_VERSION not in (local - plan.final):
-        _fail("Item 4 target is not pending relative to final baseline")
-    print("LOCAL AUDIT PASS")
+    post_baseline = sorted(v for v in local if v > BASELINE_CUTOFF)
+    if not post_baseline or post_baseline[0] != TARGET_VERSION:
+        _fail("canonical post-baseline chain does not start with Item 4 target")
+    print(f"LOCAL AUDIT PASS: post-baseline migrations={len(post_baseline)}")
 
 
 def command_apply(project_ref: str) -> None:

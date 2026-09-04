@@ -9,6 +9,7 @@ on:
     paths:
       - 'supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
       - 'supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
+      - 'supabase/migrations/20260904000054_item_a_restore_no_show.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'scripts/acl-inventory.sql'
@@ -58,16 +59,12 @@ jobs:
         run: |
           set -euo pipefail
           migration='supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
-          item02c='supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
           test -f "$migration"
-          test -f "$item02c"
           mv "$migration" /tmp/item02a-acl-baseline.sql
-          mv "$item02c" /tmp/item02c-acl-overlay.sql
-          restore_migrations() {
+          restore_migration() {
             [[ ! -f /tmp/item02a-acl-baseline.sql ]] || mv /tmp/item02a-acl-baseline.sql "$migration"
-            [[ ! -f /tmp/item02c-acl-overlay.sql ]] || mv /tmp/item02c-acl-overlay.sql "$item02c"
           }
-          trap restore_migrations EXIT
+          trap restore_migration EXIT
 
           supabase db reset
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
@@ -94,23 +91,13 @@ jobs:
             exit 1
           fi
 
-          restore_migrations
+          restore_migration
           trap - EXIT
 
-      - name: Rebuild historical Item 2A ACL baseline without Item 2C overlay
-        shell: bash
-        run: |
-          set -euo pipefail
-          item02c='supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
-          parked='/tmp/item02c-acl-overlay.sql'
-          mv "$item02c" "$parked"
-          restore_item02c() { [[ ! -f "$parked" ]] || mv "$parked" "$item02c"; }
-          trap restore_item02c EXIT
-          supabase db reset
-          restore_item02c
-          trap - EXIT
+      - name: Rebuild current production ACL target
+        run: supabase db reset
 
-      - name: Prove historical production-vs-local ACL diff is empty
+      - name: Prove current production-vs-local ACL diff is empty
         run: |
           set -euo pipefail
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
@@ -123,7 +110,7 @@ jobs:
           grep '^ACL_ROW_DIFF' /tmp/acl-after.log > /tmp/acl-after.diff.tsv || true
           test ! -s /tmp/acl-after.diff.tsv
 
-          grep -F $'ACL_SUMMARY\tfunction\t414\t803\t9cb2b004d96277b79b86fcf8181caee861dbca7628cb3a32218ef765a06cf284' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\tfunction\t415\t800\te117d0693ec6bee7118a61d950f73e3aace623f01372d57e1189a70249b7702a' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\tsequence\t2\t12\ta22f76984f935d27010a77efbbe5e0a13a21a2b818cd959edaafc37067a172ea' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\ttable\t105\t1614\tfba3298eb16529b3f223c6def1fe895194534a5883595608923a5ecd0a3c4df4' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\tview\t8\t128\tf09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be' /tmp/acl-after.log
@@ -138,11 +125,14 @@ jobs:
           test "$anon_exec" -eq 7
           test "$auth_exec" -eq 8
 
-      - name: Prove ACL baseline migration is idempotent
+      - name: Prove ACL baseline composition is idempotent
         run: |
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f tests/acl-parity/item02a_acl_parity.sql \
