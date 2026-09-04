@@ -1,6 +1,7 @@
 import {
   buildOpsIncidents,
   renderOpsAlertEmail,
+  resolveOpsAlertRecipient,
   sanitizeOpsCode,
   selectDueOpsIncidents,
   type OpsSnapshot,
@@ -75,4 +76,13 @@ Deno.test('Item C sanitizes codes and alert content contains no supplied PII, to
   for (const sentinel of sentinels) assert(!body.includes(sentinel), `sensitive sentinel leaked: ${sentinel}`)
   assert(body.includes('PAYMENT_STUCK'), 'rendered alert must identify the category')
   assert(body.includes('Sem dados pessoais'), 'rendered alert must state the privacy contract')
+})
+
+Deno.test('Item C resolves the operational recipient from the canonical sender when optional overrides are absent', () => {
+  const recipient = resolveOpsAlertRecipient({
+    dedicatedRecipient: null,
+    replyTo: null,
+    sender: 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>',
+  })
+  assert(recipient === 'agenda@blacksheepestudiocriativo.com.br', `unexpected recipient: ${recipient}`)
 })
