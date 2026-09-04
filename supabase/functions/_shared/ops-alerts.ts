@@ -214,16 +214,17 @@ async function queryOpsSnapshot(client: OpsClient, now: Date): Promise<OpsSnapsh
     client.from('payment_transactions').select('status,created_at').eq('status', 'PENDING').lte('created_at', stale),
     client.from('ops_edge_failure_events').select('function_name,error_code,http_status,occurred_at').gte('occurred_at', recent).lte('occurred_at', now.toISOString()),
     client.from('integration_jobs').select('job_type,status,created_at').eq('status', 'FAILED').gte('created_at', recent).lte('created_at', now.toISOString()),
-    client.from('schedule_divergences').select('source,reason,status,detected_at').eq('status', 'OPEN').lte('detected_at', stale),
+    client.rpc('service_list_ops_actionable_schedule_divergences', { p_stale_before: stale }),
     client.from('notification_delivery_logs').select('event_key,status,last_error_code,updated_at').eq('channel', 'EMAIL').eq('status', 'FAILED').gte('updated_at', recent).lte('updated_at', now.toISOString()),
   ])
   const results = [payments, edges, integrations, divergences, emails]
   if (results.some((result) => result.error)) throw new Error('OPS_ALERT_QUERY_FAILED')
+  const actionableDivergences = (divergences.data ?? []) as OpsSnapshot['openScheduleDivergences']
   return {
     pendingPayments: payments.data ?? [],
     edgeFailures: edges.data ?? [],
     integrationFailures: integrations.data ?? [],
-    openScheduleDivergences: divergences.data ?? [],
+    openScheduleDivergences: actionableDivergences,
     emailFailures: emails.data ?? [],
   }
 }
