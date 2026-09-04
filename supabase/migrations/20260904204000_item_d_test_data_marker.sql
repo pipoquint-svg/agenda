@@ -15,7 +15,7 @@ comment on column public.appointments.is_test is
 comment on column public.payment_transactions.is_test is
   'Inherited from appointment. Provider money remains fully traceable when classified as test.';
 comment on column public.customer_balance_movements.is_test is
-  'Inherited from appointment when linked. Test movements remain stored but are excluded from finance reporting.';
+  'Inherited from appointment on insert. Ledger rows remain immutable and are never rewritten only to classify a test.';
 
 create or replace function public.service_inherit_test_marker_from_appointment()
 returns trigger
@@ -49,9 +49,11 @@ create trigger trg_payment_transactions_inherit_test_marker
 before insert or update of appointment_id, is_test on public.payment_transactions
 for each row execute function public.service_inherit_test_marker_from_appointment();
 
+-- customer_balance_movements is an immutable financial ledger. Its marker is fixed
+-- at INSERT time from the parent appointment and is never propagated by UPDATE.
 drop trigger if exists trg_customer_balance_movements_inherit_test_marker on public.customer_balance_movements;
 create trigger trg_customer_balance_movements_inherit_test_marker
-before insert or update of appointment_id, is_test on public.customer_balance_movements
+before insert on public.customer_balance_movements
 for each row execute function public.service_inherit_test_marker_from_appointment();
 
 create or replace function public.service_propagate_appointment_test_marker()
@@ -63,11 +65,6 @@ as $$
 begin
   if old.is_test is distinct from new.is_test then
     update public.payment_transactions
-       set is_test = new.is_test
-     where appointment_id = new.id
-       and is_test is distinct from new.is_test;
-
-    update public.customer_balance_movements
        set is_test = new.is_test
      where appointment_id = new.id
        and is_test is distinct from new.is_test;
