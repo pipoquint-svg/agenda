@@ -1,11 +1,12 @@
 name: Item 1 Local Verification
-# Item A reuses this full local-stack gate.
+# Items A and B reuse this full local-stack gate.
 
 on:
   push:
     branches:
       - fix/item-01-local-homologation
       - fix/item-a-no-show
+      - fix/item-b-nfse-payment-methods
   workflow_dispatch:
 
 permissions:
