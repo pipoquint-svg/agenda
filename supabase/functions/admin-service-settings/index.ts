@@ -176,6 +176,7 @@ Deno.serve(async (req) => {
       const requestedExtraPersonPrice = numeric(body?.price_per_extra_person ?? 0, 'price_per_extra_person') ?? 0
       if (requestedBasePrice !== 0 || requestedExtraPersonPrice !== 0) await requirePermission('FINANCE_MANAGE')
       const employeeId = body?.employee_id ? uuid(body.employee_id, 'EMPLOYEE_ID_INVALID') : null
+      const maximumPeople = integer(body?.maximum_people ?? 1, 'maximum_people')
       const createArguments = {
         p_category_id: uuid(body?.category_id, 'CATEGORY_ID_INVALID'),
         p_name: text(body?.name), p_slug: text(body?.slug), p_operation_scope: operationScope(body?.operation_scope),
@@ -184,8 +185,9 @@ Deno.serve(async (req) => {
         p_base_duration_minutes: integer(body?.base_duration_minutes ?? 60, 'base_duration_minutes'), p_base_price: requestedBasePrice,
         p_buffer_before_minutes: integer(body?.buffer_before_minutes ?? 0, 'buffer_before_minutes'),
         p_buffer_after_minutes: integer(body?.buffer_after_minutes ?? 0, 'buffer_after_minutes'),
-        p_minimum_people: integer(body?.minimum_people ?? 1, 'minimum_people'), p_maximum_people: integer(body?.maximum_people ?? 1, 'maximum_people'),
+        p_minimum_people: integer(body?.minimum_people ?? 1, 'minimum_people'), p_maximum_people: maximumPeople,
         p_price_per_extra_person: requestedExtraPersonPrice, p_admin_id: admin.adminId,
+        p_included_people: integer(body?.included_people ?? maximumPeople ?? 1, 'included_people'),
       }
       const { data, error } = employeeId
         ? await client.rpc('service_admin_create_service_catalog_with_employee_audited', {
@@ -209,11 +211,13 @@ Deno.serve(async (req) => {
       // CATALOG always carries price_per_extra_person. Requiring FINANCE_MANAGE here also
       // protects decreases and resets to zero, not only non-zero increases.
       await requirePermission('FINANCE_MANAGE')
+      const maximumPeople = integer(body?.maximum_people ?? 1, 'maximum_people')
       const { data, error } = await client.rpc('service_admin_update_service_catalog_audited', {
         p_service_id: serviceId, p_category_id: uuid(body?.category_id, 'CATEGORY_ID_INVALID'),
         p_name: text(body?.name), p_slug: text(body?.slug), p_operation_scope: operationScope(body?.operation_scope),
         p_short_description: text(body?.short_description) || null, p_full_description: text(body?.full_description) || null,
-        p_minimum_people: integer(body?.minimum_people ?? 1, 'minimum_people'), p_maximum_people: integer(body?.maximum_people ?? 1, 'maximum_people'),
+        p_minimum_people: integer(body?.minimum_people ?? 1, 'minimum_people'), p_maximum_people: maximumPeople,
+        p_included_people: integer(body?.included_people ?? maximumPeople ?? 1, 'included_people'),
         p_price_per_extra_person: numeric(body?.price_per_extra_person ?? 0, 'price_per_extra_person'),
         p_is_active: body?.is_active !== false, p_sort_order: integer(body?.sort_order ?? 0, 'sort_order'), p_admin_id: admin.adminId,
       })

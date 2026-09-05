@@ -8,13 +8,13 @@ select plan(11);
 select has_function(
   'public',
   'service_admin_create_service_catalog_with_employee_audited',
-  array['uuid','text','text','text','text','text','text','integer','numeric','integer','integer','integer','integer','numeric','uuid','uuid'],
-  'atomic service and employee creation RPC exists'
+  array['uuid','text','text','text','text','text','text','integer','numeric','integer','integer','integer','integer','numeric','uuid','uuid','integer'],
+  'atomic service and employee creation RPC exists with optional included people'
 );
 select ok(
   not has_function_privilege(
     'anon',
-    'public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid)',
+    'public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid,integer)',
     'EXECUTE'
   ),
   'anon cannot create service and employee assignment'
@@ -22,7 +22,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid)',
+    'public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid,integer)',
     'EXECUTE'
   ),
   'authenticated browser cannot bypass the Edge Function'
@@ -30,7 +30,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid)',
+    'public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid,integer)',
     'EXECUTE'
   ),
   'service role can execute the atomic RPC after Edge authorization'
@@ -72,6 +72,8 @@ values (
   true
 );
 
+-- Chamada propositalmente mantém a aridade antiga: o último argumento novo
+-- é DEFAULT NULL e deve preservar compatibilidade com chamadores existentes.
 create temporary table atomic_create_result as
 select public.service_admin_create_service_catalog_with_employee_audited(
   '93500000-0000-4000-8000-000000000001',
