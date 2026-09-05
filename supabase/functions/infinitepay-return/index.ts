@@ -15,6 +15,10 @@ type TransactionRow = {
   status: string
 }
 
+type PaymentResultStatus = 'confirmado' | 'processando' | 'verificando'
+
+const CUSTOMER_RESULT_URL = 'https://www.sabrinapierri.com.br/pagamento'
+
 const providerTransport: InfinitePayTransport = async (input, init = {}) => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 12_000)
@@ -29,60 +33,28 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
-function html(title: string, message: string, status = 200): Response {
-  const body = `<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${title}</title>
-  <style>
-    :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light}
-    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#faf8f5;color:#231f20}
-    main{max-width:34rem;padding:2rem;text-align:center}
-    h1{font-size:1.5rem;margin:0 0 .75rem}
-    p{line-height:1.55;margin:0;color:#5a5254}
-  </style>
-</head>
-<body><main><h1>${title}</h1><p>${message}</p></main></body>
-</html>`
-  return new Response(body, {
-    status,
+function resultRedirect(status: PaymentResultStatus): Response {
+  const target = new URL(CUSTOMER_RESULT_URL)
+  target.searchParams.set('status', status)
+
+  return new Response(null, {
+    status: 303,
     headers: {
-      'content-type': 'text/html; charset=utf-8',
+      location: target.toString(),
       'cache-control': 'no-store, max-age=0',
-      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       'referrer-policy': 'no-referrer',
       'x-content-type-options': 'nosniff',
-      'x-frame-options': 'DENY',
     },
   })
 }
 
-function pending(): Response {
-  return html(
-    'Pagamento em processamento',
-    'A confirmação ainda está sendo processada. Você pode fechar esta página; a reserva só será atualizada depois da confirmação segura do pagamento.',
-  )
-}
-
-function confirmed(): Response {
-  return html(
-    'Pagamento confirmado',
-    'O pagamento foi confirmado com segurança. Você pode fechar esta página.',
-  )
-}
-
-function unavailable(status = 400): Response {
-  return html(
-    'Não foi possível confirmar agora',
-    'Não usamos esta página como comprovante. A confirmação da reserva depende da validação direta com a InfinitePay.',
-    status,
-  )
-}
-
 Deno.serve(async (req) => {
-  if (req.method !== 'GET') return unavailable(405)
+  if (req.method !== 'GET') {
+    return new Response(null, {
+      status: 405,
+      headers: { allow: 'GET', 'cache-control': 'no-store, max-age=0' },
+    })
+  }
 
   let orderNsu = ''
   try {
@@ -99,7 +71,7 @@ Deno.serve(async (req) => {
       .eq('transaction_type', 'CHARGE')
       .maybeSingle()
     if (error) throw new Error('INFINITEPAY_RETURN_PAYMENT_LOOKUP_FAILED')
-    if (!data) return unavailable(404)
+    if (!data) return resultRedirect('verificando')
     const tx = data as TransactionRow
 
     const runtime = await loadInfinitePayRuntime(client)
@@ -111,8 +83,8 @@ Deno.serve(async (req) => {
     }, providerTransport)
 
     // Redirect query data is never payment proof. A non-paid or not-yet-visible
-    // payment_check result cannot mutate the appointment and renders as pending.
-    if (!check.success || !check.paid) return pending()
+    // payment_check result cannot mutate the appointment and redirects as pending.
+    if (!check.success || !check.paid) return resultRedirect('processando')
 
     const verified = verifyInfinitePayPayment({
       signal,
@@ -134,12 +106,12 @@ Deno.serve(async (req) => {
       p_payload_json: snapshot,
     })
     if (applyError) throw new Error('INFINITEPAY_RETURN_PAYMENT_APPLY_FAILED')
-    return confirmed()
+    return resultRedirect('confirmado')
   } catch (cause) {
     console.error('[OPERATION_ALERT] INFINITEPAY_RETURN_FAILURE', {
       code: cause instanceof Error ? cause.message.split(':')[0] : 'INFINITEPAY_RETURN_ERROR',
       order_nsu: orderNsu || null,
     })
-    return unavailable(400)
+    return resultRedirect('verificando')
   }
 })
