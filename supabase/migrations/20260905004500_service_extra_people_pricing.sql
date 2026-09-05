@@ -132,8 +132,7 @@ begin
   end if;
   execute v_new_def;
 
-  -- 6) CREATE administrativo: substitui a assinatura existente, sem aumentar
-  -- a quantidade de RPCs. Cliente antigo pode omitir p_included_people.
+  -- 6) CREATE administrativo: adiciona p_included_people à assinatura completa.
   select pg_get_functiondef('public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid)'::regprocedure)
     into v_def;
 
@@ -166,7 +165,7 @@ begin
   revoke all on function public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,integer) from public, anon, authenticated;
   grant execute on function public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,integer) to service_role;
 
-  -- 7) CREATE + employee: mesma compatibilidade e passa included_people ao RPC base.
+  -- 7) CREATE + employee: passa included_people ao RPC base.
   select pg_get_functiondef('public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid)'::regprocedure)
     into v_def;
 
@@ -221,3 +220,82 @@ begin
   grant execute on function public.service_admin_update_service_catalog_audited(uuid,uuid,text,text,text,text,text,integer,integer,numeric,boolean,integer,uuid,integer) to service_role;
 end;
 $migration$;
+
+-- Compatibilidade retroativa: mantém as assinaturas administrativas anteriores.
+-- Chamadores legados não conhecem included_people; para eles, o comportamento anterior
+-- é preservado usando maximum_people como quantidade incluída no preço base.
+create or replace function public.service_admin_create_service_catalog_audited(
+  p_category_id uuid, p_name text, p_slug text, p_operation_scope text,
+  p_short_description text, p_full_description text,
+  p_duration_mode text, p_base_duration_minutes integer, p_base_price numeric,
+  p_buffer_before_minutes integer, p_buffer_after_minutes integer,
+  p_minimum_people integer, p_maximum_people integer, p_price_per_extra_person numeric,
+  p_admin_id uuid
+)
+returns jsonb
+language sql
+volatile
+set search_path = public
+as $$
+  select public.service_admin_create_service_catalog_audited(
+    p_category_id, p_name, p_slug, p_operation_scope,
+    p_short_description, p_full_description,
+    p_duration_mode, p_base_duration_minutes, p_base_price,
+    p_buffer_before_minutes, p_buffer_after_minutes,
+    p_minimum_people, p_maximum_people, p_price_per_extra_person,
+    p_admin_id, p_maximum_people
+  );
+$$;
+
+create or replace function public.service_admin_create_service_catalog_with_employee_audited(
+  p_category_id uuid, p_name text, p_slug text, p_operation_scope text,
+  p_short_description text, p_full_description text,
+  p_duration_mode text, p_base_duration_minutes integer, p_base_price numeric,
+  p_buffer_before_minutes integer, p_buffer_after_minutes integer,
+  p_minimum_people integer, p_maximum_people integer, p_price_per_extra_person numeric,
+  p_employee_id uuid, p_admin_id uuid
+)
+returns jsonb
+language sql
+volatile
+set search_path = public
+as $$
+  select public.service_admin_create_service_catalog_with_employee_audited(
+    p_category_id, p_name, p_slug, p_operation_scope,
+    p_short_description, p_full_description,
+    p_duration_mode, p_base_duration_minutes, p_base_price,
+    p_buffer_before_minutes, p_buffer_after_minutes,
+    p_minimum_people, p_maximum_people, p_price_per_extra_person,
+    p_employee_id, p_admin_id, p_maximum_people
+  );
+$$;
+
+create or replace function public.service_admin_update_service_catalog_audited(
+  p_service_id uuid, p_category_id uuid,
+  p_name text, p_slug text, p_operation_scope text,
+  p_short_description text, p_full_description text,
+  p_minimum_people integer, p_maximum_people integer, p_price_per_extra_person numeric,
+  p_is_active boolean, p_sort_order integer, p_admin_id uuid
+)
+returns jsonb
+language sql
+volatile
+set search_path = public
+as $$
+  select public.service_admin_update_service_catalog_audited(
+    p_service_id, p_category_id,
+    p_name, p_slug, p_operation_scope,
+    p_short_description, p_full_description,
+    p_minimum_people, p_maximum_people, p_price_per_extra_person,
+    p_is_active, p_sort_order, p_admin_id, p_maximum_people
+  );
+$$;
+
+revoke all on function public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid) from public, anon, authenticated;
+grant execute on function public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid) to service_role;
+
+revoke all on function public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid) from public, anon, authenticated;
+grant execute on function public.service_admin_create_service_catalog_with_employee_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,uuid) to service_role;
+
+revoke all on function public.service_admin_update_service_catalog_audited(uuid,uuid,text,text,text,text,text,integer,integer,numeric,boolean,integer,uuid) from public, anon, authenticated;
+grant execute on function public.service_admin_update_service_catalog_audited(uuid,uuid,text,text,text,text,text,integer,integer,numeric,boolean,integer,uuid) to service_role;
