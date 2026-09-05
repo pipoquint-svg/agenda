@@ -27,7 +27,8 @@ requireText(checkoutSessionSource, '<PaymentPanel accessToken={manage.accessToke
 // Multi-provider routing remains explicit and fail-closed.
 requireText(paymentPanelSource, "provider === 'INFINITEPAY'", 'infinitepay-router-branch')
 requireText(paymentProviderSource, "return 'MERCADO_PAGO'", 'mercado-pago-router-branch')
-requireText(paymentProviderSource, "throw new Error('PAYMENT_PROVIDER_LOOKUP_FAILED')", 'provider-lookup-fail-closed')
+requireText(paymentProviderSource, "throw new Error('PAYMENT_PROVIDER_RESPONSE_INVALID')", 'provider-invalid-response-fail-closed')
+requireText(paymentProviderSource, 'throw new Error(payload.error?.code ?? `PAYMENT_PROVIDER_HTTP_${res.status}`)', 'provider-http-fail-closed')
 
 // The stable Natal loader depends only on the public IIFE global + mountAgenda.
 requireText(embedConfigSource, "name: 'BlackSheepAgendaEmbed'", 'embed-global-name')
