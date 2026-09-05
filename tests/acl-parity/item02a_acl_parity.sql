@@ -277,7 +277,7 @@ create temporary table production_identity_summary(
   identity_hash text not null
 );
 insert into production_identity_summary values
-('function',416,'007c92b9f4efa5dcec946324ed7c7807c8fa084488fdd4a81bba4e77fb324a4d'),
+('function',421,'7373e550eabdc3854b1feb70fcf2a84fcf3ec33183c0acec95b606eaa64af706'),
 ('sequence',3,'175a4c7ab0f0c8b1f173a13ae52e1bb1fedc145cebd4a4b6d944a6c9f29a2ba0'),
 ('table',107,'11c6e40d0e805d0718ee7def831e0b43b608d38b33880e8c03a6b2928f08b535'),
 ('view',8,'bcb8b6692e6b40eaf95ef20d1c9e115ad622c27c4fc0f78d0e3b4907c5b1b6c2');
@@ -314,7 +314,7 @@ create temporary table production_acl_summary(
   acl_hash text not null
 );
 insert into production_acl_summary values
-('function',416,802,'1bdbca6d53dc8c880446cb69b6c3f439c79acbacbb65eaa60d79e06fc810fc01'),
+('function',421,812,'28b8c4bf36d11fb225556a2a8cc3d0689734c518e5ac6b0adcc68c7330d4a6ed'),
 ('sequence',3,15,'ae67d7f57fc8786c476d71d39252720bc9a2bdc650696ff198556de85cc64294'),
 ('table',107,1634,'29e28820938fa434b31793f0a66609b62829fc65a27d188f45ae3d59dbef5cdc'),
 ('view',8,128,'f09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be');
