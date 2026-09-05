@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-04",
-    "active_total": 65,
-    "verify_jwt_false": 50,
+    "captured_on": "2026-09-05",
+    "active_total": 67,
+    "verify_jwt_false": 52,
     "verify_jwt_true": 15,
-    "versioned_active": 60,
+    "versioned_active": 62,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -67,6 +67,9 @@
     "google_oauth_state": [
       "google-oauth"
     ],
+    "infinitepay_provider_check": [
+      "infinitepay-webhook"
+    ],
     "internal_secret": [
       "balance-collection-notify-email",
       "balance-collection-provider-cancel",
@@ -89,6 +92,7 @@
       "booking-hold",
       "booking-submit",
       "demand-capture",
+      "infinitepay-payment",
       "mercado-pago-payment",
       "prebook-access",
       "waitlist-signup"

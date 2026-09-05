@@ -1,0 +1,57 @@
+name: InfinitePay Gate 2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/functions/_shared/infinitepay.ts'
+      - 'supabase/functions/_shared/infinitepay_test.ts'
+      - 'supabase/functions/_shared/infinitepay-runtime.ts'
+      - 'supabase/functions/_shared/infinitepay-runtime_test.ts'
+      - 'supabase/functions/infinitepay-payment/**'
+      - 'supabase/functions/infinitepay-webhook/**'
+      - 'supabase/migrations/20260905163000_infinitepay_payment_rpc.sql'
+      - 'supabase/migrations/20260905164000_infinitepay_checkout_claim.sql'
+      - 'supabase/tests/database/146_infinitepay_payment_rpc.test.sql'
+      - 'supabase/config.toml'
+      - 'supabase/functions/auth-contract.json'
+      - 'scripts/edge-auth-contract.py'
+      - '.github/workflows/infinitepay-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Test InfinitePay adapter and runtime gate
+        run: |
+          deno test supabase/functions/_shared/infinitepay_test.ts
+          deno test supabase/functions/_shared/infinitepay-runtime_test.ts
+
+      - name: Type-check InfinitePay Edge Functions
+        run: |
+          deno check supabase/functions/infinitepay-payment/index.ts
+          deno check supabase/functions/infinitepay-webhook/index.ts
+
+      - name: Prove no real InfinitePay activation is committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -n -E '^INFINITEPAY_(HANDLE|LIVE_LINKS_ENABLED|REDIRECT_URL)=' .env* supabase/functions/*.example 2>/dev/null; then
+            echo 'Gate 2 must not commit active InfinitePay runtime values.' >&2
+            exit 1
+          fi
+          grep -Fq "throw new Error('INFINITEPAY_LIVE_LINKS_DISABLED')" supabase/functions/_shared/infinitepay-runtime.ts
+          grep -Fq "service_claim_infinitepay_checkout_by_token" supabase/functions/infinitepay-payment/index.ts
+          grep -Fq "checkInfinitePayPayment" supabase/functions/infinitepay-webhook/index.ts
