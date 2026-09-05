@@ -10,6 +10,8 @@ on:
       - 'supabase/migrations/20260902150000_reconcile_public_acl_baseline.sql'
       - 'supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
       - 'supabase/migrations/20260904000054_item_a_restore_no_show.sql'
+      - 'supabase/migrations/20260905163000_infinitepay_payment_rpc.sql'
+      - 'supabase/migrations/20260905164000_infinitepay_checkout_claim.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'scripts/acl-inventory.sql'
@@ -19,6 +21,7 @@ on:
       - 'supabase/tests/database/039_admin_service_audit_hardening.test.sql'
       - 'supabase/tests/database/042_audit_logs_append_only.test.sql'
       - 'supabase/tests/database/050_appointment_token_authorship.test.sql'
+      - 'supabase/tests/database/146_infinitepay_payment_rpc.test.sql'
       - 'tests/local-verification/item01_e2e_test.ts'
       - 'tests/local-verification/item02a_google_worker_test.ts'
       - 'docs/item-02a-acl-baseline.md'
@@ -110,7 +113,7 @@ jobs:
           grep '^ACL_ROW_DIFF' /tmp/acl-after.log > /tmp/acl-after.diff.tsv || true
           test ! -s /tmp/acl-after.diff.tsv
 
-          grep -F $'ACL_SUMMARY\tfunction\t416\t802\t1bdbca6d53dc8c880446cb69b6c3f439c79acbacbb65eaa60d79e06fc810fc01' /tmp/acl-after.log
+          grep -F $'ACL_SUMMARY\tfunction\t420\t810\t8f037c533f605337655526052cdc5d37d92d93d2bbf4c2c997f6e2b370a1be1a' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\tsequence\t3\t15\tae67d7f57fc8786c476d71d39252720bc9a2bdc650696ff198556de85cc64294' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\ttable\t107\t1634\t29e28820938fa434b31793f0a66609b62829fc65a27d188f45ae3d59dbef5cdc' /tmp/acl-after.log
           grep -F $'ACL_SUMMARY\tview\t8\t128\tf09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be' /tmp/acl-after.log

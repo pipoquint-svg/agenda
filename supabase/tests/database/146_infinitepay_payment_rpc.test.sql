@@ -110,9 +110,16 @@ select is(
 );
 
 select public.service_apply_infinitepay_payment_check(
-  ((select payload->>'transaction_id' from ip_full))::uuid,(select payload->>'transaction_id' from ip_full),
-  'ip-transaction-pix-946','ip-slug-pix-946',100000,101500,'pix',1,
-  'https://example.com/receipt-pix','{"paid":true}'::jsonb
+  ((select payload->>'transaction_id' from ip_full))::uuid,
+  (select payload->>'transaction_id' from ip_full)::text,
+  'ip-transaction-pix-946'::text,
+  'ip-slug-pix-946'::text,
+  100000::bigint,
+  101500::bigint,
+  'pix'::text,
+  1::smallint,
+  'https://example.com/receipt-pix'::text,
+  '{"paid":true}'::jsonb
 );
 select is((select status::text from public.appointments where id='94600000-0000-0000-0000-000000000030'),'CONFIRMED','verified InfinitePay Pix confirms active booking');
 select is((select method from public.payment_transactions where id=((select payload->>'transaction_id' from ip_full))::uuid),'PIX','verified capture method becomes Agenda PIX');
@@ -120,8 +127,16 @@ select is((select installments from public.payment_transactions where id=((selec
 select is((select (provider_payload_json->>'paid_amount')::bigint from public.payment_transactions where id=((select payload->>'transaction_id' from ip_full))::uuid),101500::bigint,'paid_amount may differ from base amount and is preserved as outcome data');
 select is(
   (public.service_apply_infinitepay_payment_check(
-    ((select payload->>'transaction_id' from ip_full))::uuid,(select payload->>'transaction_id' from ip_full),
-    'ip-transaction-pix-946','ip-slug-pix-946',100000,101500,'pix',1,'https://example.com/receipt-pix','{"paid":true}'::jsonb
+    ((select payload->>'transaction_id' from ip_full))::uuid,
+    (select payload->>'transaction_id' from ip_full)::text,
+    'ip-transaction-pix-946'::text,
+    'ip-slug-pix-946'::text,
+    100000::bigint,
+    101500::bigint,
+    'pix'::text,
+    1::smallint,
+    'https://example.com/receipt-pix'::text,
+    '{"paid":true}'::jsonb
   )->>'idempotent_replay')::boolean,true,'duplicate verified payment_check is idempotent'
 );
 select is((select count(*)::integer from public.payment_provider_events where provider='INFINITEPAY' and transaction_id=((select payload->>'transaction_id' from ip_full))::uuid),1,'duplicate payment_check does not duplicate provider events');
@@ -129,7 +144,10 @@ select is((select count(*)::integer from public.payment_provider_events where pr
 create temporary table ip_amount as
 select public.service_claim_infinitepay_checkout_by_token('ip-amount-token-abcdefghijklmnopqrstuvwxyz-12345','FULL','ip_amount_request_123') payload;
 select throws_ok(
-  format($$ select public.service_apply_infinitepay_payment_check(%L::uuid,%L,'ip-transaction-bad-946','ip-slug-bad-946',99999,99999,'pix',1,null,'{}'::jsonb) $$,(select payload->>'transaction_id' from ip_amount),(select payload->>'transaction_id' from ip_amount)),
+  format(
+    $$ select public.service_apply_infinitepay_payment_check(%L::uuid,%L::text,'ip-transaction-bad-946'::text,'ip-slug-bad-946'::text,99999::bigint,99999::bigint,'pix'::text,1::smallint,null::text,'{}'::jsonb) $$,
+    (select payload->>'transaction_id' from ip_amount),(select payload->>'transaction_id' from ip_amount)
+  ),
   'P0001','INFINITEPAY_PAYMENT_AMOUNT_MISMATCH','payment_check amount mismatch fails closed'
 );
 select is((select status from public.payment_transactions where id=((select payload->>'transaction_id' from ip_amount))::uuid),'PENDING','amount mismatch leaves transaction pending and unapplied');
@@ -137,8 +155,16 @@ select is((select status from public.payment_transactions where id=((select payl
 create temporary table ip_card as
 select public.service_claim_infinitepay_checkout_by_token('ip-card-token-abcdefghijklmnopqrstuvwxyz-123456','FULL','ip_card_request_12345') payload;
 select public.service_apply_infinitepay_payment_check(
-  ((select payload->>'transaction_id' from ip_card))::uuid,(select payload->>'transaction_id' from ip_card),
-  'ip-transaction-card-946','ip-slug-card-946',100000,109670,'credit_card',6,null,'{"paid":true}'::jsonb
+  ((select payload->>'transaction_id' from ip_card))::uuid,
+  (select payload->>'transaction_id' from ip_card)::text,
+  'ip-transaction-card-946'::text,
+  'ip-slug-card-946'::text,
+  100000::bigint,
+  109670::bigint,
+  'credit_card'::text,
+  6::smallint,
+  null::text,
+  '{"paid":true}'::jsonb
 );
 select ok(
   (select method='CARD' and installments=6 from public.payment_transactions where id=((select payload->>'transaction_id' from ip_card))::uuid),
