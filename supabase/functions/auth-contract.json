@@ -68,8 +68,10 @@
       "google-oauth"
     ],
     "infinitepay_provider_check": [
-      "infinitepay-return",
       "infinitepay-webhook"
+    ],
+    "infinitepay_return_check": [
+      "infinitepay-return"
     ],
     "internal_secret": [
       "balance-collection-notify-email",
