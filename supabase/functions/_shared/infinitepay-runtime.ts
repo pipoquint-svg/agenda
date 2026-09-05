@@ -4,6 +4,13 @@ export type InfinitePayRuntime = {
   liveLinksEnabled: boolean
 }
 
+type RuntimeRpcClient = {
+  rpc: (name: string, args?: Record<string, unknown>) => PromiseLike<{
+    data: unknown
+    error: { message?: string } | null
+  }>
+}
+
 function clean(value: string | undefined | null): string {
   return (value ?? '').trim()
 }
@@ -38,11 +45,9 @@ function validRedirectUrl(value: string): string {
 }
 
 /**
- * Fail-closed runtime boundary for InfinitePay.
- *
- * Reading/verifying an already-created checkout requires only the merchant handle.
- * Creating a new hosted checkout additionally requires an explicit live-links flag
- * and an HTTPS return URL. Gate 2 deliberately does not configure either in production.
+ * Pure fail-closed runtime boundary. Explicit inputs are used by the database-backed
+ * loader below; environment fallback is retained only for isolated tests/backward
+ * compatibility and is no longer used by the production InfinitePay Edge Functions.
  */
 export function infinitePayRuntime(input: {
   handle?: string | null
@@ -73,4 +78,39 @@ export function infinitePayRuntime(input: {
     redirectUrl: redirectRaw ? validRedirectUrl(redirectRaw) : null,
     liveLinksEnabled: live,
   }
+}
+
+export function infinitePayRuntimeFromRecord(
+  value: unknown,
+  options: { creatingLink?: boolean } = {},
+): InfinitePayRuntime {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('INFINITEPAY_RUNTIME_CONFIG_INVALID')
+  }
+  const row = value as Record<string, unknown>
+  if (typeof row.handle !== 'string') throw new Error('INFINITEPAY_RUNTIME_CONFIG_INVALID')
+  if (typeof row.redirect_url !== 'string') throw new Error('INFINITEPAY_RUNTIME_CONFIG_INVALID')
+  if (typeof row.live_links_enabled !== 'boolean') throw new Error('INFINITEPAY_RUNTIME_CONFIG_INVALID')
+
+  return infinitePayRuntime({
+    handle: row.handle,
+    redirectUrl: row.redirect_url,
+    liveLinksEnabled: row.live_links_enabled ? 'true' : 'false',
+    creatingLink: options.creatingLink === true,
+  })
+}
+
+export async function loadInfinitePayRuntime(
+  client: RuntimeRpcClient,
+  options: { creatingLink?: boolean } = {},
+): Promise<InfinitePayRuntime> {
+  const { data, error } = await client.rpc('service_get_infinitepay_runtime_config')
+  if (error) {
+    const message = String(error.message ?? '')
+    if (message.includes('INFINITEPAY_RUNTIME_CONFIG_MISSING')) {
+      throw new Error('INFINITEPAY_RUNTIME_CONFIG_MISSING')
+    }
+    throw new Error('INFINITEPAY_RUNTIME_CONFIG_LOAD_FAILED')
+  }
+  return infinitePayRuntimeFromRecord(data, options)
 }
