@@ -45,9 +45,6 @@ jobs:
           VITE_MERCADO_PAGO_PUBLIC_KEY: TEST-public-key
         run: npm run build
 
-      - name: Verify Natal wrapper compatibility for cutover bundle
-        run: node scripts/cutover-natal-wrapper-compat.mjs
-
       - name: Preserve cutover embed bundle
         uses: actions/upload-artifact@v4
         with:
@@ -55,6 +52,9 @@ jobs:
           path: web/dist/embed
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify Natal wrapper compatibility for cutover bundle
+        run: node scripts/cutover-natal-wrapper-compat.mjs
 
       - name: Install Chromium for admin smoke
         run: npx playwright install --with-deps chromium
