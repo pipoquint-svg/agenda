@@ -99,8 +99,17 @@ security definer
 set search_path = ''
 as $$
 begin
-  if new.promoted_appointment_id is not null
-     and (tg_op = 'INSERT' or old.promoted_appointment_id is distinct from new.promoted_appointment_id) then
+  -- Avoid relying on OLD for INSERT events. The normal public flow promotes the
+  -- hold with an UPDATE, while direct inserts with a promoted id remain supported.
+  if tg_op = 'INSERT' then
+    if new.promoted_appointment_id is not null then
+      update public.appointments
+      set payment_provider_snapshot = new.payment_provider_snapshot,
+          updated_at = now()
+      where id = new.promoted_appointment_id;
+    end if;
+  elsif new.promoted_appointment_id is not null
+        and old.promoted_appointment_id is distinct from new.promoted_appointment_id then
     update public.appointments
     set payment_provider_snapshot = new.payment_provider_snapshot,
         updated_at = now()
