@@ -1,5 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
-import { infinitePayRuntime } from '../_shared/infinitepay-runtime.ts'
+import { loadInfinitePayRuntime } from '../_shared/infinitepay-runtime.ts'
 import {
   brlToCents,
   checkInfinitePayPayment,
@@ -57,7 +57,7 @@ async function processSignal(signal: InfinitePayPaymentSignal): Promise<void> {
       return
     }
     const tx = data as TransactionRow
-    const runtime = infinitePayRuntime()
+    const runtime = await loadInfinitePayRuntime(client)
     const check = await checkInfinitePayPayment({
       handle: runtime.handle,
       orderNsu: signal.orderNsu,
