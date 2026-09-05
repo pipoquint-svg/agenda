@@ -60,10 +60,17 @@ values (
 insert into public.customers (id, name, email, phone)
 values ('94500000-0000-0000-0000-000000000020', 'Provider Customer', 'provider@example.com', '+5548999999450');
 
+-- Gate 4 scopes InfinitePay to the real Sabrina slugs. Reserve the canonical
+-- slug inside this rolled-back fixture so the abstraction test exercises an
+-- allowed InfinitePay page without weakening the production constraint.
+update public.booking_pages
+set slug='sabrina-provider-fixture-original'
+where slug='sabrina';
+
 insert into public.booking_pages (id, slug, display_name, title, brand_key, payment_provider)
 values (
   '94500000-0000-0000-0000-000000000030',
-  'provider-infinitepay',
+  'sabrina',
   'Provider InfinitePay',
   'Provider InfinitePay',
   'SABRINA',
