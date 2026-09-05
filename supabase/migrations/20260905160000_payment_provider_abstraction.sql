@@ -54,7 +54,9 @@ alter table public.appointments
 comment on column public.appointments.payment_provider_snapshot is
   'Online provider frozen from the promoted checkout hold. Manual/admin appointments default to MERCADO_PAGO until explicitly generalized.';
 
-create or replace function public.service_snapshot_checkout_payment_provider()
+-- Keep trigger implementation out of the public RPC surface. agenda_internal is
+-- the existing private trigger-helper schema used by this project.
+create or replace function agenda_internal.snapshot_checkout_payment_provider()
 returns trigger
 language plpgsql
 security definer
@@ -90,9 +92,10 @@ begin
 end;
 $$;
 
-revoke all on function public.service_snapshot_checkout_payment_provider() from public;
+revoke all on function agenda_internal.snapshot_checkout_payment_provider()
+  from public, anon, authenticated, service_role;
 
-create or replace function public.service_copy_hold_payment_provider_to_appointment()
+create or replace function agenda_internal.copy_hold_payment_provider_to_appointment()
 returns trigger
 language plpgsql
 security definer
@@ -120,19 +123,20 @@ begin
 end;
 $$;
 
-revoke all on function public.service_copy_hold_payment_provider_to_appointment() from public;
+revoke all on function agenda_internal.copy_hold_payment_provider_to_appointment()
+  from public, anon, authenticated, service_role;
 
 drop trigger if exists checkout_holds_snapshot_payment_provider_trg on public.checkout_holds;
 create trigger checkout_holds_snapshot_payment_provider_trg
 before insert or update of booking_page_id on public.checkout_holds
 for each row
-execute function public.service_snapshot_checkout_payment_provider();
+execute function agenda_internal.snapshot_checkout_payment_provider();
 
 drop trigger if exists checkout_holds_copy_payment_provider_to_appointment_trg on public.checkout_holds;
 create trigger checkout_holds_copy_payment_provider_to_appointment_trg
 after insert or update of promoted_appointment_id on public.checkout_holds
 for each row
-execute function public.service_copy_hold_payment_provider_to_appointment();
+execute function agenda_internal.copy_hold_payment_provider_to_appointment();
 
 -- Backfill appointments already promoted before this migration.
 update public.appointments a
@@ -155,19 +159,3 @@ alter table public.payment_provider_events
 alter table public.payment_provider_events
   add constraint payment_provider_events_provider_check
   check (provider = any (array['MERCADO_PAGO'::text, 'INFINITEPAY'::text]));
-
-create or replace function public.service_resolve_appointment_payment_provider(p_appointment_id uuid)
-returns text
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select coalesce(
-    (select a.payment_provider_snapshot from public.appointments a where a.id = p_appointment_id),
-    'MERCADO_PAGO'
-  );
-$$;
-
-revoke all on function public.service_resolve_appointment_payment_provider(uuid) from public;
-grant execute on function public.service_resolve_appointment_payment_provider(uuid) to service_role;
