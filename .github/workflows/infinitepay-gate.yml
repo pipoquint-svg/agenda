@@ -10,9 +10,12 @@ on:
       - 'supabase/functions/_shared/infinitepay-runtime_test.ts'
       - 'supabase/functions/infinitepay-payment/**'
       - 'supabase/functions/infinitepay-webhook/**'
+      - 'supabase/functions/infinitepay-return/**'
       - 'supabase/migrations/20260905190956_20260905163000_infinitepay_payment_rpc.sql'
       - 'supabase/migrations/20260905191019_20260905164000_infinitepay_checkout_claim.sql'
+      - 'supabase/migrations/20260905200000_infinitepay_runtime_config.sql'
       - 'supabase/tests/database/146_infinitepay_payment_rpc.test.sql'
+      - 'supabase/tests/database/147_infinitepay_runtime_config.test.sql'
       - 'supabase/config.toml'
       - 'supabase/functions/auth-contract.json'
       - 'scripts/edge-auth-contract.py'
@@ -43,6 +46,7 @@ jobs:
         run: |
           deno check supabase/functions/infinitepay-payment/index.ts
           deno check supabase/functions/infinitepay-webhook/index.ts
+          deno check supabase/functions/infinitepay-return/index.ts
 
       - name: Prove no real InfinitePay activation is committed
         shell: bash
@@ -53,5 +57,7 @@ jobs:
             exit 1
           fi
           grep -Fq "throw new Error('INFINITEPAY_LIVE_LINKS_DISABLED')" supabase/functions/_shared/infinitepay-runtime.ts
+          grep -Fq "service_get_infinitepay_runtime_config" supabase/functions/_shared/infinitepay-runtime.ts
           grep -Fq "service_claim_infinitepay_checkout_by_token" supabase/functions/infinitepay-payment/index.ts
           grep -Fq "checkInfinitePayPayment" supabase/functions/infinitepay-webhook/index.ts
+          grep -Fq "checkInfinitePayPayment" supabase/functions/infinitepay-return/index.ts
