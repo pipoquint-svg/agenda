@@ -2,6 +2,8 @@
 -- The selected employee PERSON resource participates in Google sync health,
 -- active occupancy and OPEN Google divergence checks, while the appointment
 -- being rescheduled remains excluded through p_ignore_appointment_id.
+-- Required service resources also fail closed on OPEN GOOGLE_EVENT_CONFLICT,
+-- matching the new-booking path and protecting both reschedule listing + hold.
 
 create or replace function public.list_available_slots_for_duration_reschedule_base(
   p_service_id uuid,
@@ -227,6 +229,18 @@ begin
         where ae.resource_id = v_resource.resource_id
           and ae.exception_type = 'BLOCK'
           and tstzrange(ae.start_at, ae.end_at, '[)') && v_resource.occupied_range
+      ) then
+        v_resource_ok := false;
+        exit;
+      end if;
+
+      if exists (
+        select 1
+        from public.schedule_divergences sd
+        where sd.resource_id = v_resource.resource_id
+          and sd.status = 'OPEN'
+          and sd.reason = 'GOOGLE_EVENT_CONFLICT'
+          and sd.desired_range && v_resource.occupied_range
       ) then
         v_resource_ok := false;
         exit;
