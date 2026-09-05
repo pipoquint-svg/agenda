@@ -20,6 +20,7 @@ MODE_MARKERS: dict[str, list[list[str]]] = {
     "internal_secret": [["x-internal-secret"]],
     "mercado_pago_signature": [["verifyMercadoPagoWebhookSignature"], ["x-signature"]],
     "infinitepay_provider_check": [["parseInfinitePayWebhookSignal"], ["checkInfinitePayPayment"], ["verifyInfinitePayPayment"]],
+    "infinitepay_return_check": [["parseInfinitePayRedirectSignal"], ["checkInfinitePayPayment"], ["verifyInfinitePayPayment"]],
     "google_channel_token": [["x-goog-channel-token"], ["channel_token_hash"]],
     "standard_webhooks": [["new Webhook"], ["SEND_EMAIL_HOOK_SECRET"]],
     "google_oauth_state": [["requireAdminPermission"], ["consume_google_oauth_state"]],
