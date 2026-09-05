@@ -78,7 +78,8 @@ begin
     'public.service_create_infinitepay_payment_intent_by_token(text,text,text)',
     'public.service_claim_infinitepay_checkout_by_token(text,text,text)',
     'public.service_record_infinitepay_checkout_link_result(uuid,text,text,jsonb)',
-    'public.service_apply_infinitepay_payment_check(uuid,text,text,text,bigint,bigint,text,smallint,text,jsonb)'
+    'public.service_apply_infinitepay_payment_check(uuid,text,text,text,bigint,bigint,text,smallint,text,jsonb)',
+    'public.service_get_infinitepay_runtime_config()'
   ] loop
     v_oid := to_regprocedure(v_identity);
     if v_oid is null then
@@ -108,11 +109,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 420 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=420 actual=%', v_public_function_count;
+  if v_public_function_count <> 421 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=421 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 366 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=366 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 367 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=367 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
