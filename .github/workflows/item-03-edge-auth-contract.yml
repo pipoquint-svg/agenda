@@ -30,4 +30,4 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t functions < <(python3 scripts/edge-auth-contract.py list-deployable)
-          test "${#functions[@]}" -eq 62
+          test "${#functions[@]}" -eq 63
