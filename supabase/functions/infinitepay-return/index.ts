@@ -17,7 +17,7 @@ type TransactionRow = {
 
 type PaymentResultStatus = 'confirmado' | 'processando' | 'verificando'
 
-const CUSTOMER_RESULT_URL = 'https://www.sabrinapierri.com.br/pagamento'
+const CUSTOMER_RESULT_URL = 'https://www.sabrinapierri.com.br/pagamento.html'
 
 const providerTransport: InfinitePayTransport = async (input, init = {}) => {
   const controller = new AbortController()
