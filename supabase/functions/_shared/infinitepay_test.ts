@@ -79,11 +79,31 @@ Deno.test('createInfinitePayCheckoutLink sends provider-owned payment choices on
   assert(!('discount' in capturedBody), 'Agenda must not apply a Pix discount for InfinitePay')
 })
 
+Deno.test('checkout adapter accepts the live InfinitePay .io host returned by provider', async () => {
+  const liveUrl = 'https://checkout.infinitepay.io/pierri_quint_pro?lenc=live-smoke-proof'
+  const transport: InfinitePayTransport = async () => jsonResponse({ url: liveUrl })
+  const result = await createInfinitePayCheckoutLink({
+    handle: 'pierri_quint_pro',
+    orderNsu: 'live-smoke-order-123',
+    items: [{ quantity: 1, price: 500, description: 'Teste controlado Agenda - InfinitePay' }],
+  }, transport)
+  assertEquals(result.url, liveUrl)
+})
+
 Deno.test('checkout adapter rejects a non-InfinitePay redirect returned by provider', async () => {
   const transport: InfinitePayTransport = async () => jsonResponse({ url: 'https://evil.example/checkout' })
   await assertRejects(() => createInfinitePayCheckoutLink({
     handle: 'sabrina_pierri',
     orderNsu: 'order-123',
+    items: [{ quantity: 1, price: 1000, description: 'Teste' }],
+  }, transport), 'INFINITEPAY_CHECKOUT_URL_INVALID')
+})
+
+Deno.test('checkout adapter rejects lookalike InfinitePay subdomains', async () => {
+  const transport: InfinitePayTransport = async () => jsonResponse({ url: 'https://evil.checkout.infinitepay.io/checkout' })
+  await assertRejects(() => createInfinitePayCheckoutLink({
+    handle: 'sabrina_pierri',
+    orderNsu: 'order-lookalike-123',
     items: [{ quantity: 1, price: 1000, description: 'Teste' }],
   }, transport), 'INFINITEPAY_CHECKOUT_URL_INVALID')
 })
