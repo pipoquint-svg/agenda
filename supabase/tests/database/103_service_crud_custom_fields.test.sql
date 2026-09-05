@@ -9,13 +9,13 @@ select has_function('public','service_admin_create_service_audited',array['text'
 select has_function('public','service_admin_replace_custom_fields_audited',array['uuid','jsonb','uuid'],'audited custom field replacement RPC exists');
 select has_function('public','service_admin_list_categories',array[]::text[],'category list RPC exists');
 select has_function('public','service_admin_list_extras',array[]::text[],'extra list RPC exists');
-select has_function('public','service_admin_create_service_catalog_audited',array['uuid','text','text','text','text','text','text','integer','numeric','integer','integer','integer','integer','numeric','uuid'],'complete catalog service create RPC exists');
+select has_function('public','service_admin_create_service_catalog_audited',array['uuid','text','text','text','text','text','text','integer','numeric','integer','integer','integer','integer','numeric','uuid','integer'],'complete catalog service create RPC exists with optional included people');
 select has_function('public','service_admin_replace_day_time_pricing_audited',array['uuid','jsonb','uuid'],'day/time pricing editor RPC exists');
 select has_function('public','service_admin_replace_service_extras_audited',array['uuid','jsonb','uuid'],'service extra mapping RPC exists');
 
-select ok(not has_function_privilege('authenticated','public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid)','EXECUTE'),'browser cannot create catalog service directly');
+select ok(not has_function_privilege('authenticated','public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,integer)','EXECUTE'),'browser cannot create catalog service directly');
 select ok(not has_function_privilege('authenticated','public.service_admin_replace_custom_fields_audited(uuid,jsonb,uuid)','EXECUTE'),'browser cannot replace service fields directly');
-select ok(has_function_privilege('service_role','public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid)','EXECUTE'),'service role can call catalog create after edge authorization');
+select ok(has_function_privilege('service_role','public.service_admin_create_service_catalog_audited(uuid,text,text,text,text,text,text,integer,numeric,integer,integer,integer,integer,numeric,uuid,integer)','EXECUTE'),'service role can call catalog create after edge authorization');
 
 insert into public.categories(id,name,slug,operation_scope,sort_order)
 values ('33333333-3333-4333-8333-333333333330','Gestante Teste','gestante-teste','SABRINA',10);
