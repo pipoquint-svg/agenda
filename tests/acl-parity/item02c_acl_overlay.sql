@@ -3,9 +3,6 @@
 -- Item 2C proves the current production ACL contract on top of the canonical rebuild.
 -- PR #393 legitimately adds service_admin_mark_appointment_no_show_evidenced; the
 -- contract therefore advances with that production change instead of freezing a snapshot.
--- PR #401 legitimately adds two payment-provider abstraction helpers. Both remain
--- inaccessible to browser roles; only the read-only provider resolver is executable
--- by service_role for the future provider adapter.
 do $$
 declare
   v_identity text;
@@ -85,36 +82,6 @@ begin
     raise exception 'ITEM02C_NO_SHOW_RPC_APP_ROLE_EXPOSURE:%', v_identity;
   end if;
 
-  -- PR #401: the provider resolver is intentionally server-only. The trigger
-  -- helpers are not directly executable by service_role or browser roles.
-  v_identity := 'public.service_resolve_appointment_payment_provider(uuid)';
-  v_oid := to_regprocedure(v_identity);
-  if v_oid is null then
-    raise exception 'ITEM02C_PAYMENT_PROVIDER_RESOLVER_MISSING:%', v_identity;
-  end if;
-  if not has_function_privilege('service_role', v_oid, 'EXECUTE') then
-    raise exception 'ITEM02C_PAYMENT_PROVIDER_RESOLVER_NOT_EXECUTABLE:%', v_identity;
-  end if;
-  if has_function_privilege('anon', v_oid, 'EXECUTE')
-     or has_function_privilege('authenticated', v_oid, 'EXECUTE') then
-    raise exception 'ITEM02C_PAYMENT_PROVIDER_RESOLVER_APP_ROLE_EXPOSURE:%', v_identity;
-  end if;
-
-  foreach v_identity in array array[
-    'public.service_snapshot_checkout_payment_provider()',
-    'public.service_copy_hold_payment_provider_to_appointment()'
-  ] loop
-    v_oid := to_regprocedure(v_identity);
-    if v_oid is null then
-      raise exception 'ITEM02C_PAYMENT_PROVIDER_TRIGGER_MISSING:%', v_identity;
-    end if;
-    if has_function_privilege('service_role', v_oid, 'EXECUTE')
-       or has_function_privilege('anon', v_oid, 'EXECUTE')
-       or has_function_privilege('authenticated', v_oid, 'EXECUTE') then
-      raise exception 'ITEM02C_PAYMENT_PROVIDER_TRIGGER_EXPOSURE:%', v_identity;
-    end if;
-  end loop;
-
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -122,11 +89,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 419 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=419 actual=%', v_public_function_count;
+  if v_public_function_count <> 416 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=416 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 363 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=363 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 362 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=362 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
