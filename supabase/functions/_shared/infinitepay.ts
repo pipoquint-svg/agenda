@@ -61,7 +61,10 @@ export type InfinitePayVerifiedPayment = {
 export type InfinitePayTransport = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 const API_BASE = 'https://api.checkout.infinitepay.io'
-const CHECKOUT_HOST = 'checkout.infinitepay.com.br'
+const CHECKOUT_HOSTS = new Set([
+  'checkout.infinitepay.com.br',
+  'checkout.infinitepay.io',
+])
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INFINITEPAY_RESPONSE_INVALID')
@@ -210,7 +213,7 @@ export async function createInfinitePayCheckoutLink(
   const { data } = await postJson('/links', payload, transport)
   const rawUrl = text(data.url)
   const checkoutUrl = safeHttpsUrl(rawUrl, 'INFINITEPAY_CHECKOUT_URL_INVALID')
-  if (checkoutUrl.hostname.toLowerCase() !== CHECKOUT_HOST) throw new Error('INFINITEPAY_CHECKOUT_URL_INVALID')
+  if (!CHECKOUT_HOSTS.has(checkoutUrl.hostname.toLowerCase())) throw new Error('INFINITEPAY_CHECKOUT_URL_INVALID')
   return { url: checkoutUrl.toString(), raw: data }
 }
 
