@@ -1,6 +1,6 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
-import { infinitePayRuntime } from '../_shared/infinitepay-runtime.ts'
+import { loadInfinitePayRuntime } from '../_shared/infinitepay-runtime.ts'
 import {
   brlToCents,
   checkInfinitePayPayment,
@@ -178,9 +178,9 @@ async function verifyAndApply(
   return { paid: true, state, provider: snapshot }
 }
 
-function providerReady(): boolean {
+async function providerReady(client: ReturnType<typeof adminClient>): Promise<boolean> {
   try {
-    infinitePayRuntime({ creatingLink: true })
+    await loadInfinitePayRuntime(client, { creatingLink: true })
     providerWebhookUrl()
     return true
   } catch {
@@ -237,7 +237,7 @@ Deno.serve(async (req) => {
           provider: 'INFINITEPAY',
           hosted_checkout: true,
           method_selected_at_provider: true,
-          hosted_checkout_available: providerReady(),
+          hosted_checkout_available: await providerReady(client),
         },
       })
     }
@@ -256,7 +256,7 @@ Deno.serve(async (req) => {
         throw new Error('INFINITEPAY_RETURN_URL_INVALID')
       }
       const tx = await loadTransaction(signal, context.appointment_id)
-      const runtime = infinitePayRuntime()
+      const runtime = await loadInfinitePayRuntime(client)
       const applied = await verifyAndApply(signal, tx, runtime.handle)
       return response(applied, applied.paid ? 200 : 202)
     }
@@ -268,9 +268,9 @@ Deno.serve(async (req) => {
     if (paymentKind === 'FULL' && !context.policy_allows_full) throw new Error('PAYMENT_POLICY_FULL_NOT_ALLOWED')
     if (paymentKind === 'MINIMUM' && !context.policy_allows_minimum) throw new Error('PAYMENT_POLICY_MINIMUM_NOT_ALLOWED')
 
-    // Fail before creating a local payment intent unless explicit live-link runtime
-    // configuration exists. Gate 2 deliberately leaves this disabled in production.
-    const runtime = infinitePayRuntime({ creatingLink: true })
+    // The private runtime row must explicitly enable live link creation. The default
+    // and deployment state remain fail-closed until a controlled operational window.
+    const runtime = await loadInfinitePayRuntime(client, { creatingLink: true })
     const webhookUrl = providerWebhookUrl()
 
     const { data: claimData, error: claimError } = await client.rpc('service_claim_infinitepay_checkout_by_token', {
@@ -344,7 +344,7 @@ Deno.serve(async (req) => {
   } catch (cause) {
     const code = cause instanceof Error ? cause.message.split(':')[0] : 'INFINITEPAY_PAYMENT_ERROR'
     const status = code === 'PAYMENT_PROVIDER_MISMATCH' ? 409
-      : code === 'INFINITEPAY_LIVE_LINKS_DISABLED' || code.startsWith('MISSING_ENV') ? 503
+      : code === 'INFINITEPAY_LIVE_LINKS_DISABLED' || code.startsWith('MISSING_ENV') || code.startsWith('INFINITEPAY_RUNTIME_CONFIG_') ? 503
       : code === 'PAYMENT_NOT_FOUND' ? 404
       : 400
     return response({ error: { code } }, status)
