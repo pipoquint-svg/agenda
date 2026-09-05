@@ -45,6 +45,14 @@ values (
   false
 );
 
+insert into public.service_change_policies(
+  service_id, notice_hours,
+  reschedule_first_early_percent, reschedule_first_late_percent,
+  reschedule_repeat_percent, cancellation_late_percent
+) values (
+  '62000000-0000-0000-0000-000000000003', 48, 0, 20, 20, 20
+);
+
 insert into public.booking_page_services (booking_page_id, service_id)
 values (
   '62000000-0000-0000-0000-000000000005',
