@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-05",
-    "active_total": 67,
-    "verify_jwt_false": 52,
+    "active_total": 68,
+    "verify_jwt_false": 53,
     "verify_jwt_true": 15,
-    "versioned_active": 62,
+    "versioned_active": 63,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -68,6 +68,7 @@
       "google-oauth"
     ],
     "infinitepay_provider_check": [
+      "infinitepay-return",
       "infinitepay-webhook"
     ],
     "internal_secret": [
