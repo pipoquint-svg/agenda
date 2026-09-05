@@ -23,6 +23,33 @@ insert into public.services (
   'Provider Test Service', 'provider-test-service', 60, 1000, 1, 10, 5000
 );
 
+-- Appointments require a complete service change-policy snapshot. This fixture is
+-- deliberately neutral for the provider test and does not change production rules.
+insert into public.service_change_policies (
+  service_id,
+  notice_hours,
+  reschedule_first_early_percent,
+  reschedule_first_late_percent,
+  reschedule_repeat_percent,
+  cancellation_late_percent,
+  reschedule_first_early_penalty_type,
+  reschedule_first_early_penalty_value,
+  reschedule_first_late_penalty_type,
+  reschedule_first_late_penalty_value,
+  reschedule_repeat_penalty_type,
+  reschedule_repeat_penalty_value,
+  cancellation_late_penalty_type,
+  cancellation_late_penalty_value
+) values (
+  '94500000-0000-0000-0000-000000000010',
+  48,
+  0, 20, 20, 20,
+  'PERCENT', 0,
+  'PERCENT', 20,
+  'PERCENT', 20,
+  'PERCENT', 20
+);
+
 insert into public.service_employees (id, service_id, employee_id)
 values (
   '94500000-0000-0000-0000-000000000011',
@@ -144,10 +171,14 @@ select is(
   'changing booking page configuration does not rewrite an existing appointment snapshot'
 );
 
-select is(
-  public.service_resolve_appointment_payment_provider('94500000-0000-0000-0000-000000000050'),
-  'INFINITEPAY',
-  'provider resolver returns the frozen appointment provider'
+select ok(
+  not has_function_privilege('service_role', 'agenda_internal.snapshot_checkout_payment_provider()', 'EXECUTE')
+  and not has_function_privilege('anon', 'agenda_internal.snapshot_checkout_payment_provider()', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'agenda_internal.snapshot_checkout_payment_provider()', 'EXECUTE')
+  and not has_function_privilege('service_role', 'agenda_internal.copy_hold_payment_provider_to_appointment()', 'EXECUTE')
+  and not has_function_privilege('anon', 'agenda_internal.copy_hold_payment_provider_to_appointment()', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'agenda_internal.copy_hold_payment_provider_to_appointment()', 'EXECUTE'),
+  'provider trigger helpers remain internal and non-executable outside the owner'
 );
 
 insert into public.payment_transactions (
