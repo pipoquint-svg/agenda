@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(10);
+select plan(15);
 
 insert into public.employees (id, name)
 values ('62000000-0000-0000-0000-000000000001', 'TEST PEOPLE EMPLOYEE');
@@ -13,7 +13,7 @@ values ('62000000-0000-0000-0000-000000000002', 'Test people', 'test-people-pric
 
 insert into public.services (
   id, category_id, name, slug, base_duration_minutes, base_price,
-  minimum_people, maximum_people, price_per_extra_person, operation_scope
+  minimum_people, included_people, maximum_people, price_per_extra_person, operation_scope
 ) values (
   '62000000-0000-0000-0000-000000000003',
   '62000000-0000-0000-0000-000000000002',
@@ -23,6 +23,7 @@ insert into public.services (
   890.00,
   1,
   6,
+  15,
   75.00,
   'SABRINA'
 );
@@ -54,78 +55,70 @@ select is(
   (public.calculate_booking_quote(
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    6,
-    null,
-    null
+    '[]'::jsonb,1,null,null
   )->>'commercial_value')::numeric,
   890.00::numeric,
-  'maximum_people is included in the base price'
+  'minimum allowed person count keeps the base price'
 );
 
 select is(
   (public.calculate_booking_quote(
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    6,
-    null,
-    null
-  )->>'extra_people_count')::integer,
-  0,
-  'no extra person exists at the included maximum'
+    '[]'::jsonb,6,null,null
+  )->>'commercial_value')::numeric,
+  890.00::numeric,
+  'all six included people keep the base price'
 );
 
 select is(
   (public.calculate_booking_quote(
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    7,
-    null,
-    null
+    '[]'::jsonb,7,null,null
   )->>'commercial_value')::numeric,
   965.00::numeric,
-  'the seventh person adds one configured surcharge'
+  'seventh person adds exactly one surcharge'
 );
 
 select is(
   (public.calculate_booking_quote(
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    7,
-    null,
-    null
+    '[]'::jsonb,7,null,null
   )->>'extra_people_amount')::numeric,
   75.00::numeric,
-  'quote exposes the authoritative extra people amount'
+  'quote exposes authoritative extra amount for seventh person'
 );
 
 select is(
   (public.calculate_booking_quote(
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    8,
-    null,
-    null
+    '[]'::jsonb,8,null,null
   )->>'commercial_value')::numeric,
   1040.00::numeric,
-  'each person above the included maximum adds one surcharge'
+  'eighth person means two paid extra people'
 );
 
 select is(
   (public.calculate_booking_quote(
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    8,
-    null,
-    null
-  )->>'extra_people_count')::integer,
-  2,
-  'quote exposes two extra people for eight attendees'
+    '[]'::jsonb,15,null,null
+  )->>'commercial_value')::numeric,
+  1565.00::numeric,
+  'maximum allowed people count charges nine extra people'
+);
+
+select throws_ok(
+  $$select public.calculate_booking_quote(
+    '62000000-0000-0000-0000-000000000003',
+    '62000000-0000-0000-0000-000000000004',
+    '[]'::jsonb,16,null,null
+  )$$,
+  'P0001','PEOPLE_ABOVE_MAXIMUM',
+  'quote rejects people above the hard maximum'
 );
 
 select lives_ok(
@@ -133,40 +126,56 @@ select lives_ok(
     'test-people-pricing-page',
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    7
+    '[]'::jsonb,15
   )$$,
-  'public selection accepts people above included maximum when surcharge is configured'
+  'public selection accepts the configured hard maximum'
 );
-
-select is(
-  (public.public_get_booking_page('test-people-pricing-page')->'services'->0->>'price_per_extra_person')::numeric,
-  75.00::numeric,
-  'public catalog exposes the configured per-person surcharge'
-);
-
-select is(
-  (public.public_get_booking_page('test-people-pricing-page')->'services'->0->>'allows_extra_people')::boolean,
-  true,
-  'public catalog tells the UI that extra people are enabled'
-);
-
-update public.services
-set price_per_extra_person = 0
-where id = '62000000-0000-0000-0000-000000000003';
 
 select throws_ok(
-  $$select public.calculate_booking_quote(
+  $$select public.assert_public_booking_selection(
+    'test-people-pricing-page',
     '62000000-0000-0000-0000-000000000003',
     '62000000-0000-0000-0000-000000000004',
-    '[]'::jsonb,
-    7,
-    null,
-    null
+    '[]'::jsonb,16
   )$$,
-  'P0001',
-  'PEOPLE_ABOVE_MAXIMUM',
-  'service without extra-person price preserves the effective hard cap'
+  'P0001','INVALID_PEOPLE_COUNT',
+  'public selection rejects people above maximum'
+);
+
+select is(
+  (public.public_get_booking_page('test-people-pricing-page')->'services'->0->>'included_people')::integer,
+  6,
+  'public catalog exposes included people'
+);
+
+select is(
+  (public.public_get_booking_page('test-people-pricing-page')->'services'->0->>'maximum_people')::integer,
+  15,
+  'public catalog keeps maximum as hard cap'
+);
+
+select is(
+  jsonb_array_length(public.public_get_booking_page('test-people-pricing-page')->'services'->0->'people_options'),
+  15,
+  'public catalog emits one authoritative option per allowed people count'
+);
+
+select is(
+  (public.public_get_booking_page('test-people-pricing-page')->'services'->0->'people_options'->6->>'extra_people_amount')::numeric,
+  75.00::numeric,
+  'option seven exposes one extra-person amount'
+);
+
+select is(
+  (public.public_get_booking_page('test-people-pricing-page')->'services'->0->'people_options'->14->>'extra_people_amount')::numeric,
+  675.00::numeric,
+  'option fifteen exposes nine extra-person amount'
+);
+
+select is(
+  ((select item from jsonb_array_elements(public.service_admin_list_service_settings()) item where item->>'id'='62000000-0000-0000-0000-000000000003')->>'included_people')::integer,
+  6,
+  'admin service settings exposes included people'
 );
 
 select * from finish();
