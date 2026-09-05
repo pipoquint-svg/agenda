@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(5);
+select plan(7);
 
 insert into public.resources (id, name, resource_type)
 values
@@ -118,22 +118,68 @@ insert into public.google_calendars (
 insert into public.google_calendar_events (
   id, google_calendar_id, google_event_id, status,
   start_at, end_at, qualification, normalized_payload
-) values (
-  '29200000-0000-0000-0000-000000000052',
-  '29200000-0000-0000-0000-000000000051',
-  'reschedule-person-divergence-event',
-  'confirmed',
-  '2035-01-15 10:00:00-03',
-  '2035-01-15 11:00:00-03',
-  'BLOCKING', '{}'
-);
+) values
+  (
+    '29200000-0000-0000-0000-000000000052',
+    '29200000-0000-0000-0000-000000000051',
+    'reschedule-physical-divergence-event',
+    'confirmed',
+    '2035-01-15 10:00:00-03',
+    '2035-01-15 11:00:00-03',
+    'BLOCKING', '{}'
+  ),
+  (
+    '29200000-0000-0000-0000-000000000054',
+    '29200000-0000-0000-0000-000000000051',
+    'reschedule-person-divergence-event',
+    'confirmed',
+    '2035-01-15 10:00:00-03',
+    '2035-01-15 11:00:00-03',
+    'BLOCKING', '{}'
+  );
 
 insert into public.schedule_divergences (
   id, resource_id, google_calendar_event_id, desired_range, reason
 ) values (
   '29200000-0000-0000-0000-000000000053',
-  '29200000-0000-0000-0000-000000000002',
+  '29200000-0000-0000-0000-000000000001',
   '29200000-0000-0000-0000-000000000052',
+  tstzrange('2035-01-15 10:00:00-03', '2035-01-15 11:00:00-03', '[)'),
+  'GOOGLE_EVENT_CONFLICT'
+);
+
+select is(
+  (select count(*)::integer
+   from public.list_available_slots_for_duration_reschedule_base(
+     '29200000-0000-0000-0000-000000000030',
+     '29200000-0000-0000-0000-000000000040',
+     null, '[]'::jsonb, 1, '2035-01-15'::date, null, null
+   )),
+  2,
+  'OPEN Google divergence on shared physical resource fails closed for employee A reschedule'
+);
+
+select is(
+  (select count(*)::integer
+   from public.list_available_slots_for_duration_reschedule_base(
+     '29200000-0000-0000-0000-000000000030',
+     '29200000-0000-0000-0000-000000000041',
+     null, '[]'::jsonb, 1, '2035-01-15'::date, null, null
+   )),
+  2,
+  'shared physical divergence also blocks employee B reschedule'
+);
+
+update public.schedule_divergences
+set status = 'RESOLVED', resolved_at = now(), resolution_notes = 'test resolution'
+where id = '29200000-0000-0000-0000-000000000053';
+
+insert into public.schedule_divergences (
+  id, resource_id, google_calendar_event_id, desired_range, reason
+) values (
+  '29200000-0000-0000-0000-000000000055',
+  '29200000-0000-0000-0000-000000000002',
+  '29200000-0000-0000-0000-000000000054',
   tstzrange('2035-01-15 10:00:00-03', '2035-01-15 11:00:00-03', '[)'),
   'GOOGLE_EVENT_CONFLICT'
 );
