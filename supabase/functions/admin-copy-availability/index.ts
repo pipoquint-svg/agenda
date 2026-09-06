@@ -1,4 +1,4 @@
-import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -11,6 +11,56 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8' },
   })
+}
+
+function requiredEnv(name: string): string {
+  const value = Deno.env.get(name)
+  if (!value) throw new Error(`MISSING_ENV:${name}`)
+  return value
+}
+
+function secretKey(): string {
+  const legacy = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (legacy) return legacy
+  const raw = Deno.env.get('SUPABASE_SECRET_KEYS')
+  if (!raw) throw new Error('MISSING_ENV:SUPABASE_SECRET_KEYS')
+  const parsed = JSON.parse(raw)
+  const value = parsed.default ?? Object.values(parsed)[0]
+  if (typeof value !== 'string' || !value) throw new Error('INVALID_ENV:SUPABASE_SECRET_KEYS')
+  return value
+}
+
+function adminClient(): SupabaseClient {
+  return createClient(requiredEnv('SUPABASE_URL'), secretKey(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+}
+
+async function requireAdmin(req: Request): Promise<{ adminId: string; authUserId: string }> {
+  const header = req.headers.get('authorization') ?? ''
+  const match = header.match(/^Bearer\s+(.+)$/i)
+  if (!match) throw new Error('ADMIN_AUTH_REQUIRED')
+
+  const client = adminClient()
+  const { data: userData, error: userError } = await client.auth.getUser(match[1])
+  if (userError || !userData.user) throw new Error('ADMIN_AUTH_INVALID')
+
+  const { data: adminId, error: adminError } = await client.rpc('service_admin_resolve_auth_user', {
+    p_auth_user_id: userData.user.id,
+  })
+  if (adminError || typeof adminId !== 'string' || !adminId) throw new Error('ADMIN_ACCESS_DENIED')
+  return { adminId, authUserId: userData.user.id }
+}
+
+async function requireAdminPermission(req: Request, permission: string): Promise<{ adminId: string; authUserId: string }> {
+  const admin = await requireAdmin(req)
+  const client = adminClient()
+  const { data, error } = await client.rpc('service_admin_has_permission', {
+    p_admin_id: admin.adminId,
+    p_permission: permission,
+  })
+  if (error || data !== true) throw new Error('ADMIN_PERMISSION_DENIED')
+  return admin
 }
 
 function uuid(value: unknown): string {
@@ -62,7 +112,9 @@ Deno.serve(async (req) => {
       ? 401
       : code === 'ADMIN_PERMISSION_DENIED'
         ? 403
-        : 400
+        : code.startsWith('MISSING_ENV') || code.startsWith('INVALID_ENV')
+          ? 503
+          : 400
     return json({ error: { code } }, status)
   }
 })
