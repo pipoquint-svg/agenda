@@ -72,9 +72,9 @@ def main() -> int:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     internal = manifest.get("deployable", {}).get("internal_secret", [])
     require("mercado-pago-reconcile" in internal, "DEPLOY_ALLOWLIST_MISSING", errors)
-    require(manifest.get("production_baseline", {}).get("active_total") == 65, "ACTIVE_TOTAL_NOT_UPDATED", errors)
-    require(manifest.get("production_baseline", {}).get("verify_jwt_false") == 50, "JWT_FALSE_COUNT_NOT_UPDATED", errors)
-    require(manifest.get("production_baseline", {}).get("versioned_active") == 60, "VERSIONED_ACTIVE_COUNT_NOT_UPDATED", errors)
+    require(manifest.get("production_baseline", {}).get("active_total") == 68, "ACTIVE_TOTAL_NOT_UPDATED", errors)
+    require(manifest.get("production_baseline", {}).get("verify_jwt_false") == 53, "JWT_FALSE_COUNT_NOT_UPDATED", errors)
+    require(manifest.get("production_baseline", {}).get("versioned_active") == 63, "VERSIONED_ACTIVE_COUNT_NOT_UPDATED", errors)
 
     config = CONFIG.read_text(encoding="utf-8")
     require("[functions.mercado-pago-reconcile]\nverify_jwt = false" in config, "CONFIG_AUTH_MISSING", errors)

@@ -144,6 +144,21 @@ verify_jwt = false
 [functions.mercado-pago-payment]
 verify_jwt = false
 
+# InfinitePay hosted checkout uses the same opaque appointment-token boundary. The
+# payment method/installments are selected only on the provider-hosted checkout.
+[functions.infinitepay-payment]
+verify_jwt = false
+
+# InfinitePay does not document a public webhook signature. This endpoint treats the
+# payload only as a wake-up signal and proves payment server-to-server with payment_check.
+[functions.infinitepay-webhook]
+verify_jwt = false
+
+# InfinitePay browser redirect is also only a signal. The return boundary has no
+# appointment token and confirms payment only through server-to-server payment_check.
+[functions.infinitepay-return]
+verify_jwt = false
+
 # Read-only payment-method preview. It validates the opaque appointment token itself,
 # is rate-limited, and returns backend-calculated cash amounts only.
 [functions.payment-preview]

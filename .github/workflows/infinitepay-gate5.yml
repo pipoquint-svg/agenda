@@ -1,0 +1,77 @@
+name: InfinitePay Gate 5
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/src/PaymentPanel.tsx'
+      - 'web/src/MercadoPagoPaymentPanel.tsx'
+      - 'web/src/InfinitePayPaymentPanel.tsx'
+      - 'web/src/paymentProviderApi.ts'
+      - 'web/src/infinitepayPaymentApi.ts'
+      - 'web/src/paymentApi.ts'
+      - 'web/src/BalanceCollectionPage.tsx'
+      - 'web/scripts/payment-provider-browser-smoke.mjs'
+      - '.github/workflows/infinitepay-gate5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controlled-browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check web
+        run: npm run check
+
+      - name: Build controlled preview
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key
+          VITE_APP_ENV: test
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run provider-routing browser E2E with intercepted network
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx vite preview --host 127.0.0.1 --port 4173 > /tmp/agenda-gate5-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/pagar-saldo?collection=gate5-controlled >/dev/null; then break; fi
+            if [ "$attempt" -eq 30 ]; then cat /tmp/agenda-gate5-preview.log; exit 1; fi
+            sleep 1
+          done
+          node scripts/payment-provider-browser-smoke.mjs
+
+      - name: Prove the browser E2E never targets the real InfinitePay API
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Fq 'api.checkout.infinitepay.io' scripts/payment-provider-browser-smoke.mjs; then
+            echo 'Gate 5 browser E2E must not target the real InfinitePay API.' >&2
+            exit 1
+          fi
+          grep -Fq "https://checkout.infinitepay.com.br/**" scripts/payment-provider-browser-smoke.mjs
+          grep -Fq "page.route" scripts/payment-provider-browser-smoke.mjs

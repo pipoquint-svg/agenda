@@ -18,7 +18,7 @@ const allowedTransactionTypes = new Set(['CHARGE', 'REFUND'])
 const allowedStatuses = new Set(['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'REFUNDED', 'PARTIALLY_REFUNDED'])
 const allowedPurposes = new Set(['CONTRACT', 'RESCHEDULE_PENALTY', 'CANCELLATION_PENALTY'])
 const allowedMethods = new Set(['PIX', 'CARD', 'CASH', 'TRANSFER', 'CREDIT', 'COURTESY', 'OTHER'])
-const allowedProviders = new Set(['MERCADO_PAGO', 'MANUAL'])
+const allowedProviders = new Set(['MERCADO_PAGO', 'INFINITEPAY', 'MANUAL'])
 
 type TransactionRow = {
   id: string
