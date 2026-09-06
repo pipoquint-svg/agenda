@@ -52,7 +52,7 @@ Deno.serve(async(req)=>{
    }
   }else if(checkoutMode==='PAY_NOW'&&String(appointment.status??'')==='AWAITING_PAYMENT'){
    try{
-    const delivery=await sendPaymentResumeEmail(client,{appointmentId:String(appointment.appointment_id??''),accessToken:String(appointment.access_token??'')});
+    const delivery=await sendPaymentResumeEmail(client,{appointmentId:String(appointment.appointment_id??'')});
     appointment.payment_resume_email_sent=delivery.sent;
     appointment.payment_resume_email_reason=delivery.reason;
    }catch(emailError){
