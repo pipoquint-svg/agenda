@@ -1,6 +1,7 @@
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 import { sendPreReservationCreatedEmail } from '../_shared/prebook-email.ts'
+import { sendPaymentResumeEmail } from '../_shared/payment-resume-email.ts'
 import { recordOpsEdgeFailure } from '../_shared/ops-alerts.ts'
 
 const corsHeaders = {
@@ -48,6 +49,16 @@ Deno.serve(async(req)=>{
     appointment.pre_reservation_email_sent=false;
     appointment.pre_reservation_email_reason=emailError instanceof Error?emailError.message.split(':')[0]:'PRE_RESERVATION_EMAIL_FAILED';
     console.error('[OPERATION_ALERT] PRE_RESERVATION_EMAIL_FAILED',{appointment_id:appointment.appointment_id,code:appointment.pre_reservation_email_reason});
+   }
+  }else if(checkoutMode==='PAY_NOW'&&String(appointment.status??'')==='AWAITING_PAYMENT'){
+   try{
+    const delivery=await sendPaymentResumeEmail(client,{appointmentId:String(appointment.appointment_id??''),accessToken:String(appointment.access_token??'')});
+    appointment.payment_resume_email_sent=delivery.sent;
+    appointment.payment_resume_email_reason=delivery.reason;
+   }catch(emailError){
+    appointment.payment_resume_email_sent=false;
+    appointment.payment_resume_email_reason=emailError instanceof Error?emailError.message.split(':')[0]:'PAYMENT_RESUME_EMAIL_FAILED';
+    console.error('[OPERATION_ALERT] PAYMENT_RESUME_EMAIL_FAILED',{appointment_id:appointment.appointment_id,code:appointment.payment_resume_email_reason});
    }
   }
   return response({ok:true,appointment})
