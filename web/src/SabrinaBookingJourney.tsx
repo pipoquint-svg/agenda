@@ -48,6 +48,7 @@ const clock = new Intl.DateTimeFormat('pt-BR', {
 type StepKey = 'SERVICE' | 'EXTRAS' | 'DATE' | 'PEOPLE' | 'CUSTOMER' | 'REVIEW' | 'PAYMENT' | 'CONFIRMATION'
 type CheckoutMode = 'PAY_NOW' | 'PREBOOK' | ''
 type AnswerValue = string | number | boolean | null
+type BookingPeopleOption = { count: number; included: boolean; extra_people_amount: number | string }
 
 type FinalResult = AppointmentCheckoutResult & {
   pre_reservation?: boolean
@@ -207,6 +208,13 @@ function FieldInput({ field, value, onChange }: {
 }
 
 export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
+  const natalFlow = slug === 'natal-2026'
+  const flowSteps: StepKey[] = natalFlow
+    ? ['SERVICE', 'DATE', 'EXTRAS', 'PEOPLE', 'CUSTOMER', 'REVIEW', 'PAYMENT', 'CONFIRMATION']
+    : STEPS
+  const holdSteps: StepKey[] = natalFlow
+    ? ['EXTRAS', 'PEOPLE', 'CUSTOMER', 'REVIEW']
+    : ['PEOPLE', 'CUSTOMER', 'REVIEW']
   const [page, setPage] = useState<BookingPageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -246,7 +254,12 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     [page, serviceId],
   )
   const extras = useMemo(() => selectedExtras(service, extraQuantities), [service, extraQuantities])
-  const stepIndex = STEPS.indexOf(step)
+  const peopleOptions = useMemo(() => {
+    if (!natalFlow || !service) return [] as BookingPeopleOption[]
+    const options = (service as BookingService & { people_options?: BookingPeopleOption[] }).people_options
+    return Array.isArray(options) ? options : []
+  }, [natalFlow, service])
+  const stepIndex = flowSteps.indexOf(step)
   const selectedPackage = useMemo(() => packages.find((item) => item.hour_package_id === packageId) ?? null, [packages, packageId])
 
   const probeKey = useMemo(() => {
@@ -291,7 +304,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
   }, [service, employeeRelationId, extras, peopleCount, slug])
 
   useEffect(() => {
-    if (!hold || !['PEOPLE', 'CUSTOMER', 'REVIEW'].includes(step)) {
+    if (!hold || !holdSteps.includes(step)) {
       setRemainingSeconds(0)
       return
     }
@@ -348,6 +361,10 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
 
   function changeExtra(extraId: string, quantity: number) {
     setExtraQuantities((current) => ({ ...current, [extraId]: quantity }))
+    if (natalFlow && hold) {
+      setError('')
+      return
+    }
     setDate('')
     setSlots([])
     setSelectedSlot(null)
@@ -359,6 +376,12 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
 
   function goBack() {
     if (hold) return
+    if (natalFlow) {
+      if (step === 'DATE') setStep('SERVICE')
+      if (step === 'EXTRAS') setStep('DATE')
+      if (step === 'PEOPLE') setStep('EXTRAS')
+      return
+    }
     if (step === 'EXTRAS') setStep('SERVICE')
     if (step === 'DATE') setStep('EXTRAS')
     if (step === 'PEOPLE') setStep('DATE')
@@ -425,12 +448,38 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         serviceName: service.name,
         expiresAt: nextHold.expires_at,
       }))
-      setStep('PEOPLE')
+      setStep(natalFlow ? 'EXTRAS' : 'PEOPLE')
     } catch (cause) {
       setSelectedSlot(null)
       setError(readableError(cause))
       if (cause instanceof Error && cause.message.includes('SLOT_NO_LONGER_AVAILABLE')) {
         await chooseDate(date)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirmNatalExtrasAndContinue() {
+    if (!hold) return
+    setBusy(true)
+    setError('')
+    try {
+      await updateCheckoutSelection({
+        token: hold.checkout_hold_token,
+        extras,
+        peopleCount,
+      })
+      setStep('PEOPLE')
+    } catch (cause) {
+      setError(readableError(cause))
+      const message = cause instanceof Error ? cause.message : ''
+      if (message.includes('CHECKOUT_HOLD_NOT_ACTIVE') || message.includes('HOLD_EXPIRED') || message.includes('HOLD_SELECTION_REQUIRES_NEW_SLOT') || message.includes('HOLD_SELECTION_LOCKED')) {
+        sessionStorage.removeItem('bs_checkout_hold')
+        setHold(null)
+        setContext(null)
+        setSelectedSlot(null)
+        setStep('DATE')
       }
     } finally {
       setBusy(false)
@@ -607,7 +656,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         </header>
 
         <nav className="sby-stepper" aria-label="Etapas do agendamento">
-          {STEPS.map((item, index) => {
+          {flowSteps.map((item, index) => {
             const current = item === step
             const completed = index < stepIndex
             const canReturn = !hold && completed && index <= 3
@@ -627,7 +676,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         </nav>
 
         {error ? <div className="sby-alert" role="alert">{error}</div> : null}
-        {hold && ['PEOPLE', 'CUSTOMER', 'REVIEW'].includes(step) && remainingSeconds > 0 ? (
+        {hold && holdSteps.includes(step) && remainingSeconds > 0 ? (
           <div className="sby-hold-strip">
             <span>Horário protegido</span>
             <strong>{String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:{String(remainingSeconds % 60).padStart(2, '0')}</strong>
@@ -654,13 +703,13 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                   ))}</div>
                 </div>
               ) : null}
-              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={!service || !employeeRelationId} onClick={() => setStep('EXTRAS')}>Continuar</button></div>
+              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={!service || !employeeRelationId} onClick={() => setStep(natalFlow ? 'DATE' : 'EXTRAS')}>Continuar</button></div>
             </>
           ) : null}
 
           {step === 'EXTRAS' && service ? (
             <>
-              <div className="sby-stage-title"><small>Etapa 2</small><h2>Quer incluir algum extra?</h2><p>Os extras entram no cálculo do tempo antes de mostrarmos as datas disponíveis.</p></div>
+              <div className="sby-stage-title"><small>{natalFlow ? 'Etapa 3' : 'Etapa 2'}</small><h2>Quer incluir algum extra?</h2><p>{natalFlow ? 'Seu horário já está protegido. Escolha os extras e vamos validar tudo antes de continuar.' : 'Os extras entram no cálculo do tempo antes de mostrarmos as datas disponíveis.'}</p></div>
               {service.extras.length > 0 ? <div className="sby-extras">
                 {service.extras.map((extra) => {
                   const quantity = extraQuantities[extra.id] ?? 0
@@ -696,16 +745,20 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                 })}
               </div> : <div className="sby-empty">Este pacote não possui extras disponíveis.</div>}
               {quote ? <div className="sby-mini-summary"><span>Valor atual</span><strong>{money.format(numeric(quote.commercial_value))}</strong></div> : null}
-              <div className="sby-actions"><button className="sby-secondary" type="button" onClick={goBack}>Voltar</button><button className="sby-primary" type="button" onClick={() => setStep('DATE')}>Ver datas</button></div>
+              {natalFlow ? (
+                <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmNatalExtrasAndContinue()}>{busy ? 'Validando…' : 'Continuar'}</button></div>
+              ) : (
+                <div className="sby-actions"><button className="sby-secondary" type="button" onClick={goBack}>Voltar</button><button className="sby-primary" type="button" onClick={() => setStep('DATE')}>Ver datas</button></div>
+              )}
             </>
           ) : null}
 
           {step === 'DATE' && service ? (
             <>
-              <div className="sby-stage-title"><small>Etapa 3</small><h2>Escolha a data e o horário</h2><p>O calendário já considera o pacote e os extras selecionados.</p></div>
+              <div className="sby-stage-title"><small>{natalFlow ? 'Etapa 2' : 'Etapa 3'}</small><h2>Escolha a data e o horário</h2><p>{natalFlow ? 'Escolha primeiro o melhor horário. Os extras serão definidos na próxima etapa.' : 'O calendário já considera o pacote e os extras selecionados.'}</p></div>
               <SabrinaAvailabilityCalendar probeKey={probeKey} value={date} onSelectDate={(next) => void chooseDate(next)} loadDay={loadDay} />
               {date ? <div className="sby-time-section">
-                <div className="sby-time-head"><strong>{formatDate(date)}</strong><small>{loadingSlots ? 'Buscando horários…' : `${slots.length} horário${slots.length === 1 ? '' : 's'} disponível${slots.length === 1 ? '' : 'is'}`}</small></div>
+                <div className="sby-time-head"><strong>{formatDate(date)}</strong><small>{loadingSlots ? 'Buscando horários…' : `${slots.length} horário${slots.length === 1 ? '' : 's'} ${slots.length === 1 ? 'disponível' : 'disponíveis'}`}</small></div>
                 <div className="sby-time-grid">
                   {slots.map((slot) => (
                     <button type="button" key={slot.slot_start_at} disabled={busy} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => void protectSlotAndContinue(slot)}>
@@ -723,7 +776,16 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
             <>
               <div className="sby-stage-title"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>Seu horário já está protegido. A quantidade de pessoas não altera a duração do ensaio.</p></div>
               <div className="sby-selected-time"><span>{formatDate(date)}</span><strong>{timeRange(selectedSlot)}</strong></div>
-              {service.minimum_people === service.maximum_people ? (
+              {peopleOptions.length > 0 ? (
+                <div className="sby-people-grid">
+                  {peopleOptions.map((option) => (
+                    <button type="button" key={option.count} className={peopleCount === option.count ? 'selected' : ''} onClick={() => setPeopleCount(option.count)}>
+                      {option.count}
+                      <small>{option.included ? (option.count === 1 ? 'pessoa · incluída' : 'pessoas · incluídas') : `+ ${money.format(numeric(option.extra_people_amount))}`}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : service.minimum_people === service.maximum_people ? (
                 <div className="sby-people-fixed">{service.minimum_people} {service.minimum_people === 1 ? 'pessoa' : 'pessoas'}</div>
               ) : (
                 <div className="sby-people-grid">
@@ -761,10 +823,10 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                 <div><span>Extras</span><strong>{extras.length ? service.extras.filter((extra) => (extraQuantities[extra.id] ?? 0) > 0).map((extra) => extra.name).join(', ') : 'Nenhum'}</strong></div>
               </div>
 
-              <div className="sby-review-block">
+              {!natalFlow ? <div className="sby-review-block">
                 <label className="sby-field"><span>Cupom de desconto</span><input value={couponCode} onChange={(event) => setCouponCode(event.target.value.toUpperCase())} placeholder="Digite seu cupom" disabled={couponBusy} /></label>
                 <div className="sby-inline-actions">{coupon?.coupon_code ? <button type="button" onClick={() => void removeCoupon()} disabled={couponBusy}>Remover cupom</button> : <button type="button" onClick={() => void applyCoupon()} disabled={couponBusy || couponCode.trim().length < 3}>Aplicar cupom</button>}</div>
-              </div>
+              </div> : null}
 
               {packages.length > 0 ? <div className="sby-review-block"><strong>Usar pacote/crédito disponível</strong><div className="sby-package-list"><label className={!packageId ? 'selected' : ''}><input type="radio" name="package" checked={!packageId} onChange={() => void choosePackage('')} /><span>Não usar pacote</span></label>{packages.map((item) => <label key={item.hour_package_id} className={packageId === item.hour_package_id ? 'selected' : ''}><input type="radio" name="package" checked={packageId === item.hour_package_id} disabled={!item.usable} onChange={() => void choosePackage(item.hour_package_id)} /><span>{item.name}<small>{item.usable ? `Saldo a pagar: ${money.format(numeric(item.cash_due))}` : 'Saldo insuficiente'}</small></span></label>)}</div></div> : null}
 
