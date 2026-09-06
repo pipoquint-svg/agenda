@@ -40,9 +40,8 @@ export async function sendPaymentResumeEmail(
   client: any,
   input: { appointmentId: string },
 ): Promise<{ sent: boolean; reason: string; providerMessageId?: string | null }> {
-  if (!envEnabled('TRANSACTIONAL_EMAIL_ENABLED')) {
-    return { sent: false, reason: 'TRANSACTIONAL_EMAIL_DISABLED' }
-  }
+  // This message is part of the Sabrina PAY_NOW recovery contract, not an optional
+  // campaign notification. Scope, recipient and template gates below still apply.
   if (!input.appointmentId) throw new Error('PAYMENT_RESUME_EMAIL_CONTEXT_INVALID')
 
   const { data: appointment, error: appointmentError } = await client
