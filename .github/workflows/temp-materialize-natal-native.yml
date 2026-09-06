@@ -1,0 +1,42 @@
+name: Temp Materialize Natal Native Bundle
+
+on:
+  push:
+    branches:
+      - materialize/natal-native-bundle
+    paths:
+      - '.github/workflows/temp-materialize-natal-native.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: materialize/natal-native-bundle
+          fetch-depth: 0
+      - name: Download certified production embed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/embed
+          mkdir -p /tmp/embed public-materialized
+          gh run download 34001379234 --repo pipoquint-svg/agenda --name cutover-production-agenda-embed-68c98c5f7bc9fa1908361afb527d0cd59b750670 --dir /tmp/embed
+          test -f /tmp/embed/agenda-embed.js
+          test -f /tmp/embed/agenda-embed.css
+          echo 'fcca98f9150db06bab87a0aa39f46a292569e81eb515f5117e74d7cdc477854a  /tmp/embed/agenda-embed.js' | sha256sum -c -
+          echo 'db561c0c637ab57a5bf0a84d4ce33dd25c75eb2f162af00f30fc224fb9b4c555  /tmp/embed/agenda-embed.css' | sha256sum -c -
+          cp /tmp/embed/agenda-embed.js public-materialized/agenda-embed.js
+          cp /tmp/embed/agenda-embed.css public-materialized/agenda-embed.css
+      - name: Commit certified materialization
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public-materialized/agenda-embed.js public-materialized/agenda-embed.css
+          git commit -m 'build(natal): materialize certified native-flow embed'
+          git push origin HEAD:materialize/natal-native-bundle
