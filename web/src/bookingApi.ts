@@ -193,6 +193,13 @@ function unwrapRpc<T>(data: unknown, error: { message: string } | null): T {
   return data as T
 }
 
+function normalizeCustomerFieldError(code: string): string {
+  if (code.includes('CUSTOMER_EMAIL_MISMATCH')) return 'CUSTOMER_EMAIL_INVALID'
+  if (code.includes('CUSTOMER_PHONE_MISMATCH')) return 'CUSTOMER_PHONE_INVALID'
+  if (code.includes('CUSTOMER_TAX_ID_MISMATCH')) return 'CUSTOMER_TAX_ID_INVALID'
+  return code
+}
+
 async function callPublicGateway<T>(name: 'booking-hold' | 'booking-checkout', body: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${functionsBaseUrl}/${name}`, {
     method: 'POST',
@@ -204,7 +211,7 @@ async function callPublicGateway<T>(name: 'booking-hold' | 'booking-checkout', b
     body: JSON.stringify(body),
   })
   const payload = await res.json().catch(() => ({})) as { hold?: T; data?: T; error?: { code?: string } }
-  if (!res.ok) throw new Error(payload.error?.code ?? `HTTP_${res.status}`)
+  if (!res.ok) throw new Error(normalizeCustomerFieldError(payload.error?.code ?? `HTTP_${res.status}`))
   const value = name === 'booking-hold' ? payload.hold : payload.data
   if (value === undefined) throw new Error('PUBLIC_GATEWAY_INVALID_RESPONSE')
   return value as T
