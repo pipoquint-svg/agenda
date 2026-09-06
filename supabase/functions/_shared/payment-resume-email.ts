@@ -5,6 +5,7 @@ import {
   markNotificationFailed,
   markNotificationSent,
   renderNotificationMessage,
+  sha256,
   type NotificationTemplate,
 } from './notification-email.ts'
 
@@ -30,17 +31,19 @@ function paymentResumeBaseUrl(): string {
   return parsed.toString().replace(/\/+$/, '')
 }
 
+function randomAccessToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 export async function sendPaymentResumeEmail(
   client: any,
-  input: { appointmentId: string; accessToken: string },
+  input: { appointmentId: string },
 ): Promise<{ sent: boolean; reason: string; providerMessageId?: string | null }> {
   if (!envEnabled('TRANSACTIONAL_EMAIL_ENABLED')) {
     return { sent: false, reason: 'TRANSACTIONAL_EMAIL_DISABLED' }
   }
-  const accessToken = input.accessToken.trim()
-  if (!input.appointmentId || accessToken.length < 32) {
-    throw new Error('PAYMENT_RESUME_EMAIL_CONTEXT_INVALID')
-  }
+  if (!input.appointmentId) throw new Error('PAYMENT_RESUME_EMAIL_CONTEXT_INVALID')
 
   const { data: appointment, error: appointmentError } = await client
     .from('appointments')
@@ -92,21 +95,6 @@ export async function sendPaymentResumeEmail(
   const template = (Array.isArray(rows) ? rows[0] : null) as NotificationTemplate | null
   if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
 
-  const { data: operationSettings } = await client.rpc('service_admin_get_operation_settings_v2', {
-    p_operation_scope: scope,
-  })
-  const resumeUrl = `${paymentResumeBaseUrl()}/retomar-pagamento.html#token=${encodeURIComponent(accessToken)}`
-  const values: Record<string, string> = {
-    'operation.name': String(operationSettings?.public_name ?? sender.brandName),
-    'customer.name': String(customer.name ?? ''),
-    'service.name': String(appointment.service_name_snapshot ?? service.name ?? ''),
-    'appointment.public_code': String(appointment.public_code ?? ''),
-    'appointment.start_at': dateTime(appointment.start_at),
-    'appointment.duration': `${Math.max(0, Math.round(Number(appointment.duration_minutes ?? 0)))} min`,
-    'payment.expires_at': dateTime(appointment.hold_expires_at),
-    'payment.resume_url': resumeUrl,
-  }
-  const message = renderNotificationMessage(template, values, sender.brandName)
   const idempotencyKey = `notification:${template.id}:${appointment.id}:EMAIL:CUSTOMER`
   const delivery = await beginNotificationDelivery(client, {
     templateId: template.id,
@@ -123,26 +111,62 @@ export async function sendPaymentResumeEmail(
       operation_scope: scope,
       payment_provider: appointment.payment_provider_snapshot,
       recipient_masked: maskEmail(recipient),
+      token_scope: 'PAY',
     },
   })
   if (delivery.alreadySent) {
     return { sent: true, reason: 'NOTIFICATION_ALREADY_SENT', providerMessageId: delivery.providerMessageId }
   }
 
-  const providerPayload: EmailProviderPayload = {
-    from: sender.from,
-    to: [recipient],
-    subject: message.subject,
-    text: message.text,
-    html: message.html,
-  }
-  if (sender.replyTo) providerPayload.reply_to = sender.replyTo
-
+  let issuedTokenId: string | null = null
   try {
+    const paymentToken = randomAccessToken()
+    const { data: issuedToken, error: tokenError } = await client
+      .from('appointment_access_tokens')
+      .insert({
+        appointment_id: appointment.id,
+        token_hash: await sha256(paymentToken),
+        scope: 'PAY',
+        expires_at: appointment.hold_expires_at,
+        delivery_channel: 'EMAIL',
+        destination_masked: maskEmail(recipient),
+      })
+      .select('id')
+      .single()
+    if (tokenError || !issuedToken) throw new Error('PAYMENT_RESUME_TOKEN_ISSUE_FAILED')
+    issuedTokenId = String(issuedToken.id)
+
+    const { data: operationSettings } = await client.rpc('service_admin_get_operation_settings_v2', {
+      p_operation_scope: scope,
+    })
+    const resumeUrl = `${paymentResumeBaseUrl()}/retomar-pagamento.html#token=${encodeURIComponent(paymentToken)}`
+    const values: Record<string, string> = {
+      'operation.name': String(operationSettings?.public_name ?? sender.brandName),
+      'customer.name': String(customer.name ?? ''),
+      'service.name': String(appointment.service_name_snapshot ?? service.name ?? ''),
+      'appointment.public_code': String(appointment.public_code ?? ''),
+      'appointment.start_at': dateTime(appointment.start_at),
+      'appointment.duration': `${Math.max(0, Math.round(Number(appointment.duration_minutes ?? 0)))} min`,
+      'payment.expires_at': dateTime(appointment.hold_expires_at),
+      'payment.resume_url': resumeUrl,
+    }
+    const message = renderNotificationMessage(template, values, sender.brandName)
+    const providerPayload: EmailProviderPayload = {
+      from: sender.from,
+      to: [recipient],
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+    }
+    if (sender.replyTo) providerPayload.reply_to = sender.replyTo
+
     const providerMessageId = await sendEmailWithProvider(providerPayload, idempotencyKey)
     await markNotificationSent(client, delivery.id, providerMessageId)
     return { sent: true, reason: eventKey, providerMessageId }
   } catch (error) {
+    if (issuedTokenId) {
+      await client.from('appointment_access_tokens').update({ revoked_at: new Date().toISOString() }).eq('id', issuedTokenId)
+    }
     await markNotificationFailed(client, delivery.id, error)
     throw error
   }
