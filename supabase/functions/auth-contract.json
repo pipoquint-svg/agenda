@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-05",
-    "active_total": 68,
+    "captured_on": "2026-09-06",
+    "active_total": 69,
     "verify_jwt_false": 53,
-    "verify_jwt_true": 15,
-    "versioned_active": 63,
+    "verify_jwt_true": 16,
+    "versioned_active": 64,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -47,6 +47,7 @@
       "admin-balance-collections",
       "admin-birthday-settings",
       "admin-change-actions",
+      "admin-copy-availability",
       "admin-coupons",
       "admin-customers",
       "admin-employees",
