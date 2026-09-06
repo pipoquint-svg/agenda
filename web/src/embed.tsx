@@ -14,7 +14,7 @@ function mountAgenda(target: HTMLElement) {
   createRoot(target).render(
     <StrictMode>
       <div className="bs-agenda-embed">
-        {slug === 'sabrina' ? (
+        {slug === 'sabrina' || slug === 'natal-2026' ? (
           <SabrinaBookingJourney slug={slug} />
         ) : (
           <>

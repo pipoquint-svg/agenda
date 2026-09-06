@@ -42,6 +42,8 @@ export type InfinitePayCheckoutResponse = {
 
 type ErrorPayload = { error?: { code?: string } }
 
+const checkoutHosts = new Set(['checkout.infinitepay.com.br', 'checkout.infinitepay.io'])
+
 async function callInfinitePay(accessToken: string, init: RequestInit): Promise<Response> {
   return fetch(`${functionsBaseUrl}/infinitepay-payment`, {
     ...init,
@@ -71,7 +73,7 @@ function hostedCheckoutUrl(value: string): string {
   } catch {
     throw new Error('INFINITEPAY_CHECKOUT_URL_INVALID')
   }
-  if (url.protocol !== 'https:' || url.hostname !== 'checkout.infinitepay.com.br') {
+  if (url.protocol !== 'https:' || !checkoutHosts.has(url.hostname.toLowerCase())) {
     throw new Error('INFINITEPAY_CHECKOUT_URL_INVALID')
   }
   return url.toString()
