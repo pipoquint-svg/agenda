@@ -227,8 +227,8 @@ Deno.serve(async (req) => {
           contract_settled: context.contract_settled,
           contract_balance: context.contract_balance,
           minimum_due_contract_amount: context.minimum_due_contract_amount,
-          minimum_available: context.minimum_available,
-          full_available: context.full_available,
+          minimum_available: context.minimum_available && context.policy_allows_minimum,
+          full_available: context.full_available && context.policy_allows_full,
           payment_mode: context.payment_mode,
           policy_allows_minimum: context.policy_allows_minimum,
           policy_allows_full: context.policy_allows_full,
@@ -268,8 +268,6 @@ Deno.serve(async (req) => {
     if (paymentKind === 'FULL' && !context.policy_allows_full) throw new Error('PAYMENT_POLICY_FULL_NOT_ALLOWED')
     if (paymentKind === 'MINIMUM' && !context.policy_allows_minimum) throw new Error('PAYMENT_POLICY_MINIMUM_NOT_ALLOWED')
 
-    // The private runtime row must explicitly enable live link creation. The default
-    // and deployment state remain fail-closed until a controlled operational window.
     const runtime = await loadInfinitePayRuntime(client, { creatingLink: true })
     const webhookUrl = providerWebhookUrl()
 
@@ -332,9 +330,6 @@ Deno.serve(async (req) => {
         })
         return response({ error: { code: 'INFINITEPAY_LINK_REJECTED' }, transaction_id: claim.transaction_id }, 422)
       }
-
-      // Network/timeout/5xx/invalid 2xx response is ambiguous: the provider might
-      // already have created the link. Keep CREATE_STARTED and never auto-create again.
       console.error('[OPERATION_ALERT] INFINITEPAY_LINK_CREATION_UNCERTAIN', {
         transaction_id: claim.transaction_id,
         code,
