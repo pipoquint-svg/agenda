@@ -61,7 +61,7 @@ select
   'Private expiry test',
   'BLACKSHEEP',
   'MERCADO_PAGO',
-  true
+  false
 from _private_expiry_ids;
 
 insert into public.resources(id, name, resource_type, is_active)
