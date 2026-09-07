@@ -69,6 +69,56 @@ Deno.serve(async (req) => {
       ? { ...(data as Record<string, unknown>) }
       : { pending_items: [] as unknown[] }
 
+    const { data: recentRows, error: recentError } = await client
+      .from('appointments')
+      .select('id,public_code,status,start_at,end_at,created_at,origin,service_id,primary_customer_id,service_name_snapshot')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(5)
+    if (recentError) throw new Error('ADMIN_RECENT_APPOINTMENTS_QUERY_FAILED')
+
+    const customerIds = [...new Set((recentRows ?? []).map((row) => row.primary_customer_id).filter(Boolean))] as string[]
+    const serviceIds = [...new Set((recentRows ?? []).map((row) => row.service_id).filter(Boolean))] as string[]
+
+    let recentCustomers: Array<{ id: string; name: string | null }> = []
+    if (customerIds.length > 0) {
+      const { data: customers, error: customersError } = await client
+        .from('customers')
+        .select('id,name')
+        .in('id', customerIds)
+      if (customersError) throw new Error('ADMIN_RECENT_APPOINTMENT_CUSTOMERS_QUERY_FAILED')
+      recentCustomers = customers ?? []
+    }
+
+    let recentServices: Array<{ id: string; name: string; operation_scope: string | null }> = []
+    if (serviceIds.length > 0) {
+      const { data: services, error: servicesError } = await client
+        .from('services')
+        .select('id,name,operation_scope')
+        .in('id', serviceIds)
+      if (servicesError) throw new Error('ADMIN_RECENT_APPOINTMENT_SERVICES_QUERY_FAILED')
+      recentServices = services ?? []
+    }
+
+    const customerNames = new Map(recentCustomers.map((row) => [row.id, row.name]))
+    const servicesById = new Map(recentServices.map((row) => [row.id, row]))
+    output.recent_appointments = (recentRows ?? []).map((row) => {
+      const service = row.service_id ? servicesById.get(row.service_id) : null
+      return {
+        id: row.id,
+        public_code: row.public_code,
+        status: row.status,
+        start_at: row.start_at,
+        end_at: row.end_at,
+        created_at: row.created_at,
+        origin: row.origin,
+        customer_name: row.primary_customer_id ? customerNames.get(row.primary_customer_id) ?? null : null,
+        service_name: row.service_name_snapshot || service?.name || null,
+        operation_scope: service?.operation_scope ?? null,
+      }
+    })
+
     if (canSeeFinance) {
       let openQuery = client.from('appointment_open_balances').select('*').order('start_at', { ascending: true }).limit(200)
       if (operationScope) openQuery = openQuery.eq('operation_scope', operationScope)
