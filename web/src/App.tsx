@@ -38,7 +38,7 @@ function PublicBookingRoute({ slug }: { slug: string }) {
 
 function PublicPrivateInviteRoute({ accessToken }: { accessToken: string }) {
   useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: 'SABRINA', pageSlug: 'natal-2026-private-invite' }) }, [])
-  return <><WaitlistPrivateInvitePage accessToken={accessToken} /><BookingCheckoutSession /><TrackingConsentBanner /></>
+  return <><WaitlistPrivateInvitePage accessToken={accessToken} /><TrackingConsentBanner /></>
 }
 
 function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: string | null }) {
