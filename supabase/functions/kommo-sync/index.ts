@@ -13,6 +13,17 @@ import {
   type KommoCustomField,
 } from '../_shared/kommo.ts'
 
+const NATAL_2026_SERVICE_IDS = new Set([
+  '111e9ae4-f626-4a71-a209-e20166310ee5',
+  '5268a4a1-2cfb-4c23-a89a-3cf1853fb637',
+  'ca578a83-2188-4be7-93c8-532c77801b0c',
+  '0afb550a-3cd0-46f5-9482-b1e219bf9d2e',
+])
+
+const NATAL_2026_INTERNAL_PIPELINE_ID = 14356959
+const NATAL_2026_ABANDONMENT_STAGE_ID = 111362911 // "incompleta" in Kommo
+const NATAL_2026_CONFIRMED_STAGE_ID = 110892847
+
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
@@ -55,6 +66,35 @@ type Settings = {
   stage_completed_id: number | null
   stage_no_show_id: number | null
   stage_expired_id: number | null
+}
+
+type LeadRoute = {
+  pipelineId: number
+  stageId: number
+  recoverInitialLead: boolean
+}
+
+function natal2026Route(desired: DesiredState): LeadRoute | null {
+  const appointmentStatus = String(desired.appointment_status ?? '').trim().toUpperCase()
+  const financialStatus = String(desired.financial_status ?? '').trim().toUpperCase()
+
+  if (appointmentStatus === 'AWAITING_PAYMENT' && financialStatus === 'PENDING') {
+    return {
+      pipelineId: NATAL_2026_INTERNAL_PIPELINE_ID,
+      stageId: NATAL_2026_ABANDONMENT_STAGE_ID,
+      recoverInitialLead: false,
+    }
+  }
+
+  if (appointmentStatus === 'CONFIRMED' && financialStatus === 'PAID') {
+    return {
+      pipelineId: NATAL_2026_INTERNAL_PIPELINE_ID,
+      stageId: NATAL_2026_CONFIRMED_STAGE_ID,
+      recoverInitialLead: false,
+    }
+  }
+
+  return null
 }
 
 async function contactFieldIds(baseUrl: string, token: string): Promise<{ email: number | null; phone: number | null }> {
@@ -248,7 +288,15 @@ Deno.serve(async (req) => {
     }
     if (entityVersion > desired.version) throw new Error('ENTITY_VERSION_AHEAD_OF_APPOINTMENT')
     if (!desired.eligible) return jsonResponse({ stale: false, skipped: true, reason: desired.reason ?? 'KOMMO_NOT_ELIGIBLE' })
-    if (desired.operation_scope !== 'BLACKSHEEP') throw new Error('KOMMO_OPERATION_SCOPE_DENIED')
+
+    const serviceId = String(desired.service?.id ?? '')
+    const isNatal2026 = NATAL_2026_SERVICE_IDS.has(serviceId)
+    if (isNatal2026) {
+      if (desired.operation_scope !== 'SABRINA') throw new Error('KOMMO_NATAL_OPERATION_SCOPE_DENIED')
+    } else if (desired.operation_scope !== 'BLACKSHEEP') {
+      throw new Error('KOMMO_OPERATION_SCOPE_DENIED')
+    }
+
     if (!desired.customer?.id) throw new Error('KOMMO_CUSTOMER_REQUIRED')
     if (!normalizePhone(desired.customer.phone ?? null)) throw new Error('KOMMO_PHONE_REQUIRED')
 
@@ -263,8 +311,24 @@ Deno.serve(async (req) => {
     if (!settings.account_subdomain) throw new Error('KOMMO_ACCOUNT_SUBDOMAIN_REQUIRED')
     if (!Number.isInteger(settings.pipeline_id) || Number(settings.pipeline_id) <= 0) throw new Error('KOMMO_PIPELINE_NOT_CONFIGURED')
 
+    const route = isNatal2026
+      ? natal2026Route(desired)
+      : {
+          pipelineId: Number(settings.pipeline_id),
+          stageId: stageIdForAppointment(settings, desired.appointment_status ?? 'CREATED', eventKind),
+          recoverInitialLead: true,
+        }
+
+    if (!route) {
+      return jsonResponse({
+        stale: false,
+        skipped: true,
+        reason: 'KOMMO_NATAL_STATE_NOT_MAPPED',
+        appointment_id: appointmentId,
+      })
+    }
+
     const baseUrl = `https://${settings.account_subdomain}.kommo.com/api/v4`
-    const stageId = stageIdForAppointment(settings, desired.appointment_status ?? 'CREATED', eventKind)
     const contactId = await ensureContact(client, baseUrl, token, desired.customer)
     const leadName = kommoLeadName(desired.service?.name, desired.public_code)
     const cardFields = await leadCardFieldMapping(baseUrl, token)
@@ -283,15 +347,15 @@ Deno.serve(async (req) => {
     if (existingLeadLinkError) throw new Error('KOMMO_APPOINTMENT_LINK_LOOKUP_FAILED')
 
     // One appointment maps to one lead. Historical/parallel leads for the same contact are valid.
-    // Only an unclaimed CONTATO INICIAL lead can be converted into this appointment's lead.
+    // Natal deliberately does not claim an unrelated BlackSheep CONTATO INICIAL lead.
     let leadId = existingLeadLink?.kommo_lead_id ? Number(existingLeadLink.kommo_lead_id) : null
-    if (!leadId) leadId = await recoverInitialLeadForContact(client, baseUrl, token, contactId, settings)
+    if (!leadId && route.recoverInitialLead) leadId = await recoverInitialLeadForContact(client, baseUrl, token, contactId, settings)
     if (!leadId) leadId = await recoverLeadByName(baseUrl, token, leadName)
 
     const leadBody = {
       name: leadName,
-      pipeline_id: Number(settings.pipeline_id),
-      status_id: stageId,
+      pipeline_id: route.pipelineId,
+      status_id: route.stageId,
       price: kommoLeadPrice(desired.commercial_value),
       custom_fields_values: customFields,
     }
@@ -303,9 +367,6 @@ Deno.serve(async (req) => {
         body: JSON.stringify(leadBody),
       })
     } else {
-      // Kommo's documented duplicate-control flow supports creating a lead already linked
-      // to an existing contact by embedding only the contact id. This avoids a second
-      // provider mutation and keeps contact identity/reservation identity separate.
       const created = await kommoJson<any>(baseUrl, token, '/leads', {
         method: 'POST',
         body: JSON.stringify([{
@@ -339,7 +400,8 @@ Deno.serve(async (req) => {
       version: desired.version,
       kommo_contact_id: contactId,
       kommo_lead_id: leadId,
-      stage_id: stageId,
+      pipeline_id: route.pipelineId,
+      stage_id: route.stageId,
       lead_price: leadBody.price,
       balance: desired.financial?.contract_balance ?? null,
       extras_count: desired.extras?.length ?? 0,
