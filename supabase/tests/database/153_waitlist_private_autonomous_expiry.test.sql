@@ -65,10 +65,10 @@ select
 from _private_expiry_ids;
 
 insert into public.resources(id, name, resource_type, is_active)
-select expired_resource_id, 'Expired private slot resource', 'STUDIO', true
+select expired_resource_id, 'Expired private slot resource', 'PHYSICAL', true
 from _private_expiry_ids
 union all
-select live_resource_id, 'Live private slot resource', 'STUDIO', true
+select live_resource_id, 'Live private slot resource', 'PHYSICAL', true
 from _private_expiry_ids;
 
 insert into public.resource_allocations(
