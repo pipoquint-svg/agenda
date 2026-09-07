@@ -15,6 +15,11 @@ type TransactionRow = {
   status: string
 }
 
+type PaymentApplyState = {
+  payment_after_expiration?: boolean
+  appointment_status?: string
+}
+
 type PaymentResultStatus = 'confirmado' | 'processando' | 'verificando'
 
 const CUSTOMER_RESULT_URL = 'https://www.sabrinapierri.com.br/pagamento.html'
@@ -93,7 +98,7 @@ Deno.serve(async (req) => {
       expectedAmountCents: brlToCents(tx.cash_amount),
     })
     const snapshot = infinitePayPaymentStorageSnapshot(verified)
-    const { error: applyError } = await client.rpc('service_apply_infinitepay_payment_check', {
+    const { data: state, error: applyError } = await client.rpc('service_apply_infinitepay_payment_check', {
       p_transaction_id: tx.id,
       p_order_nsu: verified.orderNsu,
       p_transaction_nsu: verified.transactionNsu,
@@ -106,6 +111,15 @@ Deno.serve(async (req) => {
       p_payload_json: snapshot,
     })
     if (applyError) throw new Error('INFINITEPAY_RETURN_PAYMENT_APPLY_FAILED')
+
+    const applied = state as PaymentApplyState | null
+    // A payment received after the 30-minute hold is real money, but it must never
+    // tell the customer the original slot was confirmed. The backend records the
+    // late-payment incident for manual handling and leaves the released slot untouched.
+    if (applied?.payment_after_expiration === true || applied?.appointment_status !== 'CONFIRMED') {
+      return resultRedirect('verificando')
+    }
+
     return resultRedirect('confirmado')
   } catch (cause) {
     console.error('[OPERATION_ALERT] INFINITEPAY_RETURN_FAILURE', {
