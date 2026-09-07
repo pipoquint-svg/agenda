@@ -2,6 +2,8 @@
 
 -- Item 2C proves the current production ACL contract plus explicitly authorized
 -- server-only payment-provider RPCs introduced by the isolated InfinitePay Gate 2.
+-- The aggregate counts also include later versioned admin/automation functions
+-- whose individual grants are enforced by their migrations and the RLS baseline.
 do $$
 declare
   v_identity text;
@@ -109,11 +111,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 421 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=421 actual=%', v_public_function_count;
+  if v_public_function_count <> 426 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=426 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 367 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=367 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 372 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=372 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
