@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-06",
-    "active_total": 69,
-    "verify_jwt_false": 53,
+    "captured_on": "2026-09-07",
+    "active_total": 70,
+    "verify_jwt_false": 54,
     "verify_jwt_true": 16,
-    "versioned_active": 64,
+    "versioned_active": 65,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -17,6 +17,7 @@
     "custom_admin": [
       "admin-agenda",
       "admin-appointment-actions",
+      "admin-appointment-edit",
       "admin-appointment-timeline",
       "admin-audit-log",
       "admin-customer-balance",
@@ -34,6 +35,7 @@
       "admin-service-settings",
       "admin-team-members",
       "admin-waitlist",
+      "admin-waitlist-private",
       "demand-capture-admin"
     ],
     "dual_admin_internal": [
@@ -99,6 +101,7 @@
       "infinitepay-payment",
       "mercado-pago-payment",
       "prebook-access",
+      "waitlist-private-invite",
       "waitlist-signup"
     ],
     "standard_webhooks": [
