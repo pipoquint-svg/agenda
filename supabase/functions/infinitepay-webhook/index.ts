@@ -44,6 +44,41 @@ async function reconcileNow(rawSignal: unknown): Promise<boolean> {
   }
 }
 
+async function reconcilePersistedSignal(
+  client: ReturnType<typeof adminClient>,
+  rawSignal: unknown,
+  idempotencyKey: string,
+): Promise<void> {
+  const reconciled = await reconcileNow(rawSignal)
+  if (!reconciled) return
+
+  await client.from('integration_jobs')
+    .update({
+      status: 'SUCCEEDED',
+      last_error: null,
+      processed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('idempotency_key', idempotencyKey)
+    .eq('status', 'PENDING')
+    .eq('attempt_count', 0)
+}
+
+function runInBackground(task: Promise<void>): void {
+  const runtime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil(promise: Promise<unknown>): void }
+  }).EdgeRuntime
+
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(task)
+    return
+  }
+
+  // Outside Supabase Edge Runtime the durable queue remains authoritative and
+  // the scheduled worker will retry the persisted job.
+  task.catch(() => undefined)
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
@@ -88,26 +123,16 @@ Deno.serve(async (req) => {
         order_nsu: signal.orderNsu,
         code: persistError.code ?? 'UNKNOWN',
       })
+      // InfinitePay documents that HTTP 400 is retried, so fail closed when the
+      // durable handoff itself did not succeed.
       return json({ error: { code: 'INFINITEPAY_WEBHOOK_PERSIST_FAILED' } }, 400)
     }
 
-    const reconciled = await reconcileNow(body)
-    if (reconciled) {
-      await client.from('integration_jobs')
-        .update({
-          status: 'SUCCEEDED',
-          last_error: null,
-          processed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('idempotency_key', idempotencyKey)
-        .eq('status', 'PENDING')
-        .eq('attempt_count', 0)
-    }
-
-    // The provider is acknowledged only after the webhook has been durably persisted.
-    // If immediate reconciliation fails, the queued job is retried by the worker.
-    return json({ ok: true, persisted: true, reconciled })
+    // Acknowledge the provider immediately after durable persistence. Financial
+    // verification runs in the Edge background; if it fails, the five-minute
+    // scheduled worker retries the same durable job.
+    runInBackground(reconcilePersistedSignal(client, body, idempotencyKey))
+    return json({ ok: true, persisted: true, reconciliation: 'background' })
   } catch (cause) {
     const code = cause instanceof Error ? cause.message.split(':')[0] : 'INFINITEPAY_WEBHOOK_INVALID'
     return json({ error: { code } }, 400)
