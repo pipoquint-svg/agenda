@@ -37,8 +37,10 @@ function PublicBookingRoute({ slug }: { slug: string }) {
 }
 
 function PublicPrivateInviteRoute({ accessToken }: { accessToken: string }) {
-  useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: 'SABRINA', pageSlug: 'natal-2026-private-invite' }) }, [])
-  return <><WaitlistPrivateInvitePage accessToken={accessToken} /><TrackingConsentBanner /></>
+  // The access token lives in the URL path. Do not initialize analytics or
+  // attribution on this route, otherwise page_location/landing_path could copy
+  // the bearer secret into third-party or attribution telemetry.
+  return <WaitlistPrivateInvitePage accessToken={accessToken} />
 }
 
 function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: string | null }) {
