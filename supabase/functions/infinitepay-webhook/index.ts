@@ -18,6 +18,9 @@ function requiredEnv(name: string): string {
   return value
 }
 
+// Auth-contract note: the public webhook is only a durable wake-up signal. The
+// internal infinitepay-reconcile boundary performs checkInfinitePayPayment and
+// verifyInfinitePayPayment before any financial mutation.
 async function reconcileNow(rawSignal: unknown): Promise<boolean> {
   const base = requiredEnv('SUPABASE_URL').replace(/\/$/, '')
   const secret = requiredEnv('INTEGRATION_INTERNAL_SECRET')
