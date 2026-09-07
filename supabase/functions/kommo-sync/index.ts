@@ -11,6 +11,7 @@ import {
   stageIdForAppointment,
   type KommoContact,
   type KommoCustomField,
+  type KommoLeadCardFields,
 } from '../_shared/kommo.ts'
 
 const NATAL_2026_SERVICE_IDS = new Set([
@@ -86,6 +87,14 @@ function natal2026Route(desired: DesiredState): LeadRoute | null {
     }
   }
 
+  if (appointmentStatus === 'EXPIRED') {
+    return {
+      pipelineId: NATAL_2026_INTERNAL_PIPELINE_ID,
+      stageId: NATAL_2026_ABANDONMENT_STAGE_ID,
+      recoverInitialLead: false,
+    }
+  }
+
   if (appointmentStatus === 'CONFIRMED' && financialStatus === 'PAID') {
     return {
       pipelineId: NATAL_2026_INTERNAL_PIPELINE_ID,
@@ -97,6 +106,41 @@ function natal2026Route(desired: DesiredState): LeadRoute | null {
   return null
 }
 
+function normalizeFieldName(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleLowerCase('pt-BR')
+}
+
+function natalDateTimeValue(startAt: string | null | undefined): string {
+  if (!startAt) throw new Error('KOMMO_RESERVATION_START_REQUIRED')
+  const instant = new Date(startAt)
+  if (Number.isNaN(instant.getTime())) throw new Error('KOMMO_RESERVATION_START_INVALID')
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant)
+  const get = (type: string) => parts.find((part) => part.type === type)?.value
+  const year = get('year')
+  const month = get('month')
+  const day = get('day')
+  const hour = get('hour')
+  const minute = get('minute')
+  const second = get('second')
+  if (!year || !month || !day || !hour || !minute || !second) {
+    throw new Error('KOMMO_RESERVATION_DATETIME_FORMAT_FAILED')
+  }
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}-03:00`
+}
+
 async function contactFieldIds(baseUrl: string, token: string): Promise<{ email: number | null; phone: number | null }> {
   const payload = await kommoJson<any>(baseUrl, token, '/contacts/custom_fields?limit=250')
   const fields = payload?._embedded?.custom_fields ?? []
@@ -105,10 +149,21 @@ async function contactFieldIds(baseUrl: string, token: string): Promise<{ email:
   return { email: Number.isInteger(email) ? email : null, phone: Number.isInteger(phone) ? phone : null }
 }
 
-async function leadCardFieldMapping(baseUrl: string, token: string) {
+async function leadCardFieldMapping(baseUrl: string, token: string, isNatal2026: boolean): Promise<KommoLeadCardFields> {
   const payload = await kommoJson<any>(baseUrl, token, '/leads/custom_fields?limit=250')
   const fields = (payload?._embedded?.custom_fields ?? []) as KommoCustomField[]
-  return resolveLeadCardFields(fields)
+  const base = resolveLeadCardFields(fields)
+  if (!isNatal2026) return base
+
+  const matches = fields.filter((field) => normalizeFieldName(field.name) === 'data e horario')
+  if (matches.length !== 1) {
+    throw new Error(matches.length === 0 ? 'KOMMO_NATAL_DATETIME_FIELD_MISSING' : 'KOMMO_NATAL_DATETIME_FIELD_AMBIGUOUS')
+  }
+  const field = matches[0]
+  if (String(field.type ?? '').trim().toLowerCase() !== 'date_time') throw new Error('KOMMO_NATAL_DATETIME_FIELD_INVALID_TYPE')
+  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_NATAL_DATETIME_FIELD_INVALID_ID')
+
+  return { ...base, reservationDate: { id: Number(field.id), type: 'date_time' } }
 }
 
 async function searchContactsByPhone(
@@ -118,9 +173,6 @@ async function searchContactsByPhone(
 ): Promise<KommoContact[]> {
   const normalized = normalizePhone(phone)
   if (!normalized) throw new Error('KOMMO_PHONE_REQUIRED')
-
-  // This search is global in Kommo Contacts. Pipeline/stage is intentionally irrelevant
-  // to customer identity: a person can have zero, one or many leads/reservations.
   const byId = new Map<number, KommoContact>()
   const queries = [...new Set([phone.trim(), normalized].filter(Boolean))]
   for (const query of queries) {
@@ -157,8 +209,6 @@ async function ensureContact(
     return Number(existingLink.kommo_contact_id)
   }
 
-  // Provider-wide contact lookup by phone is mandatory before creating any contact.
-  // E-mail is metadata, not an identity key for this integration.
   const candidates = exactContactCandidates(
     await searchContactsByPhone(baseUrl, token, phone),
     null,
@@ -184,7 +234,7 @@ async function ensureContact(
       }]),
     })
     contactId = payload?._embedded?.contacts?.[0]?.id ?? null
-    if (!Number.isInteger(contactId) || contactId <= 0) throw new Error('KOMMO_CONTACT_CREATE_INVALID_RESPONSE')
+    if (!Number.isInteger(contactId) || Number(contactId) <= 0) throw new Error('KOMMO_CONTACT_CREATE_INVALID_RESPONSE')
   }
 
   const { error: linkError } = await client.from('kommo_customer_links').upsert({
@@ -217,8 +267,6 @@ async function recoverInitialLeadForContact(
     throw new Error('KOMMO_INITIAL_STAGE_NOT_CONFIGURED')
   }
 
-  // Contact may legitimately have several leads because each reservation is a separate lead.
-  // We only reuse an unclaimed pre-booking lead in BlackSheep / CONTATO INICIAL.
   const contact = await kommoJson<any>(baseUrl, token, `/contacts/${contactId}?with=leads`)
   const rawLeadIds: number[] = (contact?._embedded?.leads ?? [])
     .map((lead: any) => Number(lead?.id))
@@ -331,13 +379,19 @@ Deno.serve(async (req) => {
     const baseUrl = `https://${settings.account_subdomain}.kommo.com/api/v4`
     const contactId = await ensureContact(client, baseUrl, token, desired.customer)
     const leadName = kommoLeadName(desired.service?.name, desired.public_code)
-    const cardFields = await leadCardFieldMapping(baseUrl, token)
+    const cardFields = await leadCardFieldMapping(baseUrl, token, isNatal2026)
     const customFields = buildLeadCardCustomFields(
       cardFields,
       desired.schedule?.start_at,
       desired.financial?.contract_balance,
       desired.extras ?? [],
     )
+    if (isNatal2026) {
+      customFields[0] = {
+        field_id: cardFields.reservationDate.id,
+        values: [{ value: natalDateTimeValue(desired.schedule?.start_at) }],
+      }
+    }
 
     const { data: existingLeadLink, error: existingLeadLinkError } = await client
       .from('kommo_appointment_links')
@@ -346,8 +400,6 @@ Deno.serve(async (req) => {
       .maybeSingle()
     if (existingLeadLinkError) throw new Error('KOMMO_APPOINTMENT_LINK_LOOKUP_FAILED')
 
-    // One appointment maps to one lead. Historical/parallel leads for the same contact are valid.
-    // Natal deliberately does not claim an unrelated BlackSheep CONTATO INICIAL lead.
     let leadId = existingLeadLink?.kommo_lead_id ? Number(existingLeadLink.kommo_lead_id) : null
     if (!leadId && route.recoverInitialLead) leadId = await recoverInitialLeadForContact(client, baseUrl, token, contactId, settings)
     if (!leadId) leadId = await recoverLeadByName(baseUrl, token, leadName)
@@ -405,6 +457,7 @@ Deno.serve(async (req) => {
       lead_price: leadBody.price,
       balance: desired.financial?.contract_balance ?? null,
       extras_count: desired.extras?.length ?? 0,
+      natal_datetime_field: isNatal2026 ? cardFields.reservationDate.id : null,
     })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'KOMMO_SYNC_FAILED'
