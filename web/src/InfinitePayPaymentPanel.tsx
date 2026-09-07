@@ -27,6 +27,19 @@ function infinitePayError(error: unknown): string {
     ?? 'Não foi possível preparar o checkout InfinitePay.'
 }
 
+function secondsUntil(value: string | null | undefined): number | null {
+  if (!value) return null
+  const expiresAt = Date.parse(value)
+  if (!Number.isFinite(expiresAt)) return null
+  return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
+}
+
+function countdown(value: number): string {
+  const minutes = Math.floor(value / 60)
+  const seconds = value % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 export function InfinitePayPaymentPanel({ accessToken, onConfirmed, mode = 'BOOKING' }: {
   accessToken: string
   onConfirmed?: () => void
@@ -37,6 +50,7 @@ export function InfinitePayPaymentPanel({ accessToken, onConfirmed, mode = 'BOOK
   const [kind, setKind] = useState<'MINIMUM' | 'FULL'>(balanceMode ? 'FULL' : 'MINIMUM')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -53,8 +67,28 @@ export function InfinitePayPaymentPanel({ accessToken, onConfirmed, mode = 'BOOK
     return () => { cancelled = true }
   }, [accessToken, balanceMode, onConfirmed])
 
+  useEffect(() => {
+    if (balanceMode || !context?.appointment.hold_expires_at) {
+      setRemainingSeconds(null)
+      return
+    }
+
+    const refresh = () => setRemainingSeconds(secondsUntil(context.appointment.hold_expires_at))
+    refresh()
+    const timer = window.setInterval(refresh, 1000)
+    return () => window.clearInterval(timer)
+  }, [balanceMode, context?.appointment.hold_expires_at])
+
+  const expired = !balanceMode && remainingSeconds !== null && remainingSeconds <= 0
+
   async function continueToCheckout() {
     if (!context?.payment_provider.hosted_checkout_available) return
+    if (!balanceMode && secondsUntil(context.appointment.hold_expires_at) === 0) {
+      setRemainingSeconds(0)
+      setError('O prazo para pagamento terminou. O horário foi liberado.')
+      return
+    }
+
     setBusy(true)
     setError(null)
     try {
@@ -86,6 +120,17 @@ export function InfinitePayPaymentPanel({ accessToken, onConfirmed, mode = 'BOOK
         <h3>{balanceMode ? 'Pague o saldo' : 'Confirme sua reserva'}</h3>
         <p>O valor abaixo é o valor-base da Agenda. Pix, cartão e parcelamento são escolhidos no checkout seguro da InfinitePay.</p>
       </div>
+
+      {!balanceMode && remainingSeconds !== null ? (
+        <div className={`form-alert ${expired ? 'error' : ''}`} role="status" aria-live="polite">
+          <strong>{expired ? 'Prazo encerrado' : `Seu horário está reservado por mais ${countdown(remainingSeconds)}`}</strong>
+          <p>
+            {expired
+              ? 'O horário voltou automaticamente para a agenda e não é mais possível iniciar este pagamento.'
+              : 'Conclua o pagamento dentro deste prazo. Depois do vencimento, o horário volta automaticamente para a agenda. Um pagamento realizado após esse prazo não garante a sessão e precisará ser tratado pela equipe.'}
+          </p>
+        </div>
+      ) : null}
 
       {error ? <div className="form-alert error" role="alert">{error}</div> : null}
 
@@ -135,8 +180,8 @@ export function InfinitePayPaymentPanel({ accessToken, onConfirmed, mode = 'BOOK
           <strong>{money.format(amount)}</strong>
           <small>A InfinitePay apresenta Pix ou cartão e calcula as condições de parcelamento conforme a configuração da conta.</small>
         </div>
-        <button type="button" className="primary" disabled={!available || busy || amount <= 0} onClick={continueToCheckout}>
-          {busy ? 'Abrindo checkout…' : 'Continuar para a InfinitePay'}
+        <button type="button" className="primary" disabled={!available || busy || expired || amount <= 0} onClick={continueToCheckout}>
+          {expired ? 'Prazo de pagamento encerrado' : busy ? 'Abrindo checkout…' : 'Continuar para a InfinitePay'}
         </button>
       </div>
     </section>
