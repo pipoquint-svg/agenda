@@ -62,6 +62,8 @@ jobs:
         run: |
           grep -Fq "client.rpc('expire_due_appointment_holds')" supabase/functions/integration-worker/index.ts
           grep -Fq "client.rpc('expire_unconfirmed_free_visits')" supabase/functions/integration-worker/index.ts
+          grep -Fq "client.rpc('service_expire_waitlist_private_slots')" supabase/functions/integration-worker/index.ts
+          grep -Fq "cron: '*/5 * * * *'" .github/workflows/integration-worker-schedule.yml
           grep -Fq "PAYMENT_AFTER_EXPIRATION" supabase/tests/database/009_payment_state_machine.test.sql
 
       - name: Gate Kommo Guard runtime isolation
