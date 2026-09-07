@@ -97,6 +97,9 @@ Deno.serve(async (req) => {
     const { error: holdExpiryError } = await client.rpc('expire_due_checkout_holds')
     if (holdExpiryError) throw new Error('CHECKOUT_HOLD_EXPIRY_FAILED')
 
+    const { data: expiredPrivateWaitlistSlots, error: privateWaitlistExpiryError } = await client.rpc('service_expire_waitlist_private_slots')
+    if (privateWaitlistExpiryError) throw new Error('WAITLIST_PRIVATE_SLOT_EXPIRY_FAILED')
+
     const { error: appointmentHoldExpiryError } = await client.rpc('expire_due_appointment_holds')
     if (appointmentHoldExpiryError) throw new Error('APPOINTMENT_HOLD_EXPIRY_FAILED')
 
@@ -278,6 +281,7 @@ Deno.serve(async (req) => {
       google_enabled: googleIntegrationEnabled,
       kommo_enabled: kommoIntegrationEnabled,
       email_worker_enabled: true,
+      expired_private_waitlist_slots: Number(expiredPrivateWaitlistSlots ?? 0),
       expired_unconfirmed_free_visits: Number(expiredFreeVisits ?? 0),
       calendars_reconciled: calendarIds.length,
       claimed: jobs.length,
