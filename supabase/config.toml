@@ -96,6 +96,14 @@ verify_jwt = false
 [functions.mercado-pago-reconcile]
 verify_jwt = false
 
+# Internal InfinitePay verification workers persist provider notifications first and
+# reconcile them server-to-server using the same authoritative payment_check proof.
+[functions.infinitepay-reconcile]
+verify_jwt = false
+
+[functions.infinitepay-webhook-worker]
+verify_jwt = false
+
 # Internal rental-balance worker and its provider/email adapters authenticate with
 # x-internal-secret. They are called server-to-server and do not carry a Supabase JWT.
 [functions.balance-collection-worker]
@@ -150,7 +158,7 @@ verify_jwt = false
 verify_jwt = false
 
 # InfinitePay does not document a public webhook signature. This endpoint treats the
-# payload only as a wake-up signal and proves payment server-to-server with payment_check.
+# payload only as a wake-up signal, durably queues it, and proves payment server-to-server.
 [functions.infinitepay-webhook]
 verify_jwt = false
 
