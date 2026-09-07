@@ -131,6 +131,29 @@ function resolveUniqueLeadField(fields: KommoCustomField[], expectedName: string
   return { id: Number(field.id), type }
 }
 
+function resolveLeadFieldByTypePriority(
+  fields: KommoCustomField[],
+  expectedName: string,
+  typePriority: string[],
+  errorPrefix: string,
+): KommoResolvedLeadField {
+  const needle = normalizeFieldName(expectedName)
+  const named = fields.filter((field) => normalizeFieldName(field.name) === needle)
+  if (named.length === 0) throw new Error(`${errorPrefix}_MISSING`)
+
+  for (const preferredType of typePriority) {
+    const matches = named.filter((field) => String(field.type ?? '').trim().toLowerCase() === preferredType)
+    if (matches.length > 1) throw new Error(`${errorPrefix}_AMBIGUOUS`)
+    if (matches.length === 1) {
+      const field = matches[0]
+      if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error(`${errorPrefix}_INVALID_ID`)
+      return { id: Number(field.id), type: preferredType }
+    }
+  }
+
+  throw new Error(`${errorPrefix}_INVALID_TYPE`)
+}
+
 export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedName = 'Data'): number {
   return resolveUniqueLeadField(fields, expectedName, ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD').id
 }
@@ -138,7 +161,7 @@ export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedNa
 export function resolveLeadCardFields(fields: KommoCustomField[]): KommoLeadCardFields {
   return {
     reservationDate: resolveUniqueLeadField(fields, 'Data', ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD'),
-    balance: resolveUniqueLeadField(fields, 'Saldo', ['numeric', 'monetary', 'text', 'textarea'], 'KOMMO_BALANCE_FIELD'),
+    balance: resolveLeadFieldByTypePriority(fields, 'Saldo', ['numeric', 'monetary', 'text', 'textarea'], 'KOMMO_BALANCE_FIELD'),
     rentalExtras: resolveUniqueLeadField(fields, 'Extras locação', ['text', 'textarea'], 'KOMMO_RENTAL_EXTRAS_FIELD'),
   }
 }
