@@ -73,4 +73,4 @@ do
   grep -Fxq "$expected" "$LOG_FILE"
 done
 
-echo 'ITEM02A_PRIVATE_WAITLIST_OVERLAY_OK'
+echo 'ITEM02A_PRIVATE_WAITLIST_OVERLAY_OK' | tee -a "$LOG_FILE"
