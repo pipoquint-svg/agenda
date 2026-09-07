@@ -56,11 +56,13 @@ Deno.serve(async (req) => {
     const base = requiredEnv('SUPABASE_URL').replace(/\/$/, '')
     const internalSecret = requiredEnv('INTEGRATION_INTERNAL_SECRET')
     const integration = await invokeWorker(base, internalSecret, 'integration-worker')
+    const infinitePayWebhook = await invokeWorker(base, internalSecret, 'infinitepay-webhook-worker')
     const balance = await invokeWorker(base, internalSecret, 'balance-collection-worker')
     const mercadoPagoReconcile = await invokeWorker(base, internalSecret, 'mercado-pago-reconcile')
     return json({
       ok: true,
       integration_worker: integration.result,
+      infinitepay_webhook_worker: infinitePayWebhook.result,
       balance_worker: balance.result,
       mercado_pago_reconcile: mercadoPagoReconcile.result,
     })
