@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { adminClient } from '../_shared/supabase.ts'
+import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -11,47 +12,6 @@ function response(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   })
-}
-
-function requiredEnv(name: string): string {
-  const value = Deno.env.get(name)
-  if (!value) throw new Error(`MISSING_ENV:${name}`)
-  return value
-}
-
-function secretKey(): string {
-  const legacy = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  if (legacy) return legacy
-  const raw = Deno.env.get('SUPABASE_SECRET_KEYS')
-  if (!raw) throw new Error('MISSING_ENV:SUPABASE_SECRET_KEYS')
-  const parsed = JSON.parse(raw)
-  const value = parsed.default ?? Object.values(parsed)[0]
-  if (typeof value !== 'string' || !value) throw new Error('INVALID_ENV:SUPABASE_SECRET_KEYS')
-  return value
-}
-
-function client(): SupabaseClient {
-  return createClient(requiredEnv('SUPABASE_URL'), secretKey(), { auth: { persistSession: false, autoRefreshToken: false } })
-}
-
-function clientKey(req: Request): string {
-  const forwarded = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? ''
-  const ip = req.headers.get('cf-connecting-ip')?.trim() || forwarded || req.headers.get('x-real-ip')?.trim() || ''
-  if (ip) return `ip:${ip}`
-  const ua = (req.headers.get('user-agent') ?? '').trim().slice(0, 200)
-  return ua ? `missing-ip:ua:${ua}` : 'missing-ip:unknown'
-}
-
-async function rateLimit(db: SupabaseClient, req: Request): Promise<void> {
-  const { error } = await db.rpc('service_consume_public_rate_limit', {
-    p_scope: 'WAITLIST_PRIVATE_INVITE',
-    p_client_key: clientKey(req),
-    p_limit: 30,
-    p_window_seconds: 600,
-  })
-  if (!error) return
-  if (error.message.includes('RATE_LIMITED')) throw new Error('RATE_LIMITED')
-  throw new Error('RATE_LIMIT_BACKEND_FAILED')
 }
 
 function token(value: unknown): string {
@@ -71,8 +31,13 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return response({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
-    const db = client()
-    await rateLimit(db, req)
+    const db = adminClient()
+    await enforceDistributedPublicRateLimit(db, req, {
+      scope: 'WAITLIST_PRIVATE_INVITE',
+      limit: 30,
+      windowSeconds: 600,
+    })
+
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
     const action = String(body.action ?? 'CONTEXT').trim().toUpperCase()
     const accessToken = token(body.access_token)
