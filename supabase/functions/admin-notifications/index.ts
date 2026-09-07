@@ -19,7 +19,7 @@ const corsHeaders = {
 const events = [
   'APPOINTMENT_APPROVED', 'APPOINTMENT_PENDING', 'APPOINTMENT_REJECTED', 'APPOINTMENT_CANCELLED',
   'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'WAITLIST_SIGNUP_TEAM', 'BIRTHDAY',
-  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL',
+  'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'PAYMENT_PENDING_CREATED', 'MANUAL',
 ]
 const channels = ['EMAIL', 'GOOGLE_CALENDAR']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
@@ -29,7 +29,7 @@ const variables = [
   'customer.name', 'customer.email', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
   'waitlist.name', 'waitlist.email', 'waitlist.whatsapp', 'waitlist.created_at',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
-  'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'extras.summary',
+  'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'payment.resume_url', 'payment.expires_at', 'extras.summary',
   'coupon.code', 'coupon.discount', 'coupon.expires_at',
   'balance.amount', 'balance.expires_at', 'balance.payment_url',
   'pre_reservation.expires_at', 'pre_reservation.payment_url',
@@ -97,6 +97,8 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'payment.paid': 'R$ 500,00',
     'payment.balance': 'R$ 500,00',
     'payment.status': 'PAGO PARCIALMENTE',
+    'payment.resume_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/pagamento?token=teste',
+    'payment.expires_at': '30/08/2026 16:00',
     'extras.summary': 'Adicional de teste × 1',
     'coupon.code': 'TESTE50',
     'coupon.discount': 'R$ 500,00',
