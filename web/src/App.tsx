@@ -23,6 +23,7 @@ import { ResourceAdmin } from './ResourceAdmin'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
+import { WaitlistPrivateInvitePage } from './WaitlistPrivateInvitePage'
 import { trackPublicPage } from './tracking'
 import './agendaAdmin.css'
 import './serviceSettingsAdmin.css'
@@ -33,6 +34,11 @@ import './checkout.css'
 function PublicBookingRoute({ slug }: { slug: string }) {
   useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: slug.toUpperCase(), pageSlug: slug }) }, [slug])
   return <><BookingPageDuration slug={slug} /><BookingCheckoutSession /><TrackingConsentBanner /></>
+}
+
+function PublicPrivateInviteRoute({ accessToken }: { accessToken: string }) {
+  useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: 'SABRINA', pageSlug: 'natal-2026-private-invite' }) }, [])
+  return <><WaitlistPrivateInvitePage accessToken={accessToken} /><BookingCheckoutSession /><TrackingConsentBanner /></>
 }
 
 function PublicDemandRoute({ brand, campaign }: { brand: string; campaign: string | null }) {
@@ -110,6 +116,8 @@ export function App() {
   if (path.startsWith('/admin/demand')) return adminPage(<DemandCaptureAdmin />)
   if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep' || path === '/agendamento' || path === '/agenda') return <PublicBookingRoute slug="blacksheep" />
+  const inviteMatch = path.match(/^\/convite-natal\/([A-Za-z0-9_-]{32,})$/)
+  if (inviteMatch) return <PublicPrivateInviteRoute accessToken={inviteMatch[1]} />
   if (path === '/pre-reserva/confirmar' || path === '/confirmar-pre-reserva') return <PreReservationPaymentPage />
   if (path === '/reserva/gerenciar' || path === '/gerenciar-reserva') return <ManageReservation />
   if (path === '/reserva/saldo' || path === '/pagar-saldo') return <BalanceCollectionPage />
