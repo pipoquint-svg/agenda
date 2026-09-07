@@ -252,6 +252,9 @@ verify_jwt = false
 [functions.admin-waitlist]
 verify_jwt = false
 
+[functions.admin-appointment-edit]
+verify_jwt = false
+
 # Keep the gateway JWT check enabled in production; the function also performs
 # the normal admin/permission checks internally.
 [functions.admin-special-calendar]
