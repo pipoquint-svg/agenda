@@ -124,6 +124,7 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
     setError('')
     try {
       const hold = await createPrivateInviteHold({ accessToken, serviceId: service.id, extras: extraSelections, peopleCount })
+      sessionStorage.removeItem('bs_appointment_manage')
       sessionStorage.setItem('bs_checkout_hold', JSON.stringify({
         token: hold.checkout_hold_token,
         id: hold.checkout_hold_id,
