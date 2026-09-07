@@ -72,9 +72,9 @@ def main() -> int:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     internal = manifest.get("deployable", {}).get("internal_secret", [])
     require("mercado-pago-reconcile" in internal, "DEPLOY_ALLOWLIST_MISSING", errors)
-    require(manifest.get("production_baseline", {}).get("active_total") == 68, "ACTIVE_TOTAL_NOT_UPDATED", errors)
-    require(manifest.get("production_baseline", {}).get("verify_jwt_false") == 53, "JWT_FALSE_COUNT_NOT_UPDATED", errors)
-    require(manifest.get("production_baseline", {}).get("versioned_active") == 63, "VERSIONED_ACTIVE_COUNT_NOT_UPDATED", errors)
+    # The global Edge-function counts are owned by Item 3's auth-contract gate.
+    # This Item 5 test verifies only Mercado Pago reconciliation invariants so
+    # unrelated Edge additions cannot make the payment-reconciliation gate stale.
 
     config = CONFIG.read_text(encoding="utf-8")
     require("[functions.mercado-pago-reconcile]\nverify_jwt = false" in config, "CONFIG_AUTH_MISSING", errors)
