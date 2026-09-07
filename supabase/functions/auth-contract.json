@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-07",
-    "active_total": 70,
-    "verify_jwt_false": 54,
+    "active_total": 72,
+    "verify_jwt_false": 56,
     "verify_jwt_true": 16,
-    "versioned_active": 65,
+    "versioned_active": 67,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -35,6 +35,7 @@
       "admin-service-settings",
       "admin-team-members",
       "admin-waitlist",
+      "admin-waitlist-private",
       "demand-capture-admin"
     ],
     "dual_admin_internal": [
@@ -100,6 +101,7 @@
       "infinitepay-payment",
       "mercado-pago-payment",
       "prebook-access",
+      "waitlist-private-invite",
       "waitlist-signup"
     ],
     "standard_webhooks": [
