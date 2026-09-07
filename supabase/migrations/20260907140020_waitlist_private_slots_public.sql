@@ -223,7 +223,12 @@ begin
   from public.operation_settings os
   where os.id=1;
 
-  v_hold_expires_at:=least(now()+make_interval(mins=>v_hold_minutes),v_slot.start_at);
+  v_hold_expires_at:=least(
+    now()+make_interval(mins=>v_hold_minutes),
+    v_slot.start_at,
+    v_slot.expires_at,
+    v_invite.expires_at
+  );
   if v_hold_expires_at<=now() then
     raise exception using errcode='P0001',message='WAITLIST_PRIVATE_SLOT_NOT_AVAILABLE';
   end if;
@@ -259,6 +264,13 @@ begin
       pre_reservation_id=null,
       allocation_type='CHECKOUT_HOLD',
       status='HELD',
+      occupied_range=(
+        select r.occupied_range
+        from public.calculate_booking_resource_ranges(
+          p_service_id,v_canonical_extras,v_slot.start_at
+        ) r
+        where r.resource_id=ra.resource_id
+      ),
       reason='WAITLIST_PRIVATE_INVITE:'||v_invite.id::text,
       created_by_admin_id=null,
       updated_at=now()
@@ -270,6 +282,20 @@ begin
 
   if (select count(*) from public.resource_allocations where checkout_hold_id=v_hold_id and allocation_type='CHECKOUT_HOLD' and status='HELD')
      <> coalesce(array_length(v_resource_ids,1),0) then
+    raise exception using errcode='P0001',message='WAITLIST_PRIVATE_SLOT_RESOURCE_INTEGRITY_ERROR';
+  end if;
+
+  if exists (
+    select 1
+    from public.resource_allocations ra
+    join public.calculate_booking_resource_ranges(
+      p_service_id,v_canonical_extras,v_slot.start_at
+    ) r on r.resource_id=ra.resource_id
+    where ra.checkout_hold_id=v_hold_id
+      and ra.allocation_type='CHECKOUT_HOLD'
+      and ra.status='HELD'
+      and ra.occupied_range is distinct from r.occupied_range
+  ) then
     raise exception using errcode='P0001',message='WAITLIST_PRIVATE_SLOT_RESOURCE_INTEGRITY_ERROR';
   end if;
 
