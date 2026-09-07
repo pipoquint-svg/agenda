@@ -49,8 +49,21 @@ Deno.serve(async (req) => {
     const signal = parseInfinitePayWebhookSignal(body)
     if (!isUuid(signal.orderNsu)) throw new Error('INFINITEPAY_ORDER_NSU_INVALID')
 
-    const idempotencyKey = `infinitepay-webhook:${signal.orderNsu}:${signal.transactionNsu}:${signal.slug}`
     const client = adminClient()
+    // InfinitePay does not publish a webhook-signature contract. Before we persist a
+    // public wake-up signal, require its order_nsu to be one of our own InfinitePay
+    // charge transactions. payment_check remains the authoritative payment proof.
+    const { data: transaction, error: transactionError } = await client
+      .from('payment_transactions')
+      .select('id')
+      .eq('id', signal.orderNsu)
+      .eq('provider', 'INFINITEPAY')
+      .eq('transaction_type', 'CHARGE')
+      .maybeSingle()
+    if (transactionError) throw new Error('INFINITEPAY_WEBHOOK_PAYMENT_LOOKUP_FAILED')
+    if (!transaction) return json({ error: { code: 'INFINITEPAY_WEBHOOK_UNKNOWN_ORDER' } }, 400)
+
+    const idempotencyKey = `infinitepay-webhook:${signal.orderNsu}:${signal.transactionNsu}:${signal.slug}`
     const { error: persistError } = await client.from('integration_jobs').upsert({
       job_type: 'INFINITEPAY_WEBHOOK_VERIFY',
       entity_type: 'PAYMENT_TRANSACTION',
