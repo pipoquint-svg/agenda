@@ -10,7 +10,10 @@ on:
       - 'supabase/functions/_shared/infinitepay-runtime_test.ts'
       - 'supabase/functions/infinitepay-payment/**'
       - 'supabase/functions/infinitepay-webhook/**'
+      - 'supabase/functions/infinitepay-reconcile/**'
+      - 'supabase/functions/infinitepay-webhook-worker/**'
       - 'supabase/functions/infinitepay-return/**'
+      - 'supabase/functions/integration-worker-trigger/**'
       - 'supabase/migrations/20260905190956_20260905163000_infinitepay_payment_rpc.sql'
       - 'supabase/migrations/20260905191019_20260905164000_infinitepay_checkout_claim.sql'
       - 'supabase/migrations/20260905200000_infinitepay_runtime_config.sql'
@@ -48,6 +51,8 @@ jobs:
         run: |
           deno check supabase/functions/infinitepay-payment/index.ts
           deno check supabase/functions/infinitepay-webhook/index.ts
+          deno check supabase/functions/infinitepay-reconcile/index.ts
+          deno check supabase/functions/infinitepay-webhook-worker/index.ts
           deno check supabase/functions/infinitepay-return/index.ts
 
       - name: Prove no real InfinitePay activation is committed
@@ -61,7 +66,11 @@ jobs:
           grep -Fq "throw new Error('INFINITEPAY_LIVE_LINKS_DISABLED')" supabase/functions/_shared/infinitepay-runtime.ts
           grep -Fq "service_get_infinitepay_runtime_config" supabase/functions/_shared/infinitepay-runtime.ts
           grep -Fq "service_claim_infinitepay_checkout_by_token" supabase/functions/infinitepay-payment/index.ts
-          grep -Fq "checkInfinitePayPayment" supabase/functions/infinitepay-webhook/index.ts
+          grep -Fq "integration_jobs" supabase/functions/infinitepay-webhook/index.ts
+          grep -Fq "INFINITEPAY_WEBHOOK_VERIFY" supabase/functions/infinitepay-webhook/index.ts
+          grep -Fq "checkInfinitePayPayment" supabase/functions/infinitepay-reconcile/index.ts
+          grep -Fq "verifyInfinitePayPayment" supabase/functions/infinitepay-reconcile/index.ts
+          grep -Fq "INFINITEPAY_WEBHOOK_VERIFY" supabase/functions/infinitepay-webhook-worker/index.ts
           grep -Fq "checkInfinitePayPayment" supabase/functions/infinitepay-return/index.ts
 
       - name: Prove checkout URL allowlist matches provider hosts exactly
