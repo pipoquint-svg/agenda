@@ -36,16 +36,17 @@ jobs:
       - name: Rebuild strictly from migrations
         run: supabase db reset
 
-      - name: Compare complete public RLS state with authoritative baseline
+      - name: Compare complete public RLS state with production plus reviewed round delta
         shell: bash
         run: |
           set -euo pipefail
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 -q -f scripts/rls-inventory.sql \
             | sed '/^[[:space:]]*$/d' > /tmp/local-rls-baseline.txt
-          diff -u tests/rls-parity/production_rls_baseline.txt /tmp/local-rls-baseline.txt \
+          tests/rls-parity/assert-private-waitlist-round-rls-overlay.sh \
+            tests/rls-parity/production_rls_baseline.txt \
+            /tmp/local-rls-baseline.txt \
             | tee /tmp/rls-parity.diff
-          test ! -s /tmp/rls-parity.diff
 
       - name: Upload RLS parity evidence
         if: always()
