@@ -43,7 +43,7 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 -q -f scripts/rls-inventory.sql \
             | sed '/^[[:space:]]*$/d' > /tmp/local-rls-baseline.txt
-          tests/rls-parity/assert-private-waitlist-round-rls-overlay.sh \
+          bash tests/rls-parity/assert-private-waitlist-round-rls-overlay.sh \
             tests/rls-parity/production_rls_baseline.txt \
             /tmp/local-rls-baseline.txt \
             | tee /tmp/rls-parity.diff
