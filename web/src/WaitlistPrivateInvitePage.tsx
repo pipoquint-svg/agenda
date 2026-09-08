@@ -68,6 +68,7 @@ function hasStoredCheckoutForInvite(inviteId: string): boolean {
 export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string }) {
   const [context, setContext] = useState<PrivateInviteContext | null>(null)
   const [serviceId, setServiceId] = useState('')
+  const [selectedSlotId, setSelectedSlotId] = useState('')
   const [peopleCount, setPeopleCount] = useState(1)
   const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -81,12 +82,30 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
     try {
       const next = await loadPrivateInviteContext(accessToken)
       setContext(next)
-      setCheckoutStarted(next.availability === 'IN_PROGRESS' && hasStoredCheckoutForInvite(next.invite_id))
-      if (!serviceId && next.services[0]) {
-        setServiceId(next.services[0].id)
-        setPeopleCount(next.services[0].minimum_people || 1)
-        setSelectedExtras(new Set(next.services[0].extras.filter((extra) => extra.is_required).map((extra) => extra.id)))
+      const hasStoredCheckout = hasStoredCheckoutForInvite(next.invite_id)
+      setCheckoutStarted(next.availability === 'IN_PROGRESS' && hasStoredCheckout)
+
+      if (next.mode === 'ROUND') {
+        const openSlots = (next.slots ?? []).filter((slot) => slot.availability === 'OPEN')
+        setSelectedSlotId((current) => {
+          if (next.active_slot_id) return next.active_slot_id
+          if (current && openSlots.some((slot) => slot.id === current)) return current
+          return openSlots[0]?.id ?? ''
+        })
+      } else {
+        setSelectedSlotId(next.slot_id ?? '')
       }
+
+      setServiceId((current) => {
+        if (current && next.services.some((item) => item.id === current)) return current
+        const first = next.services[0]
+        if (first) {
+          setPeopleCount(first.minimum_people || 1)
+          setSelectedExtras(new Set(first.extras.filter((extra) => extra.is_required).map((extra) => extra.id)))
+          return first.id
+        }
+        return ''
+      })
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : 'WAITLIST_PRIVATE_INVITE_FAILED'
       setError(code === 'WAITLIST_PRIVATE_TOKEN_EXPIRED'
@@ -108,6 +127,12 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
   const displayedTotal = Number(service?.base_price ?? 0) + (service?.extras
     .filter((extra) => selectedExtras.has(extra.id))
     .reduce((sum, extra) => sum + Number(extra.price ?? 0), 0) ?? 0)
+  const openRoundSlots = useMemo(() => context?.mode === 'ROUND'
+    ? (context.slots ?? []).filter((slot) => slot.availability === 'OPEN')
+    : [], [context])
+  const selectedRoundSlot = useMemo(() => context?.mode === 'ROUND'
+    ? (context.slots ?? []).find((slot) => slot.id === selectedSlotId) ?? null
+    : null, [context, selectedSlotId])
 
   function chooseService(id: string) {
     const next = context?.services.find((item) => item.id === id)
@@ -120,10 +145,17 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
 
   async function startCheckout() {
     if (!context || !service || context.availability !== 'OPEN') return
+    if (context.mode === 'ROUND' && !selectedSlotId) return
     setSubmitting(true)
     setError('')
     try {
-      const hold = await createPrivateInviteHold({ accessToken, serviceId: service.id, extras: extraSelections, peopleCount })
+      const hold = await createPrivateInviteHold({
+        accessToken,
+        slotId: context.mode === 'ROUND' ? selectedSlotId : undefined,
+        serviceId: service.id,
+        extras: extraSelections,
+        peopleCount,
+      })
       sessionStorage.removeItem('bs_appointment_manage')
       sessionStorage.setItem('bs_checkout_hold', JSON.stringify({
         token: hold.checkout_hold_token,
@@ -133,15 +165,24 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
         serviceName: hold.service_name,
         expiresAt: hold.expires_at,
       }))
-      rememberPrivateInviteSession(context.invite_id, context.slot_id)
+      const claimedSlotId = hold.selected_slot_id ?? context.slot_id ?? selectedSlotId
+      rememberPrivateInviteSession(context.invite_id, claimedSlotId)
       setCheckoutStarted(true)
-      setContext((current) => current ? { ...current, availability: 'IN_PROGRESS', slot_status: 'CLAIMED' } : current)
+      setContext((current) => current ? {
+        ...current,
+        availability: 'IN_PROGRESS',
+        active_slot_id: claimedSlotId,
+        slot_status: current.mode === 'SINGLE' ? 'CLAIMED' : current.slot_status,
+      } : current)
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : 'WAITLIST_PRIVATE_INVITE_FAILED'
       if (code === 'WAITLIST_PRIVATE_SLOT_TAKEN') {
-        setContext((current) => current ? { ...current, availability: 'CLAIMED', slot_status: 'CLAIMED' } : current)
-        setError('Outra família iniciou a reserva desta vaga antes de você. Se ela não concluir dentro do prazo, a vaga poderá voltar a ficar disponível.')
+        setError('Outra família iniciou a reserva desse horário antes de você. Os demais horários continuam disponíveis.')
+        await load()
+      } else if (code === 'WAITLIST_PRIVATE_INVITE_IN_PROGRESS' || code === 'WAITLIST_PRIVATE_INVITE_ALREADY_USED') {
+        setError('Este convite já está ligado a uma reserva. Atualize a página para continuar.')
+        await load()
       } else {
         setError('Não foi possível iniciar a reserva. Atualize o convite e tente novamente.')
       }
@@ -150,14 +191,21 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
     }
   }
 
+  const canChoose = context?.availability === 'OPEN'
+  const ownSlot = context?.mode === 'ROUND'
+    ? (context.slots ?? []).find((slot) => slot.id === context.active_slot_id)
+    : null
+
   return (
     <>
       <main className="booking-shell" style={{ maxWidth: 780, margin: '0 auto', paddingTop: 28, paddingBottom: 28 }}>
         <section className="booking-card" style={{ display: 'grid', gap: 20 }}>
           <div>
             <small style={{ textTransform: 'uppercase', letterSpacing: '.14em', opacity: .65 }}>Convite privado · Natal 2026</small>
-            <h1 style={{ margin: '8px 0 6px' }}>Uma vaga especial foi liberada para você</h1>
-            <p style={{ margin: 0, opacity: .78 }}>Este horário não aparece na agenda pública e só pode ser reservado por um convite válido.</p>
+            <h1 style={{ margin: '8px 0 6px' }}>{context?.mode === 'ROUND' ? 'Escolha uma das vagas liberadas para você' : 'Uma vaga especial foi liberada para você'}</h1>
+            <p style={{ margin: 0, opacity: .78 }}>{context?.mode === 'ROUND'
+              ? 'Estes horários não aparecem na agenda pública. Você pode escolher qualquer um que ainda esteja disponível.'
+              : 'Este horário não aparece na agenda pública e só pode ser reservado por um convite válido.'}</p>
           </div>
 
           {loading ? <p>Carregando seu convite…</p> : null}
@@ -165,15 +213,30 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
 
           {context ? (
             <>
-              <div style={{ borderRadius: 14, padding: 16, background: '#f7f2e8' }}>
-                <strong style={{ display: 'block', fontSize: 18 }}>{dateTime(context.start_at)}</strong>
-                <span style={{ fontSize: 13, opacity: .7 }}>Convite válido até {dateTime(context.expires_at)}</span>
-              </div>
+              {context.mode === 'SINGLE' && context.start_at ? (
+                <div style={{ borderRadius: 14, padding: 16, background: '#f7f2e8' }}>
+                  <strong style={{ display: 'block', fontSize: 18 }}>{dateTime(context.start_at)}</strong>
+                  <span style={{ fontSize: 13, opacity: .7 }}>Convite válido até {dateTime(context.expires_at)}</span>
+                </div>
+              ) : (
+                <div style={{ borderRadius: 14, padding: 16, background: '#f7f2e8' }}>
+                  <strong style={{ display: 'block', fontSize: 18 }}>{openRoundSlots.length} {openRoundSlots.length === 1 ? 'horário disponível' : 'horários disponíveis'} agora</strong>
+                  <span style={{ fontSize: 13, opacity: .7 }}>Convite válido até {dateTime(context.expires_at)}</span>
+                </div>
+              )}
 
-              {context.availability === 'FILLED' ? (
+              {context.availability === 'BOOKED' ? (
+                <div><h2>Sua reserva já foi garantida</h2><p>{ownSlot ? `Horário escolhido: ${dateTime(ownSlot.start_at)}.` : 'Este convite já foi utilizado em uma reserva.'}</p></div>
+              ) : context.availability === 'FILLED' ? (
                 <div><h2>Esta vaga já foi preenchida</h2><p>Você continua na lista de espera e poderá receber um novo convite se outra oportunidade for liberada.</p></div>
               ) : context.availability === 'UNAVAILABLE' ? (
-                <div><h2>Esta vaga não está mais disponível</h2><p>O convite foi encerrado ou o prazo terminou.</p></div>
+                <div><h2>Este convite não está mais disponível</h2><p>A rodada foi encerrada ou o prazo terminou.</p></div>
+              ) : context.availability === 'NO_AVAILABLE' ? (
+                <div>
+                  <h2>Nenhum horário livre neste momento</h2>
+                  <p>Alguma família pode estar finalizando uma reserva. Se o checkout não for concluído, o horário volta automaticamente.</p>
+                  <button type="button" onClick={() => void load()} style={{ minHeight: 42, padding: '0 16px' }}>Verificar novamente</button>
+                </div>
               ) : context.availability === 'CLAIMED' ? (
                 <div>
                   <h2>Outra família está finalizando esta vaga</h2>
@@ -183,16 +246,33 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
               ) : context.availability === 'IN_PROGRESS' && !checkoutStarted ? (
                 <div>
                   <h2>Esta reserva já foi iniciada por este convite</h2>
-                  <p>Por segurança, continue na mesma aba do navegador em que você iniciou a reserva. Se o prazo do checkout terminar sem conclusão, a vaga poderá voltar a ficar disponível.</p>
+                  <p>{ownSlot ? `Horário escolhido: ${dateTime(ownSlot.start_at)}. ` : ''}Por segurança, continue na mesma aba do navegador em que você iniciou a reserva. Se o prazo do checkout terminar sem conclusão, a vaga poderá voltar a ficar disponível.</p>
                   <button type="button" onClick={() => void load()} style={{ minHeight: 42, padding: '0 16px' }}>Verificar novamente</button>
                 </div>
               ) : context.availability === 'IN_PROGRESS' || checkoutStarted ? (
                 <div style={{ borderRadius: 14, padding: 16, background: '#f2f7f1' }}>
                   <strong>Seu horário está reservado temporariamente.</strong>
-                  <p style={{ marginBottom: 0 }}>Conclua seus dados e o pagamento na etapa abaixo para garantir a vaga.</p>
+                  <p style={{ marginBottom: 0 }}>{ownSlot ? `${dateTime(ownSlot.start_at)} · ` : ''}Conclua seus dados e o pagamento na etapa abaixo para garantir a vaga.</p>
                 </div>
-              ) : (
+              ) : canChoose ? (
                 <>
+                  {context.mode === 'ROUND' ? (
+                    <div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                        <h2 style={{ marginBottom: 10 }}>Escolha seu horário</h2>
+                        <button type="button" onClick={() => void load()} style={{ minHeight: 36, padding: '0 12px' }}>Atualizar horários</button>
+                      </div>
+                      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
+                        {openRoundSlots.map((slot) => (
+                          <label key={slot.id} style={{ display: 'flex', gap: 10, alignItems: 'center', border: selectedSlotId === slot.id ? '2px solid #191919' : '1px solid #ddd', borderRadius: 14, padding: 14, cursor: 'pointer' }}>
+                            <input type="radio" name="private-slot" checked={selectedSlotId === slot.id} onChange={() => setSelectedSlotId(slot.id)} />
+                            <strong>{dateTime(slot.start_at)}</strong>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div>
                     <h2 style={{ marginBottom: 10 }}>Escolha seu pacote</h2>
                     <div style={{ display: 'grid', gap: 10 }}>
@@ -234,13 +314,17 @@ export function WaitlistPrivateInvitePage({ accessToken }: { accessToken: string
                   ) : null}
 
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14, borderTop: '1px solid #eee', paddingTop: 16 }}>
-                    <div><small>Total selecionado</small><strong style={{ display: 'block', fontSize: 22 }}>{money(displayedTotal)}</strong></div>
-                    <button type="button" disabled={submitting || !service} onClick={() => void startCheckout()} style={{ minHeight: 48, padding: '0 20px', fontWeight: 700 }}>
-                      {submitting ? 'Reservando…' : 'Reservar esta vaga'}
+                    <div>
+                      <small>Total selecionado</small>
+                      <strong style={{ display: 'block', fontSize: 22 }}>{money(displayedTotal)}</strong>
+                      {selectedRoundSlot ? <small style={{ display: 'block', marginTop: 4, opacity: .7 }}>{dateTime(selectedRoundSlot.start_at)}</small> : null}
+                    </div>
+                    <button type="button" disabled={submitting || !service || (context.mode === 'ROUND' && !selectedSlotId)} onClick={() => void startCheckout()} style={{ minHeight: 48, padding: '0 20px', fontWeight: 700 }}>
+                      {submitting ? 'Reservando…' : context.mode === 'ROUND' ? 'Reservar horário escolhido' : 'Reservar esta vaga'}
                     </button>
                   </div>
                 </>
-              )}
+              ) : null}
             </>
           ) : null}
         </section>

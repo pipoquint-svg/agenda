@@ -4,8 +4,8 @@
 -- server-only payment-provider RPCs introduced by the isolated InfinitePay Gate 2.
 -- The aggregate counts also include later versioned admin/automation functions
 -- whose individual grants are enforced by their migrations and the RLS baseline.
--- Private waitlist adds 14 public-schema functions; only its 10 service RPCs are
--- executable by service_role (the four trigger functions remain trigger-only).
+-- Private waitlist plus private rounds add 16 public-schema functions; 12 service
+-- RPCs are executable by service_role (the four trigger functions remain trigger-only).
 do $$
 declare
   v_identity text;
@@ -106,6 +106,31 @@ begin
     end if;
   end loop;
 
+  foreach v_identity in array array[
+    'public.service_admin_waitlist_private_round_action(text,jsonb,uuid)',
+    'public.public_waitlist_private_round_action(text,text,jsonb)'
+  ] loop
+    v_oid := to_regprocedure(v_identity);
+    if v_oid is null then
+      raise exception 'ITEM02C_PRIVATE_ROUND_RPC_MISSING:%', v_identity;
+    end if;
+    if not has_function_privilege('service_role', v_oid, 'EXECUTE') then
+      raise exception 'ITEM02C_PRIVATE_ROUND_RPC_NOT_EXECUTABLE:%', v_identity;
+    end if;
+    if has_function_privilege('anon', v_oid, 'EXECUTE')
+       or has_function_privilege('authenticated', v_oid, 'EXECUTE') then
+      raise exception 'ITEM02C_PRIVATE_ROUND_RPC_APP_ROLE_EXPOSURE:%', v_identity;
+    end if;
+    if not exists (
+      select 1 from pg_proc p
+      where p.oid=v_oid
+        and p.prosecdef
+        and pg_get_userbyid(p.proowner)='postgres'
+    ) then
+      raise exception 'ITEM02C_PRIVATE_ROUND_RPC_IDENTITY_DRIFT:%', v_identity;
+    end if;
+  end loop;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -113,11 +138,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 440 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=440 actual=%', v_public_function_count;
+  if v_public_function_count <> 442 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=442 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 382 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=382 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 384 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=384 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

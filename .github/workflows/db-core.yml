@@ -143,9 +143,9 @@ jobs:
 
           psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f scripts/rls-inventory.sql \
             | sed '/^[[:space:]]*$/d' > /tmp/db-core-rls-baseline.txt
-          diff -u tests/rls-parity/production_rls_baseline.txt /tmp/db-core-rls-baseline.txt \
-            | tee /tmp/db-core-rls.diff
-          test ! -s /tmp/db-core-rls.diff
+          bash tests/rls-parity/assert-private-waitlist-round-rls-overlay.sh \
+            tests/rls-parity/production_rls_baseline.txt \
+            /tmp/db-core-rls-baseline.txt
 
       - name: Validate Gestão critical E2E fixture
         run: |
