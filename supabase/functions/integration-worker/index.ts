@@ -20,6 +20,17 @@ function retryDelaySeconds(attempt: number): number | null {
   return schedule[attempt - 1] ?? null
 }
 
+function nestedFunctionErrorCode(text: string): string | null {
+  if (!text) return null
+  try {
+    const parsed = JSON.parse(text)
+    const code = typeof parsed?.error?.code === 'string' ? parsed.error.code.trim() : ''
+    return /^[A-Z][A-Z0-9_:-]{0,119}$/.test(code) ? code : null
+  } catch {
+    return null
+  }
+}
+
 async function invokeFunction<T = Record<string, unknown>>(name: string, secret: string, body: unknown): Promise<T> {
   const base = Deno.env.get('SUPABASE_URL')
   if (!base) throw new Error('MISSING_ENV:SUPABASE_URL')
@@ -49,7 +60,9 @@ async function invokeFunction<T = Record<string, unknown>>(name: string, secret:
 
   const text = await response.text()
   if (!response.ok) {
-    throw new Error(`${name.toUpperCase().replaceAll('-', '_')}_HTTP_${response.status}`)
+    const prefix = `${name.toUpperCase().replaceAll('-', '_')}_HTTP_${response.status}`
+    const nestedCode = nestedFunctionErrorCode(text)
+    throw new Error(nestedCode ? `${prefix}:${nestedCode}` : prefix)
   }
   if (!text) return {} as T
   try {
