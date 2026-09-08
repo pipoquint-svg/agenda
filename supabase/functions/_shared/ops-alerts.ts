@@ -58,6 +58,12 @@ type OpsClient = {
   rpc(name: string, args: Record<string, unknown>): QueryResult<unknown>
 }
 
+type PendingPaymentCandidate = {
+  appointment_id: string | null
+  status: string
+  created_at: string
+}
+
 function validDate(value: string): number {
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY
@@ -209,22 +215,54 @@ export function renderOpsAlertEmail(incidents: OpsIncident[], now = new Date()):
   }
 }
 
+async function listActionablePendingPayments(
+  client: OpsClient,
+  staleBefore: string,
+): Promise<OpsSnapshot['pendingPayments']> {
+  const { data, error } = await client
+    .from('payment_transactions')
+    .select('appointment_id,status,created_at')
+    .eq('status', 'PENDING')
+    .lte('created_at', staleBefore)
+  if (error) throw new Error('OPS_ALERT_PAYMENTS_QUERY_FAILED')
+
+  const rows = (data ?? []) as PendingPaymentCandidate[]
+  const appointmentIds = [...new Set(
+    rows.map((row) => row.appointment_id).filter((id): id is string => Boolean(id)),
+  )]
+  if (appointmentIds.length === 0) return []
+
+  const appointmentResult = await client
+    .from('appointments')
+    .select('id,status,financial_status')
+    .in('id', appointmentIds)
+    .eq('status', 'AWAITING_PAYMENT')
+    .eq('financial_status', 'PENDING')
+  if (appointmentResult.error) throw new Error('OPS_ALERT_PAYMENT_APPOINTMENTS_QUERY_FAILED')
+
+  const actionableIds = new Set(
+    (appointmentResult.data ?? []).map((row: { id: string }) => row.id),
+  )
+  return rows
+    .filter((row) => Boolean(row.appointment_id && actionableIds.has(row.appointment_id)))
+    .map((row) => ({ status: row.status, created_at: row.created_at }))
+}
+
 async function queryOpsSnapshot(client: OpsClient, now: Date): Promise<OpsSnapshot> {
   const recent = new Date(now.getTime() - OPS_ALERT_SLA_MINUTES * MINUTE_MS).toISOString()
   const stale = recent
-  const [payments, edges, integrations, divergences, emails] = await Promise.all([
-    client.from('payment_transactions').select('status,created_at').eq('status', 'PENDING').lte('created_at', stale),
+  const [pendingPayments, edges, integrations, divergences, emails] = await Promise.all([
+    listActionablePendingPayments(client, stale),
     client.from('ops_edge_failure_events').select('function_name,error_code,http_status,occurred_at').gte('occurred_at', recent).lte('occurred_at', now.toISOString()),
     client.from('integration_jobs').select('job_type,status,created_at').eq('status', 'FAILED').gte('created_at', recent).lte('created_at', now.toISOString()),
     listActionableScheduleDivergences(client, stale, now),
     client.from('notification_delivery_logs').select('event_key,status,last_error_code,updated_at').eq('channel', 'EMAIL').eq('status', 'FAILED').gte('updated_at', recent).lte('updated_at', now.toISOString()),
   ])
-  if (payments.error) throw new Error('OPS_ALERT_PAYMENTS_QUERY_FAILED')
   if (edges.error) throw new Error('OPS_ALERT_EDGE_FAILURES_QUERY_FAILED')
   if (integrations.error) throw new Error('OPS_ALERT_INTEGRATIONS_QUERY_FAILED')
   if (emails.error) throw new Error('OPS_ALERT_EMAILS_QUERY_FAILED')
   return {
-    pendingPayments: payments.data ?? [],
+    pendingPayments,
     edgeFailures: edges.data ?? [],
     integrationFailures: integrations.data ?? [],
     openScheduleDivergences: divergences,
