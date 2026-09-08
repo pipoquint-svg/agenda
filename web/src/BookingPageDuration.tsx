@@ -198,8 +198,9 @@ export function BookingPageDuration({ slug }: { slug: string }) {
     resetAvailability()
   }
 
-  async function searchSlots() {
-    if (!service || !employeeRelationId || !localDate || selectedContractedMinutes <= 0) return
+  async function searchSlots(dateOverride?: string) {
+    const targetDate = dateOverride ?? localDate
+    if (!service || !employeeRelationId || !targetDate || selectedContractedMinutes <= 0) return
     setSearchingSlots(true)
     setSlotsSearchCompleted(false)
     setError(null)
@@ -212,7 +213,7 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         contractedMinutes: selectedContractedMinutes,
         extras,
         peopleCount,
-        localDate,
+        localDate: targetDate,
       })
       setSlots(result)
       setSlotsSearchCompleted(true)
@@ -397,9 +398,18 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                 <section className="booking-step">
                   <div className="step-title"><span>•</span><div><h2>Data e horário</h2><p>Mostramos somente os horários realmente disponíveis para sua reserva.</p></div></div>
                   <div className="date-search">
-                    <label>Data<input type="date" min={todayLocal()} value={localDate} onChange={(event) => { setLocalDate(event.target.value); setSlots([]); setSlotsSearchCompleted(false) }} /></label>
-                    <button className="primary" type="button" onClick={searchSlots} disabled={!localDate || !employeeRelationId || searchingSlots}>{searchingSlots ? 'Buscando horários…' : 'Buscar horários'}</button>
+                    <label>Data<input type="date" min={todayLocal()} value={localDate} onChange={(event) => {
+                      const nextDate = event.target.value
+                      setLocalDate(nextDate)
+                      setSlots([])
+                      setSlotsSearchCompleted(false)
+                      if (nextDate) void searchSlots(nextDate)
+                    }} /></label>
                   </div>
+
+                  {searchingSlots ? (
+                    <div className="booking-empty compact" aria-live="polite"><p>Buscando horários…</p></div>
+                  ) : null}
 
                   {slots.length > 0 ? (
                     <div className="slots-grid" aria-label="Horários disponíveis">
