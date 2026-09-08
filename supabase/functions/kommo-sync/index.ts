@@ -190,8 +190,9 @@ async function disambiguateContactsByEmail(
   candidates: KommoContact[],
   email: string | null | undefined,
 ): Promise<KommoContact[]> {
+  if (candidates.length <= 1) return candidates
   const normalizedEmail = email?.trim() ?? ''
-  if (candidates.length <= 1 || !normalizedEmail) return candidates
+  if (!normalizedEmail) return []
 
   const emailMatches: KommoContact[] = []
   for (const candidate of candidates) {
@@ -199,7 +200,7 @@ async function disambiguateContactsByEmail(
     if (exactContactCandidates([detailed], normalizedEmail, null).length === 1) emailMatches.push(detailed)
   }
 
-  return emailMatches.length === 1 ? emailMatches : candidates
+  return emailMatches.length === 1 ? emailMatches : []
 }
 
 async function ensureContact(
