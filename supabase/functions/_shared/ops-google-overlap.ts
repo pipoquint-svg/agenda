@@ -89,8 +89,8 @@ function projectDivergence(row: OpsScheduleDivergence) {
   }
 }
 
-function throwOnQueryError(error: QueryError): void {
-  if (error) throw new Error('OPS_ALERT_QUERY_FAILED')
+function throwOnQueryError(error: QueryError, code: string): void {
+  if (error) throw new Error(code)
 }
 
 export async function listActionableScheduleDivergences(
@@ -103,7 +103,7 @@ export async function listActionableScheduleDivergences(
     .select('id,source,reason,status,detected_at,resource_id,google_calendar_event_id,desired_range')
     .eq('status', 'OPEN')
     .lte('detected_at', staleBefore)
-  throwOnQueryError(error)
+  throwOnQueryError(error, 'OPS_ALERT_SCHEDULE_DIVERGENCES_QUERY_FAILED')
 
   const rows = (data ?? []) as OpsScheduleDivergence[]
   const actionable: Array<{ source: string; reason: string; status: string; detected_at: string }> = []
@@ -122,8 +122,8 @@ export async function listActionableScheduleDivergences(
       .select('allocation_type,status,external_source,google_calendar_event_id,checkout_hold_id,appointment_id')
       .eq('resource_id', row.resource_id)
       .in('status', BLOCKING_STATUSES)
-      .filter('occupied_range', 'ov', row.desired_range)
-    throwOnQueryError(allocationsResult.error)
+      .overlaps('occupied_range', row.desired_range)
+    throwOnQueryError(allocationsResult.error, 'OPS_ALERT_RESOURCE_ALLOCATIONS_QUERY_FAILED')
 
     const allocations = (allocationsResult.data ?? []) as OpsResourceAllocation[]
     const otherAllocations = allocations.filter((allocation) =>
@@ -146,7 +146,7 @@ export async function listActionableScheduleDivergences(
         .from('checkout_holds')
         .select('id,status,expires_at')
         .in('id', holdIds)
-      throwOnQueryError(holdResult.error)
+      throwOnQueryError(holdResult.error, 'OPS_ALERT_CHECKOUT_HOLDS_QUERY_FAILED')
       for (const hold of (holdResult.data ?? []) as CheckoutHoldState[]) {
         if (hold.status === 'ACTIVE' && Date.parse(hold.expires_at) > now.getTime()) {
           activeCheckoutHoldIds.add(hold.id)
@@ -160,7 +160,7 @@ export async function listActionableScheduleDivergences(
         .from('appointments')
         .select('id,status,hold_expires_at')
         .in('id', appointmentIds)
-      throwOnQueryError(appointmentResult.error)
+      throwOnQueryError(appointmentResult.error, 'OPS_ALERT_APPOINTMENTS_QUERY_FAILED')
       for (const appointment of (appointmentResult.data ?? []) as AppointmentState[]) {
         if (appointment.status === 'AWAITING_PAYMENT'
           && appointment.hold_expires_at
