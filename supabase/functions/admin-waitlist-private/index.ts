@@ -31,6 +31,11 @@ function iso(value: unknown, code: string): string {
   return parsed.toISOString()
 }
 
+function isoArray(value: unknown, code: string): string[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(code)
+  return value.map((item) => iso(item, code))
+}
+
 function safeErrorCode(raw: string): string {
   return raw.match(/(ADMIN_[A-Z0-9_]+|WAITLIST_PRIVATE_[A-Z0-9_]+|SERVICE_HAS_NO_REQUIRED_RESOURCES)/)?.[1]
     ?? 'WAITLIST_PRIVATE_ADMIN_FAILED'
@@ -47,9 +52,20 @@ Deno.serve(async (req) => {
     if (!(await hasAdminPermission(admin.adminId, permission))) throw new Error('ADMIN_PERMISSION_DENIED')
 
     if (req.method === 'GET') {
-      const { data, error } = await client.rpc('service_admin_list_waitlist_private_slots', { p_admin_id: admin.adminId })
-      if (error) throw new Error(error.message)
-      return response({ slots: Array.isArray(data) ? data : [] })
+      const [{ data: slots, error: slotsError }, { data: rounds, error: roundsError }] = await Promise.all([
+        client.rpc('service_admin_list_waitlist_private_slots', { p_admin_id: admin.adminId }),
+        client.rpc('service_admin_waitlist_private_round_action', {
+          p_action: 'LIST',
+          p_payload: {},
+          p_admin_id: admin.adminId,
+        }),
+      ])
+      if (slotsError) throw new Error(slotsError.message)
+      if (roundsError) throw new Error(roundsError.message)
+      return response({
+        slots: Array.isArray(slots) ? slots : [],
+        rounds: Array.isArray(rounds) ? rounds : [],
+      })
     }
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
@@ -67,6 +83,21 @@ Deno.serve(async (req) => {
       return response(data, 201)
     }
 
+    if (action === 'CREATE_ROUND') {
+      const { data, error } = await client.rpc('service_admin_waitlist_private_round_action', {
+        p_action: 'CREATE',
+        p_payload: {
+          start_ats: isoArray(body.start_ats, 'WAITLIST_PRIVATE_START_INVALID'),
+          expires_at: iso(body.expires_at, 'WAITLIST_PRIVATE_EXPIRY_INVALID'),
+          service_ids: uuidArray(body.service_ids, 'WAITLIST_PRIVATE_SERVICES_REQUIRED'),
+          waitlist_entry_ids: uuidArray(body.waitlist_entry_ids, 'WAITLIST_PRIVATE_INVITEES_REQUIRED'),
+        },
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return response(data, 201)
+    }
+
     if (action === 'ROTATE_INVITE') {
       const { data, error } = await client.rpc('service_admin_rotate_waitlist_private_invite', {
         p_invite_id: uuid(body.invite_id, 'WAITLIST_PRIVATE_INVITE_ID_INVALID'),
@@ -76,9 +107,29 @@ Deno.serve(async (req) => {
       return response(data)
     }
 
+    if (action === 'ROTATE_ROUND_INVITE') {
+      const { data, error } = await client.rpc('service_admin_waitlist_private_round_action', {
+        p_action: 'ROTATE_INVITE',
+        p_payload: { invite_id: uuid(body.invite_id, 'WAITLIST_PRIVATE_INVITE_ID_INVALID') },
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return response(data)
+    }
+
     if (action === 'REVOKE_INVITE') {
       const { data, error } = await client.rpc('service_admin_revoke_waitlist_private_invite', {
         p_invite_id: uuid(body.invite_id, 'WAITLIST_PRIVATE_INVITE_ID_INVALID'),
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return response(data)
+    }
+
+    if (action === 'REVOKE_ROUND_INVITE') {
+      const { data, error } = await client.rpc('service_admin_waitlist_private_round_action', {
+        p_action: 'REVOKE_INVITE',
+        p_payload: { invite_id: uuid(body.invite_id, 'WAITLIST_PRIVATE_INVITE_ID_INVALID') },
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
@@ -104,13 +155,23 @@ Deno.serve(async (req) => {
       return response(data)
     }
 
+    if (action === 'CLOSE_ROUND') {
+      const { data, error } = await client.rpc('service_admin_waitlist_private_round_action', {
+        p_action: 'CLOSE',
+        p_payload: { round_id: uuid(body.round_id, 'WAITLIST_PRIVATE_ROUND_ID_INVALID') },
+        p_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return response(data)
+    }
+
     throw new Error('WAITLIST_PRIVATE_ACTION_INVALID')
   } catch (error) {
     const raw = error instanceof Error ? error.message : ''
     const code = safeErrorCode(raw)
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' ? 403
-      : code === 'WAITLIST_PRIVATE_SLOT_CONFLICT' || code === 'WAITLIST_PRIVATE_SLOT_BUSY' ? 409
+      : code === 'WAITLIST_PRIVATE_SLOT_CONFLICT' || code === 'WAITLIST_PRIVATE_SLOT_BUSY' || code === 'WAITLIST_PRIVATE_ROUND_BUSY' ? 409
       : code === 'WAITLIST_PRIVATE_ADMIN_FAILED' ? 500
       : 400
     return response({ error: { code } }, status)
