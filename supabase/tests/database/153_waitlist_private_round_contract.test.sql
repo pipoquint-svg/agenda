@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(10);
+select plan(13);
 
 select has_table('public','waitlist_private_rounds','private waitlist rounds table exists');
 select has_table('public','waitlist_private_round_slots','private waitlist round slots table exists');
@@ -50,6 +50,39 @@ select ok(
   and not has_function_privilege('authenticated','public.service_admin_waitlist_private_round_action(text,jsonb,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_admin_waitlist_private_round_action(text,jsonb,uuid)','EXECUTE'),
   'admin round dispatcher is callable only through service role edge boundary'
+);
+
+select ok(
+  not has_table_privilege('service_role','public.waitlist_private_rounds','SELECT')
+  and not has_table_privilege('service_role','public.waitlist_private_rounds','INSERT')
+  and not has_table_privilege('service_role','public.waitlist_private_rounds','UPDATE')
+  and not has_table_privilege('service_role','public.waitlist_private_rounds','DELETE')
+  and not has_table_privilege('service_role','public.waitlist_private_rounds','TRUNCATE')
+  and not has_table_privilege('service_role','public.waitlist_private_rounds','REFERENCES')
+  and not has_table_privilege('service_role','public.waitlist_private_rounds','TRIGGER'),
+  'service role has no direct access to private round table'
+);
+
+select ok(
+  not has_table_privilege('service_role','public.waitlist_private_round_slots','SELECT')
+  and not has_table_privilege('service_role','public.waitlist_private_round_slots','INSERT')
+  and not has_table_privilege('service_role','public.waitlist_private_round_slots','UPDATE')
+  and not has_table_privilege('service_role','public.waitlist_private_round_slots','DELETE')
+  and not has_table_privilege('service_role','public.waitlist_private_round_slots','TRUNCATE')
+  and not has_table_privilege('service_role','public.waitlist_private_round_slots','REFERENCES')
+  and not has_table_privilege('service_role','public.waitlist_private_round_slots','TRIGGER'),
+  'service role has no direct access to private round slot table'
+);
+
+select ok(
+  not has_table_privilege('service_role','public.waitlist_private_round_invites','SELECT')
+  and not has_table_privilege('service_role','public.waitlist_private_round_invites','INSERT')
+  and not has_table_privilege('service_role','public.waitlist_private_round_invites','UPDATE')
+  and not has_table_privilege('service_role','public.waitlist_private_round_invites','DELETE')
+  and not has_table_privilege('service_role','public.waitlist_private_round_invites','TRUNCATE')
+  and not has_table_privilege('service_role','public.waitlist_private_round_invites','REFERENCES')
+  and not has_table_privilege('service_role','public.waitlist_private_round_invites','TRIGGER'),
+  'service role has no direct access to private round invite table'
 );
 
 select * from finish();
