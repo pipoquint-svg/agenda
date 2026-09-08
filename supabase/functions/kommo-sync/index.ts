@@ -184,6 +184,24 @@ async function searchContactsByPhone(
   return [...byId.values()]
 }
 
+async function disambiguateContactsByEmail(
+  baseUrl: string,
+  token: string,
+  candidates: KommoContact[],
+  email: string | null | undefined,
+): Promise<KommoContact[]> {
+  const normalizedEmail = email?.trim() ?? ''
+  if (candidates.length <= 1 || !normalizedEmail) return candidates
+
+  const emailMatches: KommoContact[] = []
+  for (const candidate of candidates) {
+    const detailed = await kommoJson<KommoContact>(baseUrl, token, `/contacts/${candidate.id}`)
+    if (exactContactCandidates([detailed], normalizedEmail, null).length === 1) emailMatches.push(detailed)
+  }
+
+  return emailMatches.length === 1 ? emailMatches : candidates
+}
+
 async function ensureContact(
   client: ReturnType<typeof adminClient>,
   baseUrl: string,
@@ -209,11 +227,12 @@ async function ensureContact(
     return Number(existingLink.kommo_contact_id)
   }
 
-  const candidates = exactContactCandidates(
+  let candidates = exactContactCandidates(
     await searchContactsByPhone(baseUrl, token, phone),
     null,
     phone,
   )
+  candidates = await disambiguateContactsByEmail(baseUrl, token, candidates, customer.email)
   if (candidates.length > 1) throw new Error('KOMMO_CONTACT_PHONE_AMBIGUOUS')
 
   let contactId = candidates[0]?.id ?? null
