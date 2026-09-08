@@ -219,8 +219,10 @@ async function queryOpsSnapshot(client: OpsClient, now: Date): Promise<OpsSnapsh
     listActionableScheduleDivergences(client, stale, now),
     client.from('notification_delivery_logs').select('event_key,status,last_error_code,updated_at').eq('channel', 'EMAIL').eq('status', 'FAILED').gte('updated_at', recent).lte('updated_at', now.toISOString()),
   ])
-  const results = [payments, edges, integrations, emails]
-  if (results.some((result) => result.error)) throw new Error('OPS_ALERT_QUERY_FAILED')
+  if (payments.error) throw new Error('OPS_ALERT_PAYMENTS_QUERY_FAILED')
+  if (edges.error) throw new Error('OPS_ALERT_EDGE_FAILURES_QUERY_FAILED')
+  if (integrations.error) throw new Error('OPS_ALERT_INTEGRATIONS_QUERY_FAILED')
+  if (emails.error) throw new Error('OPS_ALERT_EMAILS_QUERY_FAILED')
   return {
     pendingPayments: payments.data ?? [],
     edgeFailures: edges.data ?? [],
