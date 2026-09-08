@@ -20,22 +20,39 @@ export type PrivateInviteService = {
   extras: PrivateInviteExtra[]
 }
 
-export type PrivateInviteContext = {
-  invite_id: string
-  slot_id: string
-  invitee_name: string
+export type PrivateInviteSlotOption = {
+  id: string
   start_at: string
+  status: 'OPEN' | 'CLAIMED' | 'FILLED' | 'CLOSED' | 'EXPIRED' | string
+  availability: 'OPEN' | 'CLAIMED' | 'FILLED' | 'UNAVAILABLE' | 'IN_PROGRESS' | 'BOOKED' | 'LOCKED' | string
+}
+
+export type PrivateInviteContext = {
+  mode: 'SINGLE' | 'ROUND'
+  invite_id: string
+  round_id?: string
+  slot_id?: string
+  active_slot_id?: string | null
+  invitee_name: string
+  start_at?: string
   expires_at: string
-  slot_status: 'OPEN' | 'CLAIMED' | 'FILLED' | 'CLOSED' | 'EXPIRED'
-  availability: 'OPEN' | 'CLAIMED' | 'FILLED' | 'UNAVAILABLE' | 'IN_PROGRESS'
+  slot_status?: 'OPEN' | 'CLAIMED' | 'FILLED' | 'CLOSED' | 'EXPIRED'
+  availability: 'OPEN' | 'CLAIMED' | 'FILLED' | 'UNAVAILABLE' | 'IN_PROGRESS' | 'BOOKED' | 'NO_AVAILABLE'
   booking_page_slug: string
   brand_key: string
+  checkout_hold_id?: string | null
+  appointment_id?: string | null
+  appointment_status?: string | null
   services: PrivateInviteService[]
+  slots?: PrivateInviteSlotOption[]
 }
 
 export type PrivateInviteHold = CheckoutHold & {
   booking_page_slug: string
   service_name: string
+  round_id?: string
+  round_invite_id?: string
+  selected_slot_id?: string
 }
 
 async function call<T>(body: Record<string, unknown>): Promise<T> {
@@ -61,6 +78,7 @@ export function loadPrivateInviteContext(accessToken: string): Promise<PrivateIn
 
 export function createPrivateInviteHold(input: {
   accessToken: string
+  slotId?: string
   serviceId: string
   extras: ExtraSelection[]
   peopleCount: number
@@ -68,6 +86,7 @@ export function createPrivateInviteHold(input: {
   return call<PrivateInviteHold>({
     action: 'CREATE_HOLD',
     access_token: input.accessToken,
+    slot_id: input.slotId,
     service_id: input.serviceId,
     extra_selections: input.extras,
     people_count: input.peopleCount,
