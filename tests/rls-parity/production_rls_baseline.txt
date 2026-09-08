@@ -108,3 +108,7 @@ TABLE|services|false|false
 TABLE|special_calendar_dates|true|false
 TABLE|special_calendar_recurrence_rules|true|false
 TABLE|terms_versions|false|false
+TABLE|waitlist_private_invites|true|false
+TABLE|waitlist_private_slot_resources|true|false
+TABLE|waitlist_private_slot_services|true|false
+TABLE|waitlist_private_slots|true|false

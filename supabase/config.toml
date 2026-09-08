@@ -196,6 +196,10 @@ verify_jwt = false
 [functions.waitlist-signup]
 verify_jwt = false
 
+# Private waitlist invites resolve opaque individual tokens behind distributed rate limiting.
+[functions.waitlist-private-invite]
+verify_jwt = false
+
 # Public calendar export is read-only, rate-limited and keyed by the reservation public code.
 [functions.appointment-calendar]
 verify_jwt = false
@@ -258,6 +262,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.admin-waitlist]
+verify_jwt = false
+
+[functions.admin-waitlist-private]
 verify_jwt = false
 
 [functions.admin-appointment-edit]
