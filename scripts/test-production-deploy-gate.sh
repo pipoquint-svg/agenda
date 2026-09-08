@@ -6,8 +6,9 @@ deploy_workflow='.github/workflows/production-deploy.yml'
 db_core_workflow='.github/workflows/db-core.yml'
 migration='supabase/migrations/20260902214000_harden_service_role_execute_contracts.sql'
 overlay='tests/acl-parity/item02c_acl_overlay.sql'
+rls_overlay='tests/rls-parity/assert-private-waitlist-round-rls-overlay.sh'
 
-for file in "$deploy_workflow" "$db_core_workflow" "$migration" "$overlay"; do
+for file in "$deploy_workflow" "$db_core_workflow" "$migration" "$overlay" "$rls_overlay"; do
   test -f "$file"
 done
 
@@ -104,11 +105,16 @@ fi
 grep -Fq 'ITEM02C_PRIMITIVE_STILL_EXECUTABLE:' /tmp/item02d-drift-overlay.log
 
 # Return the disposable stack to the versioned state and prove the current contracts.
+# The authoritative production RLS baseline intentionally does not include feature-branch
+# tables, so the final gate validates the reviewed private-round overlay rather than
+# requiring the feature branch to equal the already-deployed production schema byte-for-byte.
 supabase db reset >/tmp/item02d-final-reset.log 2>&1
 psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$overlay" | tee /tmp/item02d-final-acl.log
 grep -Fxq 'ITEM02C_ACL_OVERLAY_OK' /tmp/item02d-final-acl.log
 psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f scripts/rls-inventory.sql \
   | sed '/^[[:space:]]*$/d' > /tmp/item02d-final-rls.txt
-diff -u tests/rls-parity/production_rls_baseline.txt /tmp/item02d-final-rls.txt
+bash "$rls_overlay" tests/rls-parity/production_rls_baseline.txt /tmp/item02d-final-rls.txt \
+  | tee /tmp/item02d-final-rls-overlay.log
+grep -Fxq 'PRIVATE_WAITLIST_ROUND_RLS_OVERLAY_OK' /tmp/item02d-final-rls-overlay.log
 
 echo 'ITEM02D_DEPLOY_GATE_OK'
