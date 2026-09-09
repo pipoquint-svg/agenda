@@ -12,7 +12,7 @@ on:
       - 'supabase/migrations/20260904000054_item_a_restore_no_show.sql'
       - 'supabase/migrations/20260905163000_infinitepay_payment_rpc.sql'
       - 'supabase/migrations/20260905164000_infinitepay_checkout_claim.sql'
-      - 'supabase/migrations/20260905200000_infinitepay_runtime_config.sql'
+      - 'supabase/migrations/20260905205632_infinitepay_runtime_config.sql'
       - 'supabase/migrations/20260907175000_private_waitlist_trigger_acl_hardening.sql'
       - 'supabase/migrations/20260908152000_waitlist_private_rounds.sql'
       - 'supabase/migrations/20260908152100_waitlist_private_round_acl_hardening.sql'
@@ -138,7 +138,7 @@ jobs:
           anon_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="anon" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
           auth_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="authenticated" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
           test "$anon_exec" -eq 7
-          test "$auth_exec" -eq 8
+          test "$auth_exec" -eq 9
 
       - name: Prove ACL baseline composition is idempotent
         run: |
