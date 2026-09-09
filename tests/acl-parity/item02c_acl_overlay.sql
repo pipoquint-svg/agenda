@@ -151,17 +151,38 @@ begin
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_RPC_IDENTITY_DRIFT:%', v_identity;
   end if;
 
-  v_identity := 'agenda_internal.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)';
+  if to_regnamespace('agenda_public_bridge') is null then
+    raise exception 'ITEM02C_MONTHLY_BRIDGE_SCHEMA_MISSING';
+  end if;
+  if has_schema_privilege('public', 'agenda_public_bridge', 'USAGE')
+     or has_schema_privilege('public', 'agenda_public_bridge', 'CREATE')
+     or has_schema_privilege('anon', 'agenda_public_bridge', 'CREATE')
+     or has_schema_privilege('authenticated', 'agenda_public_bridge', 'CREATE')
+     or has_schema_privilege('service_role', 'agenda_public_bridge', 'CREATE') then
+    raise exception 'ITEM02C_MONTHLY_BRIDGE_SCHEMA_PRIVILEGE_DRIFT';
+  end if;
+  if not has_schema_privilege('anon', 'agenda_public_bridge', 'USAGE')
+     or not has_schema_privilege('authenticated', 'agenda_public_bridge', 'USAGE')
+     or not has_schema_privilege('service_role', 'agenda_public_bridge', 'USAGE') then
+    raise exception 'ITEM02C_MONTHLY_BRIDGE_SCHEMA_USAGE_MISSING';
+  end if;
+  if has_schema_privilege('anon', 'agenda_internal', 'USAGE')
+     or has_schema_privilege('authenticated', 'agenda_internal', 'USAGE') then
+    raise exception 'ITEM02C_AGENDA_INTERNAL_APP_ROLE_EXPOSURE';
+  end if;
+  if (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='agenda_public_bridge') <> 1 then
+    raise exception 'ITEM02C_MONTHLY_BRIDGE_FUNCTION_COUNT_DRIFT';
+  end if;
+
+  v_identity := 'agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)';
   v_oid := to_regprocedure(v_identity);
   if v_oid is null then
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_MISSING:%', v_identity;
   end if;
-  if not has_schema_privilege('anon', 'agenda_internal', 'USAGE')
-     or not has_schema_privilege('authenticated', 'agenda_internal', 'USAGE')
-     or not has_schema_privilege('service_role', 'agenda_internal', 'USAGE')
-     or not has_function_privilege('anon', v_oid, 'EXECUTE')
+  if not has_function_privilege('anon', v_oid, 'EXECUTE')
      or not has_function_privilege('authenticated', v_oid, 'EXECUTE')
-     or not has_function_privilege('service_role', v_oid, 'EXECUTE') then
+     or not has_function_privilege('service_role', v_oid, 'EXECUTE')
+     or has_function_privilege('public', v_oid, 'EXECUTE') then
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_GRANT_DRIFT:%', v_identity;
   end if;
   if not exists (
@@ -177,6 +198,18 @@ begin
       )
   ) then
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_IDENTITY_DRIFT:%', v_identity;
+  end if;
+  if exists (
+    select 1
+    from pg_default_acl d
+    join pg_namespace n on n.oid = d.defaclnamespace
+    cross join lateral aclexplode(d.defaclacl) a
+    where n.nspname = 'agenda_public_bridge'
+      and d.defaclobjtype = 'f'
+      and a.grantee = 0
+      and a.privilege_type = 'EXECUTE'
+  ) then
+    raise exception 'ITEM02C_MONTHLY_BRIDGE_DEFAULT_PUBLIC_EXECUTE';
   end if;
 
   select count(*)::integer,
