@@ -16,6 +16,7 @@ on:
       - 'supabase/migrations/20260907175000_private_waitlist_trigger_acl_hardening.sql'
       - 'supabase/migrations/20260908152000_waitlist_private_rounds.sql'
       - 'supabase/migrations/20260908152100_waitlist_private_round_acl_hardening.sql'
+      - 'supabase/migrations/20260909093000_reconcile_recovered_production_function_acls.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -159,6 +160,9 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f supabase/migrations/20260908152100_waitlist_private_round_acl_hardening.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260909093000_reconcile_recovered_production_function_acls.sql
           bash tests/acl-parity/assert-private-waitlist-item02a-overlay.sh \
             postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             /tmp/acl-idempotent.log
