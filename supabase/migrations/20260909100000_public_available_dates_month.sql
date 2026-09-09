@@ -1,4 +1,6 @@
-create or replace function public.public_list_available_dates_month(
+grant usage on schema agenda_internal to anon, authenticated, service_role;
+
+create or replace function agenda_internal.list_available_dates_month_impl(
   p_booking_page_slug text,
   p_service_id uuid,
   p_service_employee_id uuid,
@@ -11,7 +13,7 @@ returns table(local_date date)
 language plpgsql
 stable
 security definer
-set search_path = 'public'
+set search_path = ''
 as $$
 declare
   v_blocks integer;
@@ -66,6 +68,38 @@ begin
   )
   order by d.local_date;
 end;
+$$;
+
+revoke all on function agenda_internal.list_available_dates_month_impl(text, uuid, uuid, integer, jsonb, integer, date)
+  from public, anon, authenticated, service_role;
+grant execute on function agenda_internal.list_available_dates_month_impl(text, uuid, uuid, integer, jsonb, integer, date)
+  to anon, authenticated, service_role;
+
+create or replace function public.public_list_available_dates_month(
+  p_booking_page_slug text,
+  p_service_id uuid,
+  p_service_employee_id uuid,
+  p_contracted_minutes integer,
+  p_extra_selections jsonb default '[]'::jsonb,
+  p_people_count integer default 1,
+  p_month date default current_date
+)
+returns table(local_date date)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select *
+  from agenda_internal.list_available_dates_month_impl(
+    p_booking_page_slug,
+    p_service_id,
+    p_service_employee_id,
+    p_contracted_minutes,
+    p_extra_selections,
+    p_people_count,
+    p_month
+  );
 $$;
 
 revoke all on function public.public_list_available_dates_month(text, uuid, uuid, integer, jsonb, integer, date) from public;
