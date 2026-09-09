@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { requireAdminPermission } from '../_shared/supabase.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -106,23 +107,12 @@ async function sha256(value: string): Promise<string> {
 }
 
 async function requireTeamManager(req: Request, client: SupabaseClient): Promise<{ adminId: string; role: string }> {
-  const header = req.headers.get('authorization') ?? ''
-  const match = header.match(/^Bearer\s+(.+)$/i)
-  if (!match) throw new Error('ADMIN_AUTH_REQUIRED')
-
-  const { data: userData, error: userError } = await client.auth.getUser(match[1])
-  if (userError || !userData.user) throw new Error('ADMIN_AUTH_INVALID')
-
-  const { data: adminId, error: resolveError } = await client.rpc('service_admin_resolve_auth_user', {
-    p_auth_user_id: userData.user.id,
-  })
-  if (resolveError || typeof adminId !== 'string' || !adminId) throw new Error('ADMIN_ACCESS_DENIED')
-
-  const [{ data: allowed, error: permissionError }, { data: actor, error: actorError }] = await Promise.all([
-    client.rpc('service_admin_has_permission', { p_admin_id: adminId, p_permission: 'TEAM_MANAGE' }),
-    client.from('admin_users').select('role,is_active').eq('id', adminId).maybeSingle(),
-  ])
-  if (permissionError || allowed !== true) throw new Error('ADMIN_PERMISSION_DENIED')
+  const { adminId } = await requireAdminPermission(req, 'TEAM_MANAGE')
+  const { data: actor, error: actorError } = await client
+    .from('admin_users')
+    .select('role,is_active')
+    .eq('id', adminId)
+    .maybeSingle()
   if (actorError || !actor?.is_active) throw new Error('ADMIN_ACCESS_DENIED')
 
   return { adminId, role: String(actor.role ?? '') }
@@ -163,15 +153,19 @@ async function reactivateMember(req: Request, client: SupabaseClient, memberId: 
       throw new Error('ADMIN_USER_REACTIVATE_FAILED')
     }
 
-    await client.from('audit_logs').insert({
-      admin_user_id: actor.adminId,
-      entity_type: 'ADMIN_USER',
-      entity_id: target.id,
-      action: 'USER_REACTIVATED',
-      before_json: { is_active: false },
-      after_json: { is_active: true },
-      origin: 'ADMIN',
-    }).catch(() => undefined)
+    try {
+      await client.from('audit_logs').insert({
+        admin_user_id: actor.adminId,
+        entity_type: 'ADMIN_USER',
+        entity_id: target.id,
+        action: 'USER_REACTIVATED',
+        before_json: { is_active: false },
+        after_json: { is_active: true },
+        origin: 'ADMIN',
+      })
+    } catch {
+      // Audit remains best-effort and must not undo a successful reactivation.
+    }
   }
 
   return json({
@@ -289,15 +283,19 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
       updated_at: new Date().toISOString(),
     }).eq('id', delivery.id)
 
-    await client.from('audit_logs').insert({
-      admin_user_id: actor.adminId,
-      entity_type: 'ADMIN_USER',
-      entity_id: target.id,
-      action: 'USER_INVITE_RESENT',
-      before_json: null,
-      after_json: { recipient_masked: maskEmail(memberEmail) },
-      origin: 'ADMIN',
-    }).catch(() => undefined)
+    try {
+      await client.from('audit_logs').insert({
+        admin_user_id: actor.adminId,
+        entity_type: 'ADMIN_USER',
+        entity_id: target.id,
+        action: 'USER_INVITE_RESENT',
+        before_json: null,
+        after_json: { recipient_masked: maskEmail(memberEmail) },
+        origin: 'ADMIN',
+      })
+    } catch {
+      // Audit remains best-effort and must not turn a successful send into a failure.
+    }
 
     return json({
       member_id: target.id,
