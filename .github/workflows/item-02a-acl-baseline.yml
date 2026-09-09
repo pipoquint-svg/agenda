@@ -104,6 +104,15 @@ jobs:
           restore_migration
           trap - EXIT
 
+      - name: Park monthly availability migration for historical Item 2A baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260909100000_public_available_dates_month.sql'
+          if [[ -f "$migration" ]]; then
+            mv "$migration" /tmp/20260909100000_public_available_dates_month.sql
+          fi
+
       - name: Rebuild current production ACL target
         run: supabase db reset
 
@@ -153,6 +162,16 @@ jobs:
           bash tests/acl-parity/assert-private-waitlist-item02a-overlay.sh \
             postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             /tmp/acl-idempotent.log
+
+      - name: Restore monthly availability migration for current Item 2C contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration='supabase/migrations/20260909100000_public_available_dates_month.sql'
+          if [[ -f /tmp/20260909100000_public_available_dates_month.sql ]]; then
+            mv /tmp/20260909100000_public_available_dates_month.sql "$migration"
+          fi
+          test -f "$migration"
 
       - name: Rebuild current ACL contract with Item 2C overlay
         run: |
