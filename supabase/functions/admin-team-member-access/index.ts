@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { requireAdminPermission } from '../_shared/supabase.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -10,8 +11,6 @@ const corsHeaders = {
 const INVITE_EVENT = 'ADMIN_USER_INVITE'
 const OPERATION_SCOPE = 'BLACKSHEEP'
 const OFFICIAL_SITE_URL = 'https://www.blacksheepestudiocriativo.com.br'
-const DEFAULT_FROM = 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>'
-const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 
 type AdminRow = {
   id: string
@@ -224,9 +223,9 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
   const subject = render(String(template.title_template ?? 'Convite de acesso'), values)
   const text = render(String(template.body_template ?? ''), values)
   const html = brandedHtml(brandName, text)
+  const sender = notificationSenderForScope(OPERATION_SCOPE)
+  if (!sender) throw new Error('EMAIL_PROVIDER_SENDER_NOT_CONFIGURED')
 
-  const from = Deno.env.get('EMAIL_FROM_BLACKSHEEP')?.trim() || DEFAULT_FROM
-  const replyTo = Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim() || undefined
   const idempotencyKey = `admin-user-invite:${target.auth_user_id}:resend:${crypto.randomUUID()}`
   const recipientHash = await sha256(memberEmail)
 
@@ -246,35 +245,15 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
   if (deliveryError || !delivery) throw new Error('NOTIFICATION_DELIVERY_LOG_INSERT_FAILED')
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15_000)
-    let response: Response
-    try {
-      response = await fetch(RESEND_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${requiredEnv('RESEND_API_KEY')}`,
-          'content-type': 'application/json',
-          'idempotency-key': idempotencyKey,
-        },
-        body: JSON.stringify({ from, to: [memberEmail], subject, text, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
-        signal: controller.signal,
-      })
-    } finally {
-      clearTimeout(timeout)
+    const payload: EmailProviderPayload = {
+      from: sender.from,
+      to: [memberEmail],
+      subject,
+      text,
+      html,
+      ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
     }
-
-    const responseText = await response.text()
-    if (!response.ok) throw new Error(`EMAIL_PROVIDER_HTTP_${response.status}`)
-    let providerMessageId: string | null = null
-    if (responseText) {
-      try {
-        const parsed = JSON.parse(responseText)
-        providerMessageId = typeof parsed?.id === 'string' ? parsed.id : null
-      } catch {
-        throw new Error('EMAIL_PROVIDER_INVALID_RESPONSE')
-      }
-    }
+    const providerMessageId = await sendEmailWithProvider(payload, idempotencyKey)
 
     await client.from('notification_delivery_logs').update({
       status: 'SENT',
