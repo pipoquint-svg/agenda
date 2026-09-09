@@ -77,8 +77,14 @@ select ok(
 );
 
 select ok(
-  not has_schema_privilege('public', 'agenda_public_bridge', 'USAGE')
-  and not has_schema_privilege('public', 'agenda_public_bridge', 'CREATE'),
+  (select not exists (
+     select 1
+     from aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a
+     where a.grantee = 0
+       and a.privilege_type in ('USAGE', 'CREATE')
+   )
+   from pg_namespace n
+   where n.nspname = 'agenda_public_bridge'),
   'PUBLIC has no bridge schema privileges'
 );
 
