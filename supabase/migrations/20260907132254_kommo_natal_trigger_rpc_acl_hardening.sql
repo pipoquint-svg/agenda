@@ -1,0 +1,2 @@
+revoke execute on function public.coalesce_natal_kommo_pending_jobs() from public, anon, authenticated;
+revoke execute on function public.enqueue_natal_2026_kommo_sync_trigger() from public, anon, authenticated;
