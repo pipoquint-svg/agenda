@@ -1,6 +1,15 @@
-grant usage on schema agenda_internal to anon, authenticated, service_role;
+create schema if not exists agenda_public_bridge;
 
-create or replace function agenda_internal.list_available_dates_month_impl(
+revoke all on schema agenda_public_bridge from public, anon, authenticated, service_role;
+grant usage on schema agenda_public_bridge to anon, authenticated, service_role;
+
+-- Functions created by postgres in this bridge schema must not inherit the
+-- PostgreSQL default EXECUTE privilege for PUBLIC. Every callable bridge must
+-- be granted explicitly below.
+alter default privileges for role postgres in schema agenda_public_bridge
+  revoke execute on functions from public;
+
+create or replace function agenda_public_bridge.list_available_dates_month_impl(
   p_booking_page_slug text,
   p_service_id uuid,
   p_service_employee_id uuid,
@@ -70,9 +79,9 @@ begin
 end;
 $$;
 
-revoke all on function agenda_internal.list_available_dates_month_impl(text, uuid, uuid, integer, jsonb, integer, date)
+revoke all on function agenda_public_bridge.list_available_dates_month_impl(text, uuid, uuid, integer, jsonb, integer, date)
   from public, anon, authenticated, service_role;
-grant execute on function agenda_internal.list_available_dates_month_impl(text, uuid, uuid, integer, jsonb, integer, date)
+grant execute on function agenda_public_bridge.list_available_dates_month_impl(text, uuid, uuid, integer, jsonb, integer, date)
   to anon, authenticated, service_role;
 
 create or replace function public.public_list_available_dates_month(
@@ -91,7 +100,7 @@ security invoker
 set search_path = ''
 as $$
   select *
-  from agenda_internal.list_available_dates_month_impl(
+  from agenda_public_bridge.list_available_dates_month_impl(
     p_booking_page_slug,
     p_service_id,
     p_service_employee_id,
