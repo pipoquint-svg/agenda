@@ -1,4 +1,6 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { requireAdminPermission } from '../_shared/supabase.ts'
+import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -9,8 +11,6 @@ const corsHeaders = {
 const INVITE_EVENT = 'ADMIN_USER_INVITE'
 const OPERATION_SCOPE = 'BLACKSHEEP'
 const OFFICIAL_SITE_URL = 'https://www.blacksheepestudiocriativo.com.br'
-const DEFAULT_FROM = 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>'
-const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 
 type AdminRow = {
   id: string
@@ -106,23 +106,12 @@ async function sha256(value: string): Promise<string> {
 }
 
 async function requireTeamManager(req: Request, client: SupabaseClient): Promise<{ adminId: string; role: string }> {
-  const header = req.headers.get('authorization') ?? ''
-  const match = header.match(/^Bearer\s+(.+)$/i)
-  if (!match) throw new Error('ADMIN_AUTH_REQUIRED')
-
-  const { data: userData, error: userError } = await client.auth.getUser(match[1])
-  if (userError || !userData.user) throw new Error('ADMIN_AUTH_INVALID')
-
-  const { data: adminId, error: resolveError } = await client.rpc('service_admin_resolve_auth_user', {
-    p_auth_user_id: userData.user.id,
-  })
-  if (resolveError || typeof adminId !== 'string' || !adminId) throw new Error('ADMIN_ACCESS_DENIED')
-
-  const [{ data: allowed, error: permissionError }, { data: actor, error: actorError }] = await Promise.all([
-    client.rpc('service_admin_has_permission', { p_admin_id: adminId, p_permission: 'TEAM_MANAGE' }),
-    client.from('admin_users').select('role,is_active').eq('id', adminId).maybeSingle(),
-  ])
-  if (permissionError || allowed !== true) throw new Error('ADMIN_PERMISSION_DENIED')
+  const { adminId } = await requireAdminPermission(req, 'TEAM_MANAGE')
+  const { data: actor, error: actorError } = await client
+    .from('admin_users')
+    .select('role,is_active')
+    .eq('id', adminId)
+    .maybeSingle()
   if (actorError || !actor?.is_active) throw new Error('ADMIN_ACCESS_DENIED')
 
   return { adminId, role: String(actor.role ?? '') }
@@ -163,15 +152,19 @@ async function reactivateMember(req: Request, client: SupabaseClient, memberId: 
       throw new Error('ADMIN_USER_REACTIVATE_FAILED')
     }
 
-    await client.from('audit_logs').insert({
-      admin_user_id: actor.adminId,
-      entity_type: 'ADMIN_USER',
-      entity_id: target.id,
-      action: 'USER_REACTIVATED',
-      before_json: { is_active: false },
-      after_json: { is_active: true },
-      origin: 'ADMIN',
-    }).catch(() => undefined)
+    try {
+      await client.from('audit_logs').insert({
+        admin_user_id: actor.adminId,
+        entity_type: 'ADMIN_USER',
+        entity_id: target.id,
+        action: 'USER_REACTIVATED',
+        before_json: { is_active: false },
+        after_json: { is_active: true },
+        origin: 'ADMIN',
+      })
+    } catch {
+      // Audit remains best-effort and must not undo a successful reactivation.
+    }
   }
 
   return json({
@@ -230,9 +223,9 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
   const subject = render(String(template.title_template ?? 'Convite de acesso'), values)
   const text = render(String(template.body_template ?? ''), values)
   const html = brandedHtml(brandName, text)
+  const sender = notificationSenderForScope(OPERATION_SCOPE)
+  if (!sender) throw new Error('EMAIL_PROVIDER_SENDER_NOT_CONFIGURED')
 
-  const from = Deno.env.get('EMAIL_FROM_BLACKSHEEP')?.trim() || DEFAULT_FROM
-  const replyTo = Deno.env.get('EMAIL_REPLY_TO_BLACKSHEEP')?.trim() || undefined
   const idempotencyKey = `admin-user-invite:${target.auth_user_id}:resend:${crypto.randomUUID()}`
   const recipientHash = await sha256(memberEmail)
 
@@ -252,35 +245,15 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
   if (deliveryError || !delivery) throw new Error('NOTIFICATION_DELIVERY_LOG_INSERT_FAILED')
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15_000)
-    let response: Response
-    try {
-      response = await fetch(RESEND_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${requiredEnv('RESEND_API_KEY')}`,
-          'content-type': 'application/json',
-          'idempotency-key': idempotencyKey,
-        },
-        body: JSON.stringify({ from, to: [memberEmail], subject, text, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
-        signal: controller.signal,
-      })
-    } finally {
-      clearTimeout(timeout)
+    const payload: EmailProviderPayload = {
+      from: sender.from,
+      to: [memberEmail],
+      subject,
+      text,
+      html,
+      ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
     }
-
-    const responseText = await response.text()
-    if (!response.ok) throw new Error(`EMAIL_PROVIDER_HTTP_${response.status}`)
-    let providerMessageId: string | null = null
-    if (responseText) {
-      try {
-        const parsed = JSON.parse(responseText)
-        providerMessageId = typeof parsed?.id === 'string' ? parsed.id : null
-      } catch {
-        throw new Error('EMAIL_PROVIDER_INVALID_RESPONSE')
-      }
-    }
+    const providerMessageId = await sendEmailWithProvider(payload, idempotencyKey)
 
     await client.from('notification_delivery_logs').update({
       status: 'SENT',
@@ -289,15 +262,19 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
       updated_at: new Date().toISOString(),
     }).eq('id', delivery.id)
 
-    await client.from('audit_logs').insert({
-      admin_user_id: actor.adminId,
-      entity_type: 'ADMIN_USER',
-      entity_id: target.id,
-      action: 'USER_INVITE_RESENT',
-      before_json: null,
-      after_json: { recipient_masked: maskEmail(memberEmail) },
-      origin: 'ADMIN',
-    }).catch(() => undefined)
+    try {
+      await client.from('audit_logs').insert({
+        admin_user_id: actor.adminId,
+        entity_type: 'ADMIN_USER',
+        entity_id: target.id,
+        action: 'USER_INVITE_RESENT',
+        before_json: null,
+        after_json: { recipient_masked: maskEmail(memberEmail) },
+        origin: 'ADMIN',
+      })
+    } catch {
+      // Audit remains best-effort and must not turn a successful send into a failure.
+    }
 
     return json({
       member_id: target.id,

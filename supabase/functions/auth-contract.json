@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-07",
-    "active_total": 74,
+    "active_total": 75,
     "verify_jwt_false": 58,
-    "verify_jwt_true": 16,
-    "versioned_active": 69,
+    "verify_jwt_true": 17,
+    "versioned_active": 70,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -58,7 +58,8 @@
       "admin-service-duplicate",
       "admin-service-payment-policy",
       "admin-service-public-notice",
-      "admin-special-calendar"
+      "admin-special-calendar",
+      "admin-team-member-access"
     ],
     "github_oidc": [
       "integration-worker-trigger",
