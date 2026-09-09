@@ -144,11 +144,38 @@ begin
   if not exists (
     select 1 from pg_proc p
     where p.oid = v_oid
-      and p.prosecdef
+      and not p.prosecdef
       and p.provolatile = 's'
       and pg_get_userbyid(p.proowner) = 'postgres'
   ) then
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_RPC_IDENTITY_DRIFT:%', v_identity;
+  end if;
+
+  v_identity := 'agenda_internal.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then
+    raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_MISSING:%', v_identity;
+  end if;
+  if not has_schema_privilege('anon', 'agenda_internal', 'USAGE')
+     or not has_schema_privilege('authenticated', 'agenda_internal', 'USAGE')
+     or not has_function_privilege('anon', v_oid, 'EXECUTE')
+     or not has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     or not has_function_privilege('service_role', v_oid, 'EXECUTE') then
+    raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_GRANT_DRIFT:%', v_identity;
+  end if;
+  if not exists (
+    select 1 from pg_proc p
+    where p.oid = v_oid
+      and p.prosecdef
+      and p.provolatile = 's'
+      and pg_get_userbyid(p.proowner) = 'postgres'
+      and exists (
+        select 1
+        from unnest(coalesce(p.proconfig, '{}'::text[])) config(value)
+        where config.value = 'search_path=' 
+      )
+  ) then
+    raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_IDENTITY_DRIFT:%', v_identity;
   end if;
 
   select count(*)::integer,
