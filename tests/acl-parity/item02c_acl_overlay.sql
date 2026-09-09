@@ -131,6 +131,26 @@ begin
     end if;
   end loop;
 
+  v_identity := 'public.public_list_available_dates_month(text,uuid,uuid,integer,jsonb,integer,date)';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then
+    raise exception 'ITEM02C_MONTHLY_AVAILABILITY_RPC_MISSING:%', v_identity;
+  end if;
+  if not has_function_privilege('anon', v_oid, 'EXECUTE')
+     or not has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     or not has_function_privilege('service_role', v_oid, 'EXECUTE') then
+    raise exception 'ITEM02C_MONTHLY_AVAILABILITY_RPC_GRANT_DRIFT:%', v_identity;
+  end if;
+  if not exists (
+    select 1 from pg_proc p
+    where p.oid = v_oid
+      and p.prosecdef
+      and p.provolatile = 's'
+      and pg_get_userbyid(p.proowner) = 'postgres'
+  ) then
+    raise exception 'ITEM02C_MONTHLY_AVAILABILITY_RPC_IDENTITY_DRIFT:%', v_identity;
+  end if;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -138,11 +158,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 442 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=442 actual=%', v_public_function_count;
+  if v_public_function_count <> 443 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=443 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 384 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=384 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 385 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=385 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
