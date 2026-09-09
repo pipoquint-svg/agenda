@@ -75,15 +75,14 @@ select ok(
 );
 
 select ok(
-  not exists (
-    select 1
-    from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
-    where p.oid = to_regprocedure('agenda_internal.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)')
-      and a.grantee = 0
-      and a.privilege_type = 'EXECUTE'
-  )
-  from pg_proc p
-  where p.oid = to_regprocedure('agenda_internal.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'),
+  (select not exists (
+     select 1
+     from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+     where a.grantee = 0
+       and a.privilege_type = 'EXECUTE'
+   )
+   from pg_proc p
+   where p.oid = to_regprocedure('agenda_internal.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)')),
   'internal privileged implementation is not executable by PUBLIC'
 );
 
