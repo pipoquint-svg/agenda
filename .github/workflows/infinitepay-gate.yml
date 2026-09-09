@@ -16,8 +16,8 @@ on:
       - 'supabase/functions/integration-worker-trigger/**'
       - 'supabase/migrations/20260905190956_20260905163000_infinitepay_payment_rpc.sql'
       - 'supabase/migrations/20260905191019_20260905164000_infinitepay_checkout_claim.sql'
-      - 'supabase/migrations/20260905200000_infinitepay_runtime_config.sql'
-      - 'supabase/migrations/20260905201000_infinitepay_checkout_url_hosts.sql'
+      - 'supabase/migrations/20260905205632_infinitepay_runtime_config.sql'
+      - 'supabase/migrations/20260905205648_infinitepay_checkout_url_hosts.sql'
       - 'supabase/tests/database/146_infinitepay_payment_rpc.test.sql'
       - 'supabase/tests/database/147_infinitepay_runtime_config.test.sql'
       - 'supabase/tests/database/148_infinitepay_checkout_url_hosts.test.sql'
@@ -77,7 +77,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          migration='supabase/migrations/20260905201000_infinitepay_checkout_url_hosts.sql'
+          migration='supabase/migrations/20260905205648_infinitepay_checkout_url_hosts.sql'
           grep -Fq "^https://checkout[.]infinitepay[.]com[.]br(?:/|$)" "$migration"
           grep -Fq "^https://checkout[.]infinitepay[.]io(?:/|$)" "$migration"
           if grep -Eq "checkout.*infinitepay.*\\*|infinitepay.*\\*" "$migration"; then
