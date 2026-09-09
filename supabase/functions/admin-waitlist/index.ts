@@ -24,6 +24,37 @@ function uuid(value: unknown, code: string): string {
   return id
 }
 
+async function activeBookingPageSlugForService(client: any, serviceId: string): Promise<string> {
+  const { data: service, error: serviceError } = await client.from('services')
+    .select('id,is_active,duration_mode')
+    .eq('id', serviceId)
+    .maybeSingle()
+  if (serviceError || !service || service.is_active !== true || service.duration_mode !== 'FIXED') {
+    throw new Error('WAITLIST_SERVICE_NOT_AVAILABLE')
+  }
+
+  const { data: links, error: linksError } = await client.from('booking_page_services')
+    .select('booking_page_id')
+    .eq('service_id', serviceId)
+    .eq('is_active', true)
+  if (linksError) throw new Error('WAITLIST_SERVICE_NOT_AVAILABLE')
+
+  const pageIds = [...new Set((links ?? [])
+    .map((row: Record<string, unknown>) => String(row.booking_page_id ?? '').trim())
+    .filter(Boolean))]
+  if (pageIds.length === 0) throw new Error('WAITLIST_SERVICE_NOT_AVAILABLE')
+
+  const { data: pages, error: pagesError } = await client.from('booking_pages')
+    .select('id,slug')
+    .in('id', pageIds)
+    .eq('is_active', true)
+    .order('slug', { ascending: true })
+    .limit(1)
+  const slug = String(pages?.[0]?.slug ?? '').trim()
+  if (pagesError || !slug) throw new Error('WAITLIST_SERVICE_NOT_AVAILABLE')
+  return slug
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'GET' && req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -38,13 +69,53 @@ Deno.serve(async (req) => {
     if (req.method === 'POST') {
       await requirePermission('WAITLIST_MANAGE')
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
-      if (body.action !== 'mark_contacted') throw new Error('WAITLIST_ACTION_INVALID')
-      const { data, error } = await client.rpc('service_admin_mark_waitlist_contacted', {
-        p_waitlist_entry_id: uuid(body.waitlist_entry_id, 'WAITLIST_ENTRY_ID_INVALID'),
-        p_admin_id: admin.adminId,
-      })
-      if (error) throw new Error(error.message)
-      return json(data)
+
+      if (body.action === 'create') {
+        const serviceId = uuid(body.service_id, 'WAITLIST_SERVICE_ID_INVALID')
+        const bookingPageSlug = await activeBookingPageSlugForService(client, serviceId)
+        const { data, error } = await client.rpc('public_create_service_waitlist_entry', {
+          p_booking_page_slug: bookingPageSlug,
+          p_service_id: serviceId,
+          p_name: String(body.name ?? ''),
+          p_email: String(body.email ?? ''),
+          p_whatsapp: String(body.whatsapp ?? ''),
+        })
+        if (error) {
+          if (error.message.includes('PUBLIC_SERVICE_NOT_AVAILABLE_ON_PAGE')) throw new Error('WAITLIST_SERVICE_NOT_AVAILABLE')
+          throw new Error(error.message)
+        }
+
+        const signup = (data ?? {}) as Record<string, unknown>
+        const notificationKey = String(signup.notification_idempotency_key ?? '').trim()
+        if (notificationKey) {
+          const { error: skipError } = await client.from('notification_delivery_logs')
+            .update({
+              status: 'SKIPPED',
+              last_error_code: 'MANUAL_ADMIN_ENTRY',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('idempotency_key', notificationKey)
+            .eq('status', 'PENDING')
+          if (skipError) console.error('WAITLIST_MANUAL_NOTIFICATION_SKIP_FAILED')
+        }
+
+        return json({
+          ok: true,
+          waitlist_entry_id: signup.id,
+          created_at: signup.created_at,
+        }, 201)
+      }
+
+      if (body.action === 'mark_contacted') {
+        const { data, error } = await client.rpc('service_admin_mark_waitlist_contacted', {
+          p_waitlist_entry_id: uuid(body.waitlist_entry_id, 'WAITLIST_ENTRY_ID_INVALID'),
+          p_admin_id: admin.adminId,
+        })
+        if (error) throw new Error(error.message)
+        return json(data)
+      }
+
+      throw new Error('WAITLIST_ACTION_INVALID')
     }
 
     await requirePermission('WAITLIST_VIEW')
@@ -95,6 +166,7 @@ Deno.serve(async (req) => {
     const code = raw.match(/(ADMIN_[A-Z0-9_]+|WAITLIST_[A-Z0-9_]+)/)?.[1] ?? 'WAITLIST_ADMIN_FAILED'
     const status = code === 'ADMIN_PERMISSION_DENIED' || code.startsWith('ADMIN_AUTH_') ? 403
       : code === 'WAITLIST_ENTRY_NOT_FOUND' ? 404
+      : code === 'WAITLIST_ALREADY_REGISTERED' ? 409
       : 400
     return json({ error: { code } }, status)
   }
