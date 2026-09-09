@@ -154,8 +154,14 @@ begin
   if to_regnamespace('agenda_public_bridge') is null then
     raise exception 'ITEM02C_MONTHLY_BRIDGE_SCHEMA_MISSING';
   end if;
-  if has_schema_privilege('public', 'agenda_public_bridge', 'USAGE')
-     or has_schema_privilege('public', 'agenda_public_bridge', 'CREATE')
+  if exists (
+    select 1
+    from pg_namespace n
+    cross join lateral aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a
+    where n.nspname = 'agenda_public_bridge'
+      and a.grantee = 0
+      and a.privilege_type in ('USAGE', 'CREATE')
+  )
      or has_schema_privilege('anon', 'agenda_public_bridge', 'CREATE')
      or has_schema_privilege('authenticated', 'agenda_public_bridge', 'CREATE')
      or has_schema_privilege('service_role', 'agenda_public_bridge', 'CREATE') then
@@ -182,7 +188,14 @@ begin
   if not has_function_privilege('anon', v_oid, 'EXECUTE')
      or not has_function_privilege('authenticated', v_oid, 'EXECUTE')
      or not has_function_privilege('service_role', v_oid, 'EXECUTE')
-     or has_function_privilege('public', v_oid, 'EXECUTE') then
+     or exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       where p.oid = v_oid
+         and a.grantee = 0
+         and a.privilege_type = 'EXECUTE'
+     ) then
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_GRANT_DRIFT:%', v_identity;
   end if;
   if not exists (
