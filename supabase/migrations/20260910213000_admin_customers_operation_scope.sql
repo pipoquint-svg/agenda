@@ -131,7 +131,32 @@ begin
 end;
 $$;
 
+create or replace function public.service_admin_list_customers_page(
+  p_search text,
+  p_limit integer,
+  p_offset integer,
+  p_operation_scope text
+)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = public, pg_temp
+as $$
+  select public.service_admin_list_customers_page_scoped(
+    p_search,
+    p_limit,
+    p_offset,
+    p_operation_scope
+  );
+$$;
+
 revoke all on function public.service_admin_list_customers_page_scoped(text, integer, integer, text) from public;
 revoke all on function public.service_admin_list_customers_page_scoped(text, integer, integer, text) from anon;
 revoke all on function public.service_admin_list_customers_page_scoped(text, integer, integer, text) from authenticated;
 grant execute on function public.service_admin_list_customers_page_scoped(text, integer, integer, text) to service_role;
+
+revoke all on function public.service_admin_list_customers_page(text, integer, integer, text) from public;
+revoke all on function public.service_admin_list_customers_page(text, integer, integer, text) from anon;
+revoke all on function public.service_admin_list_customers_page(text, integer, integer, text) from authenticated;
+grant execute on function public.service_admin_list_customers_page(text, integer, integer, text) to service_role;
