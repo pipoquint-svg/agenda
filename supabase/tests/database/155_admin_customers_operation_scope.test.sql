@@ -40,6 +40,13 @@ select ok(
   'service role can execute scoped customer reads for the admin Edge Function'
 );
 
+insert into public.employees (id, name, is_active)
+values (
+  '99000000-0000-0000-0000-000000000002',
+  'QA Sabrina Operation Filter',
+  false
+);
+
 insert into public.services (
   id, name, slug, base_duration_minutes, is_active, operation_scope
 ) values (
