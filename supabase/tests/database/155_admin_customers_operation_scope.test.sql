@@ -43,28 +43,44 @@ select ok(
 insert into public.employees (id, name, is_active)
 values (
   '99000000-0000-0000-0000-000000000002',
-  'QA Sabrina Operation Filter',
+  'QA Operation Filter',
   false
 );
 
 insert into public.services (
   id, name, slug, base_duration_minutes, is_active, operation_scope
-) values (
-  '99100000-0000-0000-0000-000000000010',
-  'QA Sabrina Operation Filter',
-  'qa-sabrina-operation-filter',
-  60,
-  false,
-  'SABRINA'
-);
+) values
+  (
+    '99000000-0000-0000-0000-000000000010',
+    'QA BlackSheep Operation Filter',
+    'qa-blacksheep-operation-filter',
+    60,
+    false,
+    'BLACKSHEEP'
+  ),
+  (
+    '99100000-0000-0000-0000-000000000010',
+    'QA Sabrina Operation Filter',
+    'qa-sabrina-operation-filter',
+    60,
+    false,
+    'SABRINA'
+  );
 
 insert into public.service_employees (id, service_id, employee_id, is_active)
-values (
-  '99100000-0000-0000-0000-000000000020',
-  '99100000-0000-0000-0000-000000000010',
-  '99000000-0000-0000-0000-000000000002',
-  false
-);
+values
+  (
+    '99000000-0000-0000-0000-000000000020',
+    '99000000-0000-0000-0000-000000000010',
+    '99000000-0000-0000-0000-000000000002',
+    false
+  ),
+  (
+    '99100000-0000-0000-0000-000000000020',
+    '99100000-0000-0000-0000-000000000010',
+    '99000000-0000-0000-0000-000000000002',
+    false
+  );
 
 insert into public.customers (id, name, email)
 values
