@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-07",
-    "active_total": 75,
-    "verify_jwt_false": 58,
+    "captured_on": "2026-09-10",
+    "active_total": 76,
+    "verify_jwt_false": 59,
     "verify_jwt_true": 17,
-    "versioned_active": 70,
+    "versioned_active": 71,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -22,6 +22,7 @@
       "admin-audit-log",
       "admin-customer-balance",
       "admin-dashboard",
+      "admin-external-block",
       "admin-finance",
       "admin-finance-minimal",
       "admin-google",
