@@ -6,12 +6,20 @@ const corsHeaders = {
   'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
 }
 
+type OperationScope = 'ALL' | 'BLACKSHEEP' | 'SABRINA'
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 }
 
 function clean(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function operationScope(value: unknown): OperationScope {
+  const scope = (clean(value) ?? 'ALL').toUpperCase()
+  if (!['ALL', 'BLACKSHEEP', 'SABRINA'].includes(scope)) throw new Error('CUSTOMER_OPERATION_SCOPE_INVALID')
+  return scope as OperationScope
 }
 
 function uuid(value: unknown): string {
@@ -56,11 +64,12 @@ function customerCsv(rows: Array<Record<string, unknown>>): string {
   return `\uFEFF${header.map(csvCell).join(',')}\r\n${lines.join('\r\n')}\r\n`
 }
 
-async function listPage(client: ReturnType<typeof adminClient>, search: string | null, limit: number, offset: number) {
+async function listPage(client: ReturnType<typeof adminClient>, search: string | null, limit: number, offset: number, scope: OperationScope) {
   const { data, error } = await client.rpc('service_admin_list_customers_page', {
     p_search: search,
     p_limit: limit,
     p_offset: offset,
+    p_operation_scope: scope,
   })
   if (error) throw new Error(error.message)
   return (data ?? { customers: [], total: 0, limit, offset, has_more: false }) as Record<string, unknown>
@@ -111,6 +120,7 @@ Deno.serve(async (req) => {
       }
 
       const search = clean(url.searchParams.get('search'))
+      const scope = operationScope(url.searchParams.get('operation_scope'))
       if (url.searchParams.get('export') === 'csv') {
         if (!(await hasAdminPermission(admin.adminId, 'CUSTOMERS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')
         const rows: Array<Record<string, unknown>> = []
@@ -118,7 +128,7 @@ Deno.serve(async (req) => {
         let offset = 0
         let total = 0
         do {
-          const page = await listPage(client, search, pageSize, offset)
+          const page = await listPage(client, search, pageSize, offset, scope)
           const customers = Array.isArray(page.customers) ? page.customers as Array<Record<string, unknown>> : []
           rows.push(...customers)
           total = Number(page.total ?? rows.length)
@@ -139,7 +149,7 @@ Deno.serve(async (req) => {
       const offset = Number(url.searchParams.get('offset') ?? '0')
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('CUSTOMER_LIMIT_INVALID')
       if (!Number.isInteger(offset) || offset < 0) throw new Error('CUSTOMER_OFFSET_INVALID')
-      return json(await listPage(client, search, limit, offset))
+      return json(await listPage(client, search, limit, offset, scope))
     }
 
     if (!(await hasAdminPermission(admin.adminId, 'CUSTOMERS_MANAGE'))) throw new Error('ADMIN_PERMISSION_DENIED')

@@ -29,7 +29,7 @@ select is(
      'service_admin_list_customers_page','service_admin_create_customer',
      'service_admin_update_customer_identity','service_admin_anonymize_customer'
    ) and p.proconfig::text='{"search_path=public, pg_temp"}'),
-  6,
+  7,
   'all customer administration boundaries pin search_path'
 );
 
