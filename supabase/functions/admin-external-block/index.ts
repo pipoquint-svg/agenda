@@ -310,12 +310,35 @@ async function enqueueFullSync(
   client: ReturnType<typeof adminClient>,
   calendarId: string,
   discriminator: string,
-): Promise<void> {
-  await client.rpc('enqueue_google_calendar_sync', {
+): Promise<boolean> {
+  const { error } = await client.rpc('enqueue_google_calendar_sync', {
     p_google_calendar_id: calendarId,
     p_idempotency_key: `google-external-admin:${calendarId}:${discriminator}`,
     p_payload_json: { source: 'ADMIN_EXTERNAL_BLOCK_MUTATION', force_full: true },
   })
+  return !error
+}
+
+async function reconcileAfterProviderMutation(
+  client: ReturnType<typeof adminClient>,
+  calendarId: string,
+  discriminator: string,
+  localApply: (() => Promise<void>) | null,
+): Promise<{ syncImmediate: boolean; syncQueued: boolean }> {
+  if (localApply) {
+    try {
+      await localApply()
+      return { syncImmediate: true, syncQueued: false }
+    } catch {
+      // O Google já é a fonte de verdade. Se o espelho local falhar, reconciliamos
+      // por sync e não induzimos o operador a repetir uma mutação já aceita pelo provider.
+    }
+  }
+
+  const syncImmediate = await invokeFullSync(calendarId)
+  if (syncImmediate) return { syncImmediate: true, syncQueued: false }
+  const syncQueued = await enqueueFullSync(client, calendarId, discriminator)
+  return { syncImmediate: false, syncQueued }
 }
 
 function detailResponse(
@@ -344,12 +367,10 @@ function detailResponse(
     delete_supported: writable,
     resource_count: resourceCount,
     write_blocker: !roleWritable
-      ? 'CALENDAR_READ_ONLY'
+      ? 'EXTERNAL_BLOCK_READ_ONLY'
       : !connectionWritable
-        ? 'GOOGLE_RECONNECT_REQUIRED'
-        : event.is_all_day
-          ? 'ALL_DAY_EDIT_UNSUPPORTED'
-          : null,
+        ? 'EXTERNAL_BLOCK_GOOGLE_RECONNECT_REQUIRED'
+        : null,
   }
 }
 
@@ -360,6 +381,43 @@ function mutationAuditSnapshot(event: EventRow) {
     end_at: event.end_at,
     recurring_event_id: event.recurring_event_id,
   }
+}
+
+async function auditRequested(
+  client: ReturnType<typeof adminClient>,
+  adminId: string,
+  event: EventRow,
+  action: 'UPDATE' | 'DELETE',
+  before: Record<string, unknown>,
+  requested: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await client.from('audit_logs').insert({
+    admin_user_id: adminId,
+    entity_type: 'GOOGLE_CALENDAR_EVENT',
+    entity_id: event.id,
+    action: action === 'UPDATE' ? 'EXTERNAL_BLOCK_UPDATE_REQUESTED' : 'EXTERNAL_BLOCK_DELETE_REQUESTED',
+    before_json: before,
+    after_json: requested,
+    origin: 'ADMIN',
+  })
+  if (error) throw new Error('EXTERNAL_BLOCK_AUDIT_FAILED')
+}
+
+async function auditSucceededBestEffort(
+  client: ReturnType<typeof adminClient>,
+  adminId: string,
+  event: EventRow,
+  action: 'UPDATE' | 'DELETE',
+  result: Record<string, unknown>,
+): Promise<void> {
+  await client.from('audit_logs').insert({
+    admin_user_id: adminId,
+    entity_type: 'GOOGLE_CALENDAR_EVENT',
+    entity_id: event.id,
+    action: action === 'UPDATE' ? 'EXTERNAL_BLOCK_UPDATED' : 'EXTERNAL_BLOCK_DELETED',
+    after_json: result,
+    origin: 'ADMIN',
+  })
 }
 
 Deno.serve(async (req) => {
@@ -396,11 +454,11 @@ Deno.serve(async (req) => {
       : context.event.google_event_id
     const targetProviderEvent = await getGoogleEvent(providerCalendarId, targetEventId, token)
     const before = mutationAuditSnapshot(context.event)
-    let syncImmediate = true
 
     if (action === 'UPDATE') {
       if (context.event.is_all_day) throw new Error('EXTERNAL_BLOCK_ALL_DAY_EDIT_UNSUPPORTED')
       const summary = typeof body.summary === 'string' ? body.summary.trim().slice(0, 1024) : context.event.summary ?? ''
+      if (!summary) throw new Error('EXTERNAL_BLOCK_SUMMARY_REQUIRED')
       const requestedStart = requiredIso(body.start_at, 'EXTERNAL_BLOCK_START_INVALID')
       const requestedEnd = requiredIso(body.end_at, 'EXTERNAL_BLOCK_END_INVALID')
       const requestedStartMs = Date.parse(requestedStart)
@@ -423,6 +481,13 @@ Deno.serve(async (req) => {
         providerTimezone = targetProviderEvent.start?.timeZone ?? providerTimezone
       }
 
+      await auditRequested(context.client, adminId, context.event, 'UPDATE', before, {
+        summary,
+        start_at: requestedStart,
+        end_at: requestedEnd,
+        scope,
+      })
+
       const updated = await patchGoogleEvent(
         providerCalendarId,
         targetEventId,
@@ -435,51 +500,58 @@ Deno.serve(async (req) => {
         },
       )
 
-      if (scope === 'THIS') {
-        await applyProviderEventLocally(context.client, context.calendar.id, updated)
-      } else {
-        syncImmediate = await invokeFullSync(context.calendar.id)
-        if (!syncImmediate) {
-          await enqueueFullSync(context.client, context.calendar.id, `${context.event.id}:update:${Date.now()}`)
-        }
-      }
+      const reconcile = await reconcileAfterProviderMutation(
+        context.client,
+        context.calendar.id,
+        `${context.event.id}:update:${Date.now()}`,
+        scope === 'THIS'
+          ? () => applyProviderEventLocally(context.client, context.calendar.id, updated)
+          : null,
+      )
 
-      const { error: auditError } = await context.client.from('audit_logs').insert({
-        admin_user_id: adminId,
-        entity_type: 'GOOGLE_CALENDAR_EVENT',
-        entity_id: context.event.id,
-        action: 'EXTERNAL_BLOCK_UPDATED',
-        before_json: before,
-        after_json: { summary, start_at: requestedStart, end_at: requestedEnd, scope },
-        origin: 'ADMIN',
+      await auditSucceededBestEffort(context.client, adminId, context.event, 'UPDATE', {
+        summary,
+        start_at: requestedStart,
+        end_at: requestedEnd,
+        scope,
+        sync_immediate: reconcile.syncImmediate,
+        sync_queued: reconcile.syncQueued,
       })
-      if (auditError) throw new Error('EXTERNAL_BLOCK_AUDIT_FAILED')
 
-      return json({ ok: true, action, scope, sync_immediate: syncImmediate })
+      return json({
+        ok: true,
+        action,
+        scope,
+        sync_immediate: reconcile.syncImmediate,
+        sync_queued: reconcile.syncQueued,
+      })
     }
 
+    await auditRequested(context.client, adminId, context.event, 'DELETE', before, { scope })
     await deleteGoogleEvent(providerCalendarId, targetEventId, token, targetProviderEvent.etag)
-    if (scope === 'THIS') {
-      await applyDeletedOccurrenceLocally(context.client, context.event)
-    } else {
-      syncImmediate = await invokeFullSync(context.calendar.id)
-      if (!syncImmediate) {
-        await enqueueFullSync(context.client, context.calendar.id, `${context.event.id}:delete:${Date.now()}`)
-      }
-    }
 
-    const { error: auditError } = await context.client.from('audit_logs').insert({
-      admin_user_id: adminId,
-      entity_type: 'GOOGLE_CALENDAR_EVENT',
-      entity_id: context.event.id,
-      action: 'EXTERNAL_BLOCK_DELETED',
-      before_json: before,
-      after_json: { scope },
-      origin: 'ADMIN',
+    const reconcile = await reconcileAfterProviderMutation(
+      context.client,
+      context.calendar.id,
+      `${context.event.id}:delete:${Date.now()}`,
+      scope === 'THIS'
+        ? () => applyDeletedOccurrenceLocally(context.client, context.event)
+        : null,
+    )
+
+    await auditSucceededBestEffort(context.client, adminId, context.event, 'DELETE', {
+      scope,
+      sync_immediate: reconcile.syncImmediate,
+      sync_queued: reconcile.syncQueued,
     })
-    if (auditError) throw new Error('EXTERNAL_BLOCK_AUDIT_FAILED')
 
-    return json({ ok: true, action, scope, sync_immediate: syncImmediate })
+    return json({
+      ok: true,
+      action,
+      scope,
+      sync_immediate: reconcile.syncImmediate,
+      sync_queued: reconcile.syncQueued,
+    })
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'EXTERNAL_BLOCK_FAILED'
     const status = code === 'ADMIN_PERMISSION_DENIED' ? 403
