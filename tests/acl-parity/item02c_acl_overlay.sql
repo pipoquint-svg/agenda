@@ -6,6 +6,8 @@
 -- whose individual grants are enforced by their migrations and the RLS baseline.
 -- Private waitlist plus private rounds add 16 public-schema functions; 12 service
 -- RPCs are executable by service_role (the four trigger functions remain trigger-only).
+-- The scoped customer list adds two server-only public functions, both restricted
+-- to service_role: a SECURITY DEFINER read model and a SECURITY INVOKER boundary.
 do $$
 declare
   v_identity text;
@@ -232,11 +234,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 448 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=448 actual=%', v_public_function_count;
+  if v_public_function_count <> 450 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=450 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 390 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=390 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 392 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=392 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
