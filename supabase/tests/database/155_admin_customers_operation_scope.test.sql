@@ -79,44 +79,50 @@ values
 insert into public.appointments (
   id, public_code, service_id, service_employee_id, status,
   start_at, end_at, duration_minutes, people_count, primary_customer_id,
-  origin, is_test, deleted_at, confirmation_percentage_snapshot
+  origin, is_test, deleted_at,
+  checkout_minimum_payment_type_snapshot,
+  checkout_minimum_payment_value_snapshot,
+  payment_mode_snapshot,
+  pix_discount_percent_snapshot,
+  card_max_installments_snapshot,
+  confirmation_percentage_snapshot
 )
 values
   (
     '99100000-0000-0000-0000-000000000201','OPFILTER-BS-1',
     '99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','HELD',
     '2035-01-02T12:00:00Z','2035-01-02T13:00:00Z',60,1,'99100000-0000-0000-0000-000000000101',
-    'ADMIN',true,null,50
+    'ADMIN',true,null,'PERCENT',50,'MINIMUM_OR_FULL',0,6,50
   ),
   (
     '99100000-0000-0000-0000-000000000202','OPFILTER-SA-1',
     '99100000-0000-0000-0000-000000000010','99100000-0000-0000-0000-000000000020','HELD',
     '2035-01-03T12:00:00Z','2035-01-03T13:00:00Z',60,1,'99100000-0000-0000-0000-000000000102',
-    'ADMIN',true,null,50
+    'ADMIN',true,null,'PERCENT',50,'MINIMUM_OR_FULL',0,6,50
   ),
   (
     '99100000-0000-0000-0000-000000000203','OPFILTER-BOTH-BS',
     '99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','HELD',
     '2035-01-04T12:00:00Z','2035-01-04T13:00:00Z',60,1,'99100000-0000-0000-0000-000000000104',
-    'ADMIN',true,null,50
+    'ADMIN',true,null,'PERCENT',50,'MINIMUM_OR_FULL',0,6,50
   ),
   (
     '99100000-0000-0000-0000-000000000204','OPFILTER-BOTH-SA',
     '99100000-0000-0000-0000-000000000010','99100000-0000-0000-0000-000000000020','HELD',
     '2035-01-05T12:00:00Z','2035-01-05T13:00:00Z',60,1,'99100000-0000-0000-0000-000000000104',
-    'ADMIN',true,null,50
+    'ADMIN',true,null,'PERCENT',50,'MINIMUM_OR_FULL',0,6,50
   ),
   (
     '99100000-0000-0000-0000-000000000205','OPFILTER-DRAFT-SA',
     '99100000-0000-0000-0000-000000000010','99100000-0000-0000-0000-000000000020','DRAFT',
     '2035-01-06T12:00:00Z','2035-01-06T13:00:00Z',60,1,'99100000-0000-0000-0000-000000000106',
-    'ADMIN',true,null,50
+    'ADMIN',true,null,'PERCENT',50,'MINIMUM_OR_FULL',0,6,50
   ),
   (
     '99100000-0000-0000-0000-000000000206','OPFILTER-DELETED-BS',
     '99000000-0000-0000-0000-000000000010','99000000-0000-0000-0000-000000000020','HELD',
     '2035-01-07T12:00:00Z','2035-01-07T13:00:00Z',60,1,'99100000-0000-0000-0000-000000000107',
-    'ADMIN',true,now(),50
+    'ADMIN',true,now(),'PERCENT',50,'MINIMUM_OR_FULL',0,6,50
   );
 
 insert into public.appointment_participants (
