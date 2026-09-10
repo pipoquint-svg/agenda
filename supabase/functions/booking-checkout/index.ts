@@ -22,9 +22,9 @@ function token(value: unknown, code: string): string {
 }
 
 function publicCustomerFieldError(code: string): string {
-  if (code === 'CUSTOMER_EMAIL_MISMATCH') return 'CUSTOMER_EMAIL_INVALID'
-  if (code === 'CUSTOMER_PHONE_MISMATCH') return 'CUSTOMER_PHONE_INVALID'
-  if (code === 'CUSTOMER_TAX_ID_MISMATCH') return 'CUSTOMER_TAX_ID_INVALID'
+  // Preserve mismatch codes so the UI can distinguish invalid format from
+  // valid data that does not match the existing customer record.
+  // The stored value itself is never returned here.
   return code
 }
 
