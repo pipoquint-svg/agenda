@@ -2,6 +2,7 @@ import {
   buildManagedGoogleEvent,
   deterministicAgendaGoogleEventId,
   managedEventNeedsRepair,
+  mergeManagedDescriptionWithCustomFields,
   renderManagedNotificationTemplate,
   sameInstant,
   type ManagedAppointmentDesiredState,
@@ -60,6 +61,27 @@ Deno.test('managed notification template fails closed on undeclared variable', (
     rejected = error instanceof Error && error.message === 'NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:payment.total'
   }
   assert(rejected, 'undeclared variables must be rejected instead of leaking values')
+})
+
+Deno.test('calendar template keeps authoritative custom booking fields in description', () => {
+  const merged = mergeManagedDescriptionWithCustomFields(
+    'Orientações internas do ensaio.',
+    'BlackSheep Agenda • Reserva BS-1234\n\nCliente: Amanda\n\nRespostas da reserva:\nInstagram: @amanda\nNome do bebê: Arthur',
+  )
+  assert(
+    merged === 'Orientações internas do ensaio.\n\nRespostas da reserva:\nInstagram: @amanda\nNome do bebê: Arthur',
+    'custom fields must survive a configured Google Calendar template',
+  )
+})
+
+Deno.test('stale custom-field section from a calendar template is replaced by authoritative answers', () => {
+  const merged = mergeManagedDescriptionWithCustomFields(
+    'Orientações internas.\n\nRespostas da reserva:\nInstagram: @antigo',
+    'BlackSheep Agenda • Reserva BS-1234\n\nRespostas da reserva:\nInstagram: @novo\nPets: duas cachorras',
+  )
+  assert(!merged.includes('@antigo'), 'stale custom field content must be removed')
+  assert(merged.includes('Instagram: @novo'), 'current custom field content must be present')
+  assert(merged.includes('Pets: duas cachorras'), 'all current custom fields must be present')
 })
 
 Deno.test('sameInstant compares RFC3339 instants independent of offset', () => {
