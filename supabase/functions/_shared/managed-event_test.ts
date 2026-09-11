@@ -1,7 +1,9 @@
 import {
+  appendManagedCustomFields,
   buildManagedGoogleEvent,
   deterministicAgendaGoogleEventId,
   managedEventNeedsRepair,
+  renderManagedCustomFieldValue,
   renderManagedNotificationTemplate,
   sameInstant,
   type ManagedAppointmentDesiredState,
@@ -33,14 +35,14 @@ Deno.test('deterministic Agenda event id is stable and Google-compatible', () =>
   assert(/^bs[0-9a-v]+$/.test(first), 'event id must use base32hex-compatible alphabet')
 })
 
-Deno.test('managed event payload contains operational metadata but no customer PII', () => {
+Deno.test('managed event payload contains operational metadata but no implicit customer PII', () => {
   const event = buildManagedGoogleEvent(desired) as any
   assert(event.summary === 'Ensaio Gestante', 'service snapshot must be used as title')
   assert(event.extendedProperties.private.bs_source === 'blacksheep_agenda', 'source marker is required')
   assert(event.extendedProperties.private.bs_appointment_id === desired.appointment_id, 'appointment marker is required')
   assert(event.extendedProperties.private.bs_appointment_version === '7', 'version marker is required')
   const serialized = JSON.stringify(event)
-  assert(!serialized.includes('email') && !serialized.includes('phone') && !serialized.includes('cpf'), 'payload must not contain customer PII fields')
+  assert(!serialized.includes('email') && !serialized.includes('phone') && !serialized.includes('cpf'), 'payload must not invent customer PII fields')
 })
 
 Deno.test('managed notification template renders only variables authorized by template schema', () => {
@@ -60,6 +62,38 @@ Deno.test('managed notification template fails closed on undeclared variable', (
     rejected = error instanceof Error && error.message === 'NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:payment.total'
   }
   assert(rejected, 'undeclared variables must be rejected instead of leaking values')
+})
+
+Deno.test('custom reservation fields are appended dynamically in form order', () => {
+  const description = appendManagedCustomFields('Reserva confirmada', [
+    { field_key: 'pet_names', label: 'Pets', value: ['Luna', 'Nina'], sort_order: 30, sequence: 2 },
+    { field_key: 'baby_name', label: 'Nome do bebê', value: 'Arthur', sort_order: 20, sequence: 1 },
+    { field_key: 'future_custom_field', label: 'Novo campo futuro', value: 'Nova resposta', sort_order: 40, sequence: 3 },
+  ])
+  assert(
+    description === 'Reserva confirmada\n\nNome do bebê: Arthur\nPets: Luna, Nina\nNovo campo futuro: Nova resposta',
+    'custom fields must be rendered without hard-coded field names and preserve sort order',
+  )
+})
+
+Deno.test('custom reservation fields omit empty, technical and duplicate labels', () => {
+  const description = appendManagedCustomFields('Instagram: @cliente', [
+    { field_key: 'instagram', label: 'Instagram', value: '@duplicado', sort_order: 1 },
+    { field_key: 'empty_note', label: 'Observação', value: '   ', sort_order: 2 },
+    { field_key: 'internal_token', label: 'Token interno', value: 'nao-expor', sort_order: 3 },
+    { field_key: 'public_note', label: 'Preferências', value: 'Luz suave\nSem flash', sort_order: 4 },
+  ])
+  assert(!description.includes('@duplicado'), 'labels already present in the base description must not be duplicated')
+  assert(!description.includes('Observação:'), 'empty custom answers must be omitted')
+  assert(!description.includes('Token interno'), 'technical fields must be omitted')
+  assert(description.includes('Preferências: Luz suave\nSem flash'), 'meaningful multiline text must be preserved')
+})
+
+Deno.test('custom reservation value renderer keeps common future field types human-readable', () => {
+  assert(renderManagedCustomFieldValue(true) === 'Sim', 'boolean true must be human-readable')
+  assert(renderManagedCustomFieldValue(false) === 'Não', 'boolean false must be human-readable')
+  assert(renderManagedCustomFieldValue(['A', '', 'B']) === 'A, B', 'multi-select arrays must be readable')
+  assert(renderManagedCustomFieldValue({ label: 'Opção bonita', value: 'raw' }) === 'Opção bonita', 'labeled option objects must prefer their display label')
 })
 
 Deno.test('sameInstant compares RFC3339 instants independent of offset', () => {
