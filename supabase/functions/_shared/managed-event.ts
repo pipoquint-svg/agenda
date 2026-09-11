@@ -87,11 +87,16 @@ function normalizedLabel(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR')
 }
 
+function normalizedDescription(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLocaleLowerCase('pt-BR')
+}
+
 export function appendManagedCustomFields(
   description: string | null | undefined,
   fields: ManagedCustomField[],
 ): string {
   const base = String(description ?? '').trim()
+  const normalizedBase = normalizedDescription(base)
   const occupiedLabels = new Set(
     base
       .split(/\r?\n/)
@@ -113,7 +118,7 @@ export function appendManagedCustomFields(
       const value = renderManagedCustomFieldValue(field.value)
       if (!label || !value) return ''
       const normalized = normalizedLabel(label)
-      if (occupiedLabels.has(normalized)) return ''
+      if (occupiedLabels.has(normalized) || normalizedBase.includes(`${normalized}:`)) return ''
       occupiedLabels.add(normalized)
       return `${label}: ${value}`
     })
