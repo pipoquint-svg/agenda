@@ -1,6 +1,7 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken } from '../_shared/google.ts'
 import {
+  appendManagedCustomFields,
   buildManagedGoogleEvent,
   deterministicAgendaGoogleEventId,
   renderManagedNotificationTemplate,
@@ -99,6 +100,51 @@ async function applyConfiguredCalendarTemplate(
   }
 }
 
+async function appendAppointmentCustomFields(
+  client: ReturnType<typeof adminClient>,
+  appointmentId: string,
+  desired: ManagedAppointmentDesiredState,
+): Promise<ManagedAppointmentDesiredState> {
+  const { data: answers, error: answersError } = await client
+    .from('appointment_answers')
+    .select('service_field_id,field_key_snapshot,label_snapshot,value_json,created_at')
+    .eq('appointment_id', appointmentId)
+    .order('created_at', { ascending: true })
+  if (answersError) throw new Error('GOOGLE_CUSTOM_FIELDS_LOOKUP_FAILED')
+  if (!answers?.length) return desired
+
+  const fieldIds = [...new Set(
+    answers
+      .map((answer: any) => typeof answer.service_field_id === 'string' ? answer.service_field_id : '')
+      .filter(Boolean),
+  )]
+  const sortOrderById = new Map<string, number>()
+  if (fieldIds.length) {
+    const { data: fields, error: fieldsError } = await client
+      .from('service_fields')
+      .select('id,sort_order')
+      .in('id', fieldIds)
+    if (fieldsError) throw new Error('GOOGLE_CUSTOM_FIELDS_ORDER_LOOKUP_FAILED')
+    for (const field of fields ?? []) {
+      const order = Number((field as any).sort_order)
+      if (Number.isFinite(order)) sortOrderById.set(String((field as any).id), order)
+    }
+  }
+
+  const customFields = answers.map((answer: any, sequence: number) => ({
+    field_key: answer.field_key_snapshot,
+    label: answer.label_snapshot,
+    value: answer.value_json,
+    sort_order: sortOrderById.get(String(answer.service_field_id ?? '')) ?? null,
+    sequence,
+  }))
+
+  return {
+    ...desired,
+    description: appendManagedCustomFields(desired.description, customFields),
+  }
+}
+
 async function mirrorCancelled(
   client: ReturnType<typeof adminClient>,
   calendarId: string,
@@ -149,6 +195,7 @@ Deno.serve(async (req) => {
 
     if (desired.desired_action === 'PRESENT') {
       desired = await applyConfiguredCalendarTemplate(client, appointmentId, desired)
+      desired = await appendAppointmentCustomFields(client, appointmentId, desired)
     }
 
     const { data: mirrors, error: mirrorError } = await client
