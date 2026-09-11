@@ -20,6 +20,12 @@ type GoogleEvent = Record<string, any> & {
   end?: { dateTime?: string; date?: string; timeZone?: string }
   recurringEventId?: string
   originalStartTime?: { dateTime?: string; date?: string }
+  attendees?: Array<{
+    email?: string
+    responseStatus?: string
+    self?: boolean
+    organizer?: boolean
+  }>
 }
 
 type EventRow = {
@@ -211,6 +217,53 @@ async function patchGoogleEvent(
     if (status === 404) throw new Error('EXTERNAL_BLOCK_PROVIDER_NOT_FOUND')
     if (status === 403) throw new Error('EXTERNAL_BLOCK_READ_ONLY')
     throw error
+  }
+}
+
+async function reconfirmSelfAttendance(
+  calendarId: string,
+  eventId: string,
+  token: string,
+  providerEvent: GoogleEvent,
+): Promise<{ event: GoogleEvent; confirmed: boolean }> {
+  let current = providerEvent
+  let selfAttendee = current.attendees?.find((attendee) => attendee?.self === true && attendee?.organizer !== true)
+
+  if (!clean(selfAttendee?.email)) {
+    try {
+      current = await getGoogleEvent(calendarId, eventId, token)
+      selfAttendee = current.attendees?.find((attendee) => attendee?.self === true && attendee?.organizer !== true)
+    } catch {
+      return { event: providerEvent, confirmed: false }
+    }
+  }
+
+  const email = clean(selfAttendee?.email)
+  if (!email) return { event: current, confirmed: false }
+
+  const confirm = (event: GoogleEvent) => patchGoogleEvent(
+    calendarId,
+    eventId,
+    token,
+    event.etag,
+    {
+      attendeesOmitted: true,
+      attendees: [{ email, responseStatus: 'accepted' }],
+    },
+  )
+
+  try {
+    return { event: await confirm(current), confirmed: true }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ''
+    if (code !== 'EXTERNAL_BLOCK_CONFLICT') return { event: current, confirmed: false }
+
+    try {
+      const fresh = await getGoogleEvent(calendarId, eventId, token)
+      return { event: await confirm(fresh), confirmed: true }
+    } catch {
+      return { event: current, confirmed: false }
+    }
   }
 }
 
@@ -488,7 +541,7 @@ Deno.serve(async (req) => {
         scope,
       })
 
-      const updated = await patchGoogleEvent(
+      const providerUpdated = await patchGoogleEvent(
         providerCalendarId,
         targetEventId,
         token,
@@ -499,6 +552,14 @@ Deno.serve(async (req) => {
           end: { dateTime: providerEnd, timeZone: targetProviderEvent.end?.timeZone ?? providerTimezone },
         },
       )
+
+      const rsvp = await reconfirmSelfAttendance(
+        providerCalendarId,
+        targetEventId,
+        token,
+        providerUpdated,
+      )
+      const updated = rsvp.event
 
       const reconcile = await reconcileAfterProviderMutation(
         context.client,
@@ -514,6 +575,7 @@ Deno.serve(async (req) => {
         start_at: requestedStart,
         end_at: requestedEnd,
         scope,
+        self_rsvp_reconfirmed: rsvp.confirmed,
         sync_immediate: reconcile.syncImmediate,
         sync_queued: reconcile.syncQueued,
       })
@@ -522,6 +584,7 @@ Deno.serve(async (req) => {
         ok: true,
         action,
         scope,
+        self_rsvp_reconfirmed: rsvp.confirmed,
         sync_immediate: reconcile.syncImmediate,
         sync_queued: reconcile.syncQueued,
       })
