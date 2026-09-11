@@ -74,6 +74,19 @@ Deno.test('calendar template keeps authoritative custom booking fields in descri
   )
 })
 
+Deno.test('new reservation payload always carries custom fields after a configured description', () => {
+  const event = buildManagedGoogleEvent({
+    ...desired,
+    description: 'Orientações internas do ensaio.',
+    custom_fields_description: 'Instagram: @amanda\nNome do bebê: Arthur\nPets: duas cachorras',
+  }) as any
+  assert(event.description.includes('Orientações internas do ensaio.'), 'configured description must be preserved')
+  assert(event.description.includes('Respostas da reserva:'), 'custom field section marker must be present')
+  assert(event.description.includes('Instagram: @amanda'), 'first custom field must be present')
+  assert(event.description.includes('Nome do bebê: Arthur'), 'all custom fields must be present')
+  assert(event.description.includes('Pets: duas cachorras'), 'multi-field custom answers must be preserved')
+})
+
 Deno.test('stale custom-field section from a calendar template is replaced by authoritative answers', () => {
   const merged = mergeManagedDescriptionWithCustomFields(
     'Orientações internas.\n\nRespostas da reserva:\nInstagram: @antigo',
