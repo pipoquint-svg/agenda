@@ -16,6 +16,8 @@ export type ManagedAppointmentDesiredState = {
   description?: string
 }
 
+const CUSTOM_FIELDS_DESCRIPTION_MARKER = 'Respostas da reserva:'
+
 export function renderManagedNotificationTemplate(
   source: string,
   allowedVariables: Iterable<string>,
@@ -27,6 +29,29 @@ export function renderManagedNotificationTemplate(
     if (!allowed.has(key)) throw new Error(`NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:${key}`)
     return values[key] ?? ''
   })
+}
+
+/**
+ * Mantém os campos personalizados da reserva na descrição do Google Calendar,
+ * mesmo quando um template de calendário substitui o corpo padrão.
+ * Se o template já contém um bloco antigo, ele é substituído pelo bloco
+ * autoritativo vindo do desired state da reserva.
+ */
+export function mergeManagedDescriptionWithCustomFields(
+  baseDescription: string | null | undefined,
+  desiredDescription: string | null | undefined,
+): string {
+  const base = String(baseDescription ?? '').trim()
+  const desired = String(desiredDescription ?? '')
+  const desiredMarkerIndex = desired.indexOf(CUSTOM_FIELDS_DESCRIPTION_MARKER)
+  if (desiredMarkerIndex < 0) return base
+
+  const authoritativeCustomFields = desired.slice(desiredMarkerIndex).trim()
+  if (!authoritativeCustomFields) return base
+
+  const baseMarkerIndex = base.indexOf(CUSTOM_FIELDS_DESCRIPTION_MARKER)
+  const prefix = (baseMarkerIndex >= 0 ? base.slice(0, baseMarkerIndex) : base).trimEnd()
+  return prefix ? `${prefix}\n\n${authoritativeCustomFields}` : authoritativeCustomFields
 }
 
 export function deterministicAgendaGoogleEventId(appointmentId: string): string {
