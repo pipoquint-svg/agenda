@@ -15,6 +15,7 @@ type GoogleEvent = Record<string, any> & {
   id?: string
   etag?: string
   summary?: string
+  description?: string
   status?: string
   start?: { dateTime?: string; date?: string; timeZone?: string }
   end?: { dateTime?: string; date?: string; timeZone?: string }
@@ -399,6 +400,7 @@ function detailResponse(
   calendar: CalendarRow,
   connection: ConnectionRow,
   resourceCount: number,
+  providerEvent: GoogleEvent | null,
 ) {
   const roleWritable = calendar.is_active && writableRole(calendar.access_role)
   const connectionWritable = connection.status === 'ACTIVE' && Boolean(connection.refresh_token_ciphertext)
@@ -406,6 +408,8 @@ function detailResponse(
   return {
     id: event.id,
     summary: event.summary,
+    description: typeof providerEvent?.description === 'string' ? providerEvent.description : null,
+    description_authoritative: providerEvent !== null,
     start_at: event.start_at,
     end_at: event.end_at,
     start_date: event.start_date,
@@ -490,7 +494,27 @@ Deno.serve(async (req) => {
     const context = await loadContext(eventId)
 
     if (req.method === 'GET') {
-      return json(detailResponse(context.event, context.calendar, context.connection, context.allocations.length))
+      let providerEvent: GoogleEvent | null = null
+      if (context.connection.status === 'ACTIVE' && context.connection.refresh_token_ciphertext) {
+        try {
+          const token = await accessToken(context.connection)
+          providerEvent = await getGoogleEvent(
+            context.calendar.google_calendar_id,
+            context.event.google_event_id,
+            token,
+          )
+        } catch (error) {
+          const code = error instanceof Error ? error.message : ''
+          if (code === 'EXTERNAL_BLOCK_PROVIDER_NOT_FOUND') throw error
+        }
+      }
+      return json(detailResponse(
+        context.event,
+        context.calendar,
+        context.connection,
+        context.allocations.length,
+        providerEvent,
+      ))
     }
 
     if (!context.calendar.is_active || !writableRole(context.calendar.access_role)) {
@@ -518,6 +542,15 @@ Deno.serve(async (req) => {
       const requestedEndMs = Date.parse(requestedEnd)
       if (requestedEndMs <= requestedStartMs) throw new Error('EXTERNAL_BLOCK_RANGE_INVALID')
 
+      const descriptionProvided = typeof body.description === 'string'
+      const description = descriptionProvided
+        ? body.description as string
+        : typeof targetProviderEvent.description === 'string'
+          ? targetProviderEvent.description
+          : undefined
+      const descriptionChanged = descriptionProvided
+        && (body.description as string) !== (targetProviderEvent.description ?? '')
+
       let providerStart = requestedStart
       let providerEnd = requestedEnd
       let providerTimezone = context.calendar.timezone ?? 'America/Sao_Paulo'
@@ -539,6 +572,7 @@ Deno.serve(async (req) => {
         start_at: requestedStart,
         end_at: requestedEnd,
         scope,
+        description_changed: descriptionChanged,
       })
 
       const providerUpdated = await patchGoogleEvent(
@@ -548,6 +582,7 @@ Deno.serve(async (req) => {
         targetProviderEvent.etag,
         {
           summary,
+          ...(description !== undefined ? { description } : {}),
           start: { dateTime: providerStart, timeZone: providerTimezone },
           end: { dateTime: providerEnd, timeZone: targetProviderEvent.end?.timeZone ?? providerTimezone },
         },
@@ -575,6 +610,7 @@ Deno.serve(async (req) => {
         start_at: requestedStart,
         end_at: requestedEnd,
         scope,
+        description_changed: descriptionChanged,
         self_rsvp_reconfirmed: rsvp.confirmed,
         sync_immediate: reconcile.syncImmediate,
         sync_queued: reconcile.syncQueued,
@@ -584,6 +620,7 @@ Deno.serve(async (req) => {
         ok: true,
         action,
         scope,
+        description_changed: descriptionChanged,
         self_rsvp_reconfirmed: rsvp.confirmed,
         sync_immediate: reconcile.syncImmediate,
         sync_queued: reconcile.syncQueued,
