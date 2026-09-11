@@ -13,6 +13,12 @@ const financePendingKinds = new Set([
   'CANCELLATION_REFUND_PENDING',
 ])
 
+const homeMovementActions = [
+  'PAYMENT_HOLD_EXPIRED',
+  'APPOINTMENT_CANCELLED',
+  'APPOINTMENT_RESCHEDULED',
+]
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -39,6 +45,11 @@ function redactFinancialPendingItems(data: unknown): unknown {
     })
   }
   return output
+}
+
+function objectValue(value: unknown, key: string): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return (value as Record<string, unknown>)[key] ?? null
 }
 
 Deno.serve(async (req) => {
@@ -69,17 +80,53 @@ Deno.serve(async (req) => {
       ? { ...(data as Record<string, unknown>) }
       : { pending_items: [] as unknown[] }
 
-    const { data: recentRows, error: recentError } = await client
-      .from('appointments')
-      .select('id,public_code,status,start_at,end_at,created_at,origin,service_id,primary_customer_id,service_name_snapshot')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(5)
-    if (recentError) throw new Error('ADMIN_RECENT_APPOINTMENTS_QUERY_FAILED')
+    const [recentResult, movementsResult] = await Promise.all([
+      client
+        .from('appointments')
+        .select('id,public_code,status,start_at,end_at,created_at,origin,service_id,primary_customer_id,service_name_snapshot')
+        .is('deleted_at', null)
+        .eq('status', 'CONFIRMED')
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(20),
+      client
+        .from('audit_logs')
+        .select('id,entity_id,action,before_json,after_json,created_at')
+        .eq('entity_type', 'APPOINTMENT')
+        .in('action', homeMovementActions)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(30),
+    ])
+    if (recentResult.error) throw new Error('ADMIN_RECENT_APPOINTMENTS_QUERY_FAILED')
+    if (movementsResult.error) throw new Error('ADMIN_RECENT_MOVEMENTS_QUERY_FAILED')
 
-    const customerIds = [...new Set((recentRows ?? []).map((row) => row.primary_customer_id).filter(Boolean))] as string[]
-    const serviceIds = [...new Set((recentRows ?? []).map((row) => row.service_id).filter(Boolean))] as string[]
+    const recentRows = recentResult.data ?? []
+    const movementRows = movementsResult.data ?? []
+    const movementAppointmentIds = movementRows.map((row) => row.entity_id).filter(Boolean) as string[]
+
+    let movementAppointments: Array<{
+      id: string
+      public_code: string | null
+      status: string
+      start_at: string
+      end_at: string
+      service_id: string | null
+      primary_customer_id: string | null
+      service_name_snapshot: string | null
+    }> = []
+    if (movementAppointmentIds.length > 0) {
+      const { data: rows, error: movementAppointmentsError } = await client
+        .from('appointments')
+        .select('id,public_code,status,start_at,end_at,service_id,primary_customer_id,service_name_snapshot')
+        .in('id', [...new Set(movementAppointmentIds)])
+      if (movementAppointmentsError) throw new Error('ADMIN_RECENT_MOVEMENT_APPOINTMENTS_QUERY_FAILED')
+      movementAppointments = rows ?? []
+    }
+
+    const allAppointmentRows = [...recentRows, ...movementAppointments]
+    const customerIds = [...new Set(allAppointmentRows.map((row) => row.primary_customer_id).filter(Boolean))] as string[]
+    const serviceIds = [...new Set(allAppointmentRows.map((row) => row.service_id).filter(Boolean))] as string[]
 
     let recentCustomers: Array<{ id: string; name: string | null }> = []
     if (customerIds.length > 0) {
@@ -103,21 +150,51 @@ Deno.serve(async (req) => {
 
     const customerNames = new Map(recentCustomers.map((row) => [row.id, row.name]))
     const servicesById = new Map(recentServices.map((row) => [row.id, row]))
-    output.recent_appointments = (recentRows ?? []).map((row) => {
-      const service = row.service_id ? servicesById.get(row.service_id) : null
-      return {
-        id: row.id,
-        public_code: row.public_code,
-        status: row.status,
-        start_at: row.start_at,
-        end_at: row.end_at,
-        created_at: row.created_at,
-        origin: row.origin,
-        customer_name: row.primary_customer_id ? customerNames.get(row.primary_customer_id) ?? null : null,
-        service_name: row.service_name_snapshot || service?.name || null,
-        operation_scope: service?.operation_scope ?? null,
-      }
-    })
+    const movementAppointmentsById = new Map(movementAppointments.map((row) => [row.id, row]))
+
+    output.recent_appointments = recentRows
+      .map((row) => {
+        const service = row.service_id ? servicesById.get(row.service_id) : null
+        return {
+          id: row.id,
+          public_code: row.public_code,
+          status: row.status,
+          start_at: row.start_at,
+          end_at: row.end_at,
+          created_at: row.created_at,
+          origin: row.origin,
+          customer_name: row.primary_customer_id ? customerNames.get(row.primary_customer_id) ?? null : null,
+          service_name: row.service_name_snapshot || service?.name || null,
+          operation_scope: service?.operation_scope ?? null,
+        }
+      })
+      .filter((row) => !operationScope || row.operation_scope === operationScope)
+      .slice(0, 5)
+
+    output.recent_movements = movementRows
+      .map((row) => {
+        const appointment = movementAppointmentsById.get(String(row.entity_id))
+        if (!appointment) return null
+        const service = appointment.service_id ? servicesById.get(appointment.service_id) : null
+        const movement = {
+          id: row.id,
+          appointment_id: appointment.id,
+          public_code: appointment.public_code,
+          action: row.action,
+          occurred_at: row.created_at,
+          customer_name: appointment.primary_customer_id ? customerNames.get(appointment.primary_customer_id) ?? null : null,
+          service_name: appointment.service_name_snapshot || service?.name || null,
+          operation_scope: service?.operation_scope ?? null,
+          old_start_at: row.action === 'APPOINTMENT_RESCHEDULED' ? objectValue(row.before_json, 'start_at') : null,
+          new_start_at: row.action === 'APPOINTMENT_RESCHEDULED' ? objectValue(row.after_json, 'start_at') : null,
+          current_start_at: appointment.start_at,
+          current_end_at: appointment.end_at,
+        }
+        return movement
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .filter((row) => !operationScope || row.operation_scope === operationScope)
+      .slice(0, 10)
 
     if (canSeeFinance) {
       let openQuery = client.from('appointment_open_balances').select('*').order('start_at', { ascending: true }).limit(200)
