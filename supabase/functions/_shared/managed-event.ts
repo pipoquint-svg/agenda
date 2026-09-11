@@ -14,6 +14,7 @@ export type ManagedAppointmentDesiredState = {
   google_connection_id?: string
   summary?: string
   description?: string
+  custom_fields_description?: string
 }
 
 const CUSTOM_FIELDS_DESCRIPTION_MARKER = 'Respostas da reserva:'
@@ -65,9 +66,19 @@ export function buildManagedGoogleEvent(desired: ManagedAppointmentDesiredState)
     throw new Error('GOOGLE_APPOINTMENT_TIME_MISSING')
   }
 
+  const baseDescription = desired.description
+    ?? `BlackSheep Agenda • Reserva ${desired.public_code ?? ''}`.trim()
+  const customFields = String(desired.custom_fields_description ?? '').trim()
+  const description = customFields
+    ? mergeManagedDescriptionWithCustomFields(
+      baseDescription,
+      `${CUSTOM_FIELDS_DESCRIPTION_MARKER}\n${customFields}`,
+    )
+    : baseDescription
+
   return {
     summary: desired.summary ?? 'Reserva BlackSheep Agenda',
-    description: desired.description ?? `BlackSheep Agenda • Reserva ${desired.public_code ?? ''}`.trim(),
+    description,
     start: {
       dateTime: desired.start_at,
       timeZone: desired.calendar_timezone,
