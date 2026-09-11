@@ -89,6 +89,20 @@ Deno.test('custom reservation fields omit empty, technical and duplicate labels'
   assert(description.includes('Preferências: Luz suave\nSem flash'), 'meaningful multiline text must be preserved')
 })
 
+Deno.test('legacy inline reservation answers are not duplicated on resync', () => {
+  const legacy = 'BlackSheep Agenda • Reserva 3D6859C3EE4D Cliente: Gisele Respostas da reserva: Qual serviço será realizado?: Corporativo Instagram: giselelohn Qual o set de luz utilizado?: Led'
+  const description = appendManagedCustomFields(legacy, [
+    { field_key: 'service', label: 'Qual serviço será realizado?', value: 'Corporativo', sort_order: 1 },
+    { field_key: 'instagram', label: 'Instagram', value: '@duplicado', sort_order: 2 },
+    { field_key: 'light_set', label: 'Qual o set de luz utilizado?', value: 'Led', sort_order: 3 },
+    { field_key: 'new_field', label: 'Novo campo', value: 'Nova resposta', sort_order: 4 },
+  ])
+  assert(!description.includes('@duplicado'), 'legacy inline labels already present in the description must not be appended again')
+  assert(description.match(/Qual serviço será realizado\?:/g)?.length === 1, 'legacy service answer must remain single')
+  assert(description.match(/Qual o set de luz utilizado\?:/g)?.length === 1, 'legacy light answer must remain single')
+  assert(description.endsWith('Novo campo: Nova resposta'), 'new fields must still be appended to legacy descriptions')
+})
+
 Deno.test('custom reservation value renderer keeps common future field types human-readable', () => {
   assert(renderManagedCustomFieldValue(true) === 'Sim', 'boolean true must be human-readable')
   assert(renderManagedCustomFieldValue(false) === 'Não', 'boolean false must be human-readable')
