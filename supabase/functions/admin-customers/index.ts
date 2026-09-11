@@ -75,6 +75,108 @@ async function listPage(client: ReturnType<typeof adminClient>, search: string |
   return (data ?? { customers: [], total: 0, limit, offset, has_more: false }) as Record<string, unknown>
 }
 
+async function customerWorkspace(client: ReturnType<typeof adminClient>, customerId: string, canSeeFinance: boolean, canSeePackages: boolean) {
+  const { data: participantRows, error: participantError } = await client
+    .from('appointment_participants')
+    .select('appointment_id')
+    .eq('customer_id', customerId)
+  if (participantError) throw new Error('CUSTOMER_APPOINTMENT_PARTICIPANTS_QUERY_FAILED')
+
+  const participantIds = [...new Set((participantRows ?? []).map((row) => row.appointment_id).filter(Boolean))] as string[]
+  const appointmentSelect = 'id,public_code,status,financial_status,start_at,end_at,created_at,updated_at,service_name_snapshot,primary_customer_id,commercial_value,confirmed_at,completed_at,cancelled_at'
+  const primaryPromise = client
+    .from('appointments')
+    .select(appointmentSelect)
+    .eq('primary_customer_id', customerId)
+    .is('deleted_at', null)
+    .order('start_at', { ascending: false })
+    .limit(100)
+
+  const participantPromise = participantIds.length > 0
+    ? client.from('appointments').select(appointmentSelect).in('id', participantIds).is('deleted_at', null).order('start_at', { ascending: false }).limit(100)
+    : Promise.resolve({ data: [], error: null })
+
+  const communicationPromise = client
+    .from('notification_delivery_logs')
+    .select('id,event_key,channel,audience,appointment_id,status,attempt_count,last_error_code,created_at,updated_at,recipient_masked')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  const packagePromise = canSeePackages
+    ? client
+      .from('hour_package_balances')
+      .select('hour_package_id,name,status,total_seconds,available_seconds,purchased_value,valid_from,valid_until')
+      .eq('customer_id', customerId)
+      .order('valid_until', { ascending: false, nullsFirst: false })
+      .limit(50)
+    : Promise.resolve({ data: [], error: null })
+
+  const [primaryResult, participantResult, communicationsResult, packagesResult] = await Promise.all([
+    primaryPromise,
+    participantPromise,
+    communicationPromise,
+    packagePromise,
+  ])
+
+  if (primaryResult.error || participantResult.error) throw new Error('CUSTOMER_APPOINTMENTS_QUERY_FAILED')
+  if (communicationsResult.error) throw new Error('CUSTOMER_COMMUNICATIONS_QUERY_FAILED')
+  if (packagesResult.error) throw new Error('CUSTOMER_PACKAGES_QUERY_FAILED')
+
+  const appointmentMap = new Map<string, Record<string, unknown>>()
+  for (const row of [...(primaryResult.data ?? []), ...(participantResult.data ?? [])] as Array<Record<string, unknown>>) {
+    appointmentMap.set(String(row.id), row)
+  }
+  const appointments = [...appointmentMap.values()]
+    .sort((a, b) => String(b.start_at ?? '').localeCompare(String(a.start_at ?? '')))
+    .slice(0, 100)
+  const appointmentIds = appointments.map((row) => String(row.id)).filter(Boolean)
+
+  let finance: Record<string, unknown> = { visible: false, balance_movements: [], transactions: [] }
+  if (canSeeFinance) {
+    const balancePromise = client
+      .from('customer_balance_movements')
+      .select('id,movement_type,direction,amount,appointment_id,choice_origin,created_at,expires_at')
+      .eq('customer_id', customerId)
+      .eq('is_test', false)
+      .order('created_at', { ascending: false })
+      .limit(100)
+    const transactionsPromise = appointmentIds.length > 0
+      ? client
+        .from('payment_transactions')
+        .select('id,appointment_id,transaction_type,method,provider,status,contract_amount_settled,payment_discount_amount,cash_amount,paid_at,created_at,payment_purpose')
+        .in('appointment_id', appointmentIds)
+        .eq('is_test', false)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      : Promise.resolve({ data: [], error: null })
+    const [balanceResult, transactionsResult] = await Promise.all([balancePromise, transactionsPromise])
+    if (balanceResult.error || transactionsResult.error) throw new Error('CUSTOMER_FINANCE_QUERY_FAILED')
+    finance = {
+      visible: true,
+      balance_movements: balanceResult.data ?? [],
+      transactions: transactionsResult.data ?? [],
+    }
+  }
+
+  const historyEntityIds = [customerId, ...appointmentIds].slice(0, 101)
+  const { data: history, error: historyError } = await client
+    .from('audit_logs')
+    .select('id,entity_type,entity_id,action,origin,created_at')
+    .in('entity_id', historyEntityIds)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (historyError) throw new Error('CUSTOMER_HISTORY_QUERY_FAILED')
+
+  return {
+    appointments,
+    finance,
+    packages: packagesResult.data ?? [],
+    communications: communicationsResult.data ?? [],
+    history: history ?? [],
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -89,14 +191,18 @@ Deno.serve(async (req) => {
       const customerId = clean(url.searchParams.get('customer_id'))
       if (customerId) {
         const id = uuid(customerId)
+        const canSeeFinance = await hasAdminPermission(admin.adminId, 'FINANCE_VIEW')
+        const canSeePackages = await hasAdminPermission(admin.adminId, 'PACKAGES_VIEW')
         const [
           { data: profile, error },
           { data: services, error: servicesError },
           { data: birthDateReconciliation, error: reconciliationError },
+          workspace,
         ] = await Promise.all([
           client.rpc('service_admin_get_customer_commercial_profile', { p_customer_id: id }),
           client.rpc('service_admin_list_customer_service_options'),
           client.rpc('service_admin_list_customer_birth_date_candidates', { p_customer_id: id, p_admin_id: admin.adminId }),
+          customerWorkspace(client, id, canSeeFinance, canSeePackages),
         ])
         if (error) throw new Error(error.message)
         if (servicesError) throw new Error('CUSTOMER_SERVICES_QUERY_FAILED')
@@ -116,6 +222,7 @@ Deno.serve(async (req) => {
           profile,
           services: Array.isArray(services) ? services : [],
           birth_date_reconciliation: reconciliationError ? reconciliationFallback : (birthDateReconciliation ?? reconciliationFallback),
+          workspace,
         })
       }
 
