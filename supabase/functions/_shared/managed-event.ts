@@ -16,6 +16,14 @@ export type ManagedAppointmentDesiredState = {
   description?: string
 }
 
+export type ManagedCustomField = {
+  field_key?: string | null
+  label?: string | null
+  value: unknown
+  sort_order?: number | null
+  sequence?: number
+}
+
 export function renderManagedNotificationTemplate(
   source: string,
   allowedVariables: Iterable<string>,
@@ -27,6 +35,92 @@ export function renderManagedNotificationTemplate(
     if (!allowed.has(key)) throw new Error(`NOTIFICATION_TEMPLATE_VARIABLE_NOT_ALLOWED:${key}`)
     return values[key] ?? ''
   })
+}
+
+function publicCustomFieldKey(value: string | null | undefined): boolean {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!key) return true
+  return !(
+    key.startsWith('_')
+    || key.startsWith('internal_')
+    || key.startsWith('internal.')
+    || key.startsWith('system_')
+    || key.startsWith('system.')
+    || key.startsWith('bs_')
+    || key.startsWith('bs.')
+  )
+}
+
+export function renderManagedCustomFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'boolean') return value ? 'Sim' : 'Não'
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => renderManagedCustomFieldValue(item))
+      .filter(Boolean)
+      .join(', ')
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if ('label' in record) {
+      const label = renderManagedCustomFieldValue(record.label)
+      if (label) return label
+    }
+    if ('value' in record) {
+      const nestedValue = renderManagedCustomFieldValue(record.value)
+      if (nestedValue) return nestedValue
+    }
+    return Object.entries(record)
+      .map(([key, nested]) => {
+        const rendered = renderManagedCustomFieldValue(nested)
+        return rendered ? `${key}: ${rendered}` : ''
+      })
+      .filter(Boolean)
+      .join(', ')
+  }
+  return ''
+}
+
+function normalizedLabel(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR')
+}
+
+export function appendManagedCustomFields(
+  description: string | null | undefined,
+  fields: ManagedCustomField[],
+): string {
+  const base = String(description ?? '').trim()
+  const occupiedLabels = new Set(
+    base
+      .split(/\r?\n/)
+      .map((line) => line.match(/^\s*([^:]{1,200})\s*:/)?.[1] ?? '')
+      .map(normalizedLabel)
+      .filter(Boolean),
+  )
+
+  const lines = [...fields]
+    .sort((left, right) => {
+      const leftOrder = Number.isFinite(left.sort_order) ? Number(left.sort_order) : Number.MAX_SAFE_INTEGER
+      const rightOrder = Number.isFinite(right.sort_order) ? Number(right.sort_order) : Number.MAX_SAFE_INTEGER
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder
+      return Number(left.sequence ?? 0) - Number(right.sequence ?? 0)
+    })
+    .map((field) => {
+      if (!publicCustomFieldKey(field.field_key)) return ''
+      const label = String(field.label ?? '').trim()
+      const value = renderManagedCustomFieldValue(field.value)
+      if (!label || !value) return ''
+      const normalized = normalizedLabel(label)
+      if (occupiedLabels.has(normalized)) return ''
+      occupiedLabels.add(normalized)
+      return `${label}: ${value}`
+    })
+    .filter(Boolean)
+
+  if (!lines.length) return base
+  return [base, lines.join('\n')].filter(Boolean).join('\n\n')
 }
 
 export function deterministicAgendaGoogleEventId(appointmentId: string): string {
