@@ -131,3 +131,10 @@ begin
   );
 end;
 $function$;
+
+-- Server-only administrative read model. The Edge Function authenticates the
+-- admin and calls the RPC with the service role; app roles never call it directly.
+revoke all on function public.service_admin_finance_launches_range(timestamptz, timestamptz, text, uuid) from public;
+revoke all on function public.service_admin_finance_launches_range(timestamptz, timestamptz, text, uuid) from anon;
+revoke all on function public.service_admin_finance_launches_range(timestamptz, timestamptz, text, uuid) from authenticated;
+grant execute on function public.service_admin_finance_launches_range(timestamptz, timestamptz, text, uuid) to service_role;
