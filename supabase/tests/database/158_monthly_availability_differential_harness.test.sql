@@ -26,7 +26,29 @@ begin
   );
 end $$;
 
-select plan(8);
+create function pg_temp.monthly_availability_capture_v2(
+  p_page_slug text, p_service_id uuid, p_service_employee_id uuid,
+  p_contracted_minutes integer, p_extras jsonb, p_people_count integer, p_month date
+) returns jsonb language plpgsql as $$
+declare v_started timestamptz := clock_timestamp(); v_dates jsonb;
+begin
+  select coalesce(jsonb_agg(to_char(local_date, 'YYYY-MM-DD') order by local_date), '[]'::jsonb)
+    into v_dates
+  from agenda_internal.list_available_dates_month_v2(
+    p_page_slug, p_service_id, p_service_employee_id, p_contracted_minutes,
+    p_extras, p_people_count, p_month
+  );
+  return jsonb_build_object(
+    'engine', 'V2_MONTH',
+    'input', jsonb_build_object('booking_page_slug',p_page_slug,'service_id',p_service_id,
+      'service_employee_id',p_service_employee_id,'contracted_minutes',p_contracted_minutes,
+      'extras',p_extras,'people_count',p_people_count,'month',p_month),
+    'dates',v_dates,'date_count',jsonb_array_length(v_dates),
+    'elapsed_ms',round(extract(epoch from clock_timestamp()-v_started)*1000,3)
+  );
+end $$;
+
+select plan(15);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -61,13 +83,28 @@ insert into monthly_legacy values
  ('dec_31',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-12-01')),
  ('extras',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
 
+create temp table monthly_v2(case_key text primary key, result jsonb not null);
+insert into monthly_v2 values
+ ('feb_28',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')),
+ ('feb_29',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2036-02-01')),
+ ('apr_30',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-04-01')),
+ ('dec_31',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-12-01')),
+ ('extras',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
+
 select ok((select result ?& array['input','dates','date_count','elapsed_ms'] from monthly_legacy where case_key='feb_28'),'legacy monthly capture serializes canonical payload');
 select is((select result->'dates' from monthly_legacy where case_key='feb_28'),(pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')->'dates'),'monthly dates are deterministic and ordered');
+select is((select result->'dates' from monthly_legacy where case_key='feb_28'),(select result->'dates' from monthly_v2 where case_key='feb_28'),'V1/V2 parity: 28-day February date set');
 select is((select result - 'elapsed_ms' from monthly_legacy where case_key='feb_29'),(pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2036-02-01')-'elapsed_ms'),'leap February excludes volatile timing');
+select is((select result->'dates' from monthly_legacy where case_key='feb_29'),(select result->'dates' from monthly_v2 where case_key='feb_29'),'V1/V2 parity: leap February date set');
 select ok((select (result->>'date_count')::integer >= 0 from monthly_legacy where case_key='apr_30'),'30-day month is captured');
+select is((select result->'dates' from monthly_legacy where case_key='apr_30'),(select result->'dates' from monthly_v2 where case_key='apr_30'),'V1/V2 parity: 30-day month date set');
 select ok((select (result->>'date_count')::integer >= 0 from monthly_legacy where case_key='dec_31'),'31-day and year-boundary month is captured');
+select is((select result->'dates' from monthly_legacy where case_key='dec_31'),(select result->'dates' from monthly_v2 where case_key='dec_31'),'V1/V2 parity: 31-day year-boundary date set');
 select ok((select result->'input'->'extras' <> '[]'::jsonb from monthly_legacy where case_key='extras'),'PREPEND APPEND merged-resource selection is serialized');
+select is((select result->'dates' from monthly_legacy where case_key='extras'),(select result->'dates' from monthly_v2 where case_key='extras'),'V1/V2 parity: PREPEND APPEND merged-resource date set');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from monthly_legacy where case_key='feb_28'),'monthly elapsed time is recorded outside comparison');
+select ok(to_regprocedure('agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)') is not null,'private V2 month engine exists');
+select ok(not has_function_privilege('anon','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE') and not has_function_privilege('authenticated','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE'),'V2 engine is not callable by app roles');
 select ok(position('list_available_slots_for_duration' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) > 0 and position('list_available_dates_month_v2' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) = 0,'public monthly bridge remains on V1 before V2 exists');
 
 select * from finish();

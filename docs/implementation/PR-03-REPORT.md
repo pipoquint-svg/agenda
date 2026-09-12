@@ -32,3 +32,29 @@ The one composite deterministic fixture produced five legacy-month captures: fou
 OPEN/BLOCK exceptions, occupancy (appointment/active/expired hold), minimum notice, maximum horizon, Google conflict/staleness/divergence, and an independent FIXED monthly case remain **NOT YET COVERED** by the 03-A fixture. They are explicit requirements for the V1 × V2 differential matrix in Gate 03-B; they are not claimed as covered here.
 
 No migration was created. No production SQL or public contract changed. No public cutover occurred; the public endpoint remains on V1.
+
+## V2 Architecture (03-B)
+
+`agenda_internal.list_available_dates_month_v2(...)` is an additive, private PL/pgSQL entry point with one set-based `RETURN QUERY` pipeline for the complete local month. It has a fixed empty `search_path`; `PUBLIC`, `anon`, and `authenticated` receive no EXECUTE grant. The existing `agenda_public_bridge.list_available_dates_month_impl` is deliberately untouched and continues to call V1.
+
+Pipeline phases are: month bounds; weekly and employee-OPEN candidate generation; candidate schedule profile; notice/horizon bounds; employee containment and BLOCK checks; per-candidate resource ranges; resource availability/allocation/divergence checks; employee-person Google/divergence/allocation checks; and final distinct local dates.
+
+### Request constants
+
+The V2 resolves the canonical duration blocks and contracted minutes, public selection validation, active service, employee linkage, operation timezone, service buffers, slot interval, booking bounds, employee person resource, and that person's Google readiness once per invocation. `operation_settings.id = 1` is explicitly retained as **LEGACY SINGLE-TENANT COMPATIBILITY**.
+
+### Candidate-specific semantics
+
+Anchor/core/appointment ranges, `resolve_extra_schedule_profile`, PREPEND/APPEND, resource occupied ranges, weekly/OPEN/BLOCK containment, allocation overlap, schedule-divergence overlap, and employee-person interval conflicts remain candidate-specific. Resource ranges use the PR-02 seam `agenda_internal.calculate_booking_resource_ranges_resolved_duration(...)`.
+
+### Pricing avoidance
+
+V1's monthly result is an existence-of-date response. The V2 does not call `calculate_booking_quote_for_duration(...)`: the current duration engine obtains its scheduling pre/post values from `resolve_extra_schedule_profile(...)`, while commercial value is not used by the monthly predicate. Duration and public selection validation remain the existing canonical public functions.
+
+### Google semantics
+
+Employee-person readiness is request-constant because it depends only on the validated employee resource. Required booking-resource readiness is evaluated once per distinct materialized resource and applied only to candidates using that resource. Divergences and allocations remain range predicates. No fail-closed condition was relaxed.
+
+## Gate 03-B
+
+Implementation and V1 × V2 fixtures are pending Database Core validation. No cutover is included.
