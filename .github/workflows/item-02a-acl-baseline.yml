@@ -18,6 +18,8 @@ on:
       - 'supabase/migrations/20260908152100_waitlist_private_round_acl_hardening.sql'
       - 'supabase/migrations/20260909093000_reconcile_recovered_production_function_acls.sql'
       - 'supabase/migrations/20260910213000_admin_customers_operation_scope.sql'
+      - 'supabase/migrations/20260912134500_monthly_availability_fast_path.sql'
+      - 'supabase/migrations/20260912134600_monthly_availability_fast_path_acl.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -113,7 +115,9 @@ jobs:
           set -euo pipefail
           for migration in \
             supabase/migrations/20260909100000_public_available_dates_month.sql \
-            supabase/migrations/20260910213000_admin_customers_operation_scope.sql
+            supabase/migrations/20260910213000_admin_customers_operation_scope.sql \
+            supabase/migrations/20260912134500_monthly_availability_fast_path.sql \
+            supabase/migrations/20260912134600_monthly_availability_fast_path_acl.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -180,7 +184,9 @@ jobs:
           set -euo pipefail
           for migration in \
             supabase/migrations/20260909100000_public_available_dates_month.sql \
-            supabase/migrations/20260910213000_admin_customers_operation_scope.sql
+            supabase/migrations/20260910213000_admin_customers_operation_scope.sql \
+            supabase/migrations/20260912134500_monthly_availability_fast_path.sql \
+            supabase/migrations/20260912134600_monthly_availability_fast_path_acl.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then

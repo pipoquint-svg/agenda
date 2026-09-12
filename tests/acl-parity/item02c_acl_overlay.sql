@@ -10,6 +10,8 @@
 -- to service_role: a SECURITY DEFINER read model and a SECURITY INVOKER boundary.
 -- Finance launches adds one server-only SECURITY DEFINER read model restricted to
 -- service_role; anon/authenticated cannot execute it directly.
+-- Monthly availability keeps one callable bridge implementation plus one private
+-- SECURITY INVOKER helper used only from the SECURITY DEFINER bridge implementation.
 do $$
 declare
   v_identity text;
@@ -180,7 +182,7 @@ begin
      or has_schema_privilege('authenticated', 'agenda_internal', 'USAGE') then
     raise exception 'ITEM02C_AGENDA_INTERNAL_APP_ROLE_EXPOSURE';
   end if;
-  if (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='agenda_public_bridge') <> 1 then
+  if (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='agenda_public_bridge') <> 2 then
     raise exception 'ITEM02C_MONTHLY_BRIDGE_FUNCTION_COUNT_DRIFT';
   end if;
 
@@ -216,6 +218,40 @@ begin
   ) then
     raise exception 'ITEM02C_MONTHLY_AVAILABILITY_IMPL_IDENTITY_DRIFT:%', v_identity;
   end if;
+
+  v_identity := 'agenda_public_bridge.has_available_slot_for_duration_impl(uuid,uuid,integer,jsonb,integer,date,timestamp with time zone)';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then
+    raise exception 'ITEM02C_MONTHLY_FAST_PATH_MISSING:%', v_identity;
+  end if;
+  if has_function_privilege('anon', v_oid, 'EXECUTE')
+     or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     or has_function_privilege('service_role', v_oid, 'EXECUTE')
+     or exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       where p.oid = v_oid
+         and a.grantee = 0
+         and a.privilege_type = 'EXECUTE'
+     ) then
+    raise exception 'ITEM02C_MONTHLY_FAST_PATH_EXPOSURE:%', v_identity;
+  end if;
+  if not exists (
+    select 1 from pg_proc p
+    where p.oid = v_oid
+      and not p.prosecdef
+      and p.provolatile = 's'
+      and pg_get_userbyid(p.proowner) = 'postgres'
+      and exists (
+        select 1
+        from unnest(coalesce(p.proconfig, '{}'::text[])) config(value)
+        where config.value = 'search_path=public, extensions'
+      )
+  ) then
+    raise exception 'ITEM02C_MONTHLY_FAST_PATH_IDENTITY_DRIFT:%', v_identity;
+  end if;
+
   if exists (
     select 1
     from pg_default_acl d
