@@ -185,13 +185,16 @@ select ok(
   ), false)
   and
   coalesce((
-    select md5(pg_get_functiondef(p.oid)) = '018933b63df4fcdecfab01c73764964d'
+    select position('agenda_internal.calculate_booking_resource_ranges_resolved_duration' in pg_get_functiondef(p.oid)) > 0
+       and position('v_contracted_minutes' in pg_get_functiondef(p.oid)) > 0
+       and position('v_service.buffer_before_minutes' in pg_get_functiondef(p.oid)) > 0
+       and position('v_service.buffer_after_minutes' in pg_get_functiondef(p.oid)) > 0
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
       and p.proname = 'list_available_slots_for_duration_without_google_sync_gate'
   ), false),
-  'internal availability functions remain byte-for-byte definition-equivalent to the approved baseline'
+  'internal availability functions preserve the approved no-Google engine and use the resolved range helper with stable duration and buffers'
 );
 
 select * from finish();

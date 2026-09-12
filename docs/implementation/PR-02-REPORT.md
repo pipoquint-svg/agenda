@@ -35,6 +35,8 @@ The parity fixture compares complete normalized `(resource_id, occupied_range)` 
 
 The targeted `pg_get_functiondef + replace` migration was chosen to keep the existing mature candidate loop intact. It replaces exactly the known legacy range call and fails explicitly if that text is absent. Canonical rebuild validates deterministic application against current history. Logical rollback is a forward-only migration restoring the prior call; applied history is never edited.
 
+The existing static guards were updated from an obsolete literal-call/hash baseline to the intentional structural contract: the unchanged no-Google internal engine remains byte-for-byte pinned, while the duration engine must call the resolved helper with its already-resolved duration and service buffers. This does not relax behavioral parity; the parity harness compares the resulting slots and resource ranges.
+
 ## Performance statement
 
 Structural reduction is confirmed: the resource-range path no longer rereads `services` or calls `resolve_service_contracted_minutes` per candidate. End-to-end latency improvement is not yet measured.

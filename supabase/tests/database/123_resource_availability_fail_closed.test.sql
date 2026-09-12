@@ -18,10 +18,10 @@ select ok(
 select ok(
   exists (
     select 1 from _resource_availability_function_def
-    where def like '%calculate_booking_resource_ranges_for_duration%'
+    where def like '%agenda_internal.calculate_booking_resource_ranges_resolved_duration%'
       and def like '%resource_availability_rules%'
   ),
-  'required booking resource ranges are evaluated against explicit resource availability rules'
+  'required booking resource ranges use the resolved helper and are evaluated against explicit resource availability rules'
 );
 
 select ok(
