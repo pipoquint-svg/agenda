@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(31);
+select plan(39);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -138,6 +138,66 @@ insert into monthly_v2 values
  ('external_person',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')),
  ('extras',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
 
+-- Bound fixtures use the engine's deterministic test clock where the legacy
+-- duration path does, then restore it before exercising public notice, which
+-- deliberately remains relative to PostgreSQL now().
+select set_config('agenda.test_now', '2035-01-01 08:00 America/Sao_Paulo', true);
+update public.services
+set minimum_booking_notice_minutes = 181,
+    maximum_booking_horizon_days = 5000,
+    public_minimum_booking_notice_hours = 0
+where id = '15800000-0000-0000-0000-000000000010';
+insert into monthly_legacy values
+ ('minimum_notice',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01'));
+insert into monthly_v2 values
+ ('minimum_notice',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01'));
+
+update public.services
+set minimum_booking_notice_minutes = 0,
+    maximum_booking_horizon_days = 1
+where id = '15800000-0000-0000-0000-000000000010';
+insert into monthly_legacy values
+ ('maximum_horizon',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01'));
+insert into monthly_v2 values
+ ('maximum_horizon',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01'));
+
+select set_config('agenda.test_now', '', true);
+update public.services
+set maximum_booking_horizon_days = 5000,
+    public_minimum_booking_notice_hours = 4
+where id = '15800000-0000-0000-0000-000000000010';
+delete from public.availability_rules
+where service_employee_id = '15800000-0000-0000-0000-000000000020';
+delete from public.resource_availability_rules
+where resource_id in ('15800000-0000-0000-0000-000000000002','15800000-0000-0000-0000-000000000003');
+create temp table public_notice_clock as
+select date_trunc('hour', now()) + interval '1 hour' as pre_start_at,
+       date_trunc('hour', now()) + interval '6 hours' as post_start_at;
+insert into public.availability_exceptions(service_employee_id,exception_type,start_at,end_at,reason)
+select '15800000-0000-0000-0000-000000000020', 'OPEN', c.pre_start_at, c.pre_start_at + interval '1 hour', 'monthly-public-notice-pre'
+from public_notice_clock c
+union all
+select '15800000-0000-0000-0000-000000000020', 'OPEN', c.post_start_at, c.post_start_at + interval '1 hour', 'monthly-public-notice-post'
+from public_notice_clock c;
+insert into public.availability_exceptions(resource_id,exception_type,start_at,end_at,reason)
+select r.resource_id, 'OPEN', c.pre_start_at - interval '15 minutes', c.pre_start_at + interval '75 minutes', 'monthly-public-notice-pre'
+from public_notice_clock c cross join (values ('15800000-0000-0000-0000-000000000002'::uuid),('15800000-0000-0000-0000-000000000003'::uuid)) r(resource_id)
+union all
+select r.resource_id, 'OPEN', c.post_start_at - interval '15 minutes', c.post_start_at + interval '75 minutes', 'monthly-public-notice-post'
+from public_notice_clock c cross join (values ('15800000-0000-0000-0000-000000000002'::uuid),('15800000-0000-0000-0000-000000000003'::uuid)) r(resource_id);
+insert into monthly_legacy
+select 'public_notice_pre', pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.pre_start_at at time zone 'America/Sao_Paulo')::date)
+from public_notice_clock c
+union all
+select 'public_notice_post', pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.post_start_at at time zone 'America/Sao_Paulo')::date)
+from public_notice_clock c;
+insert into monthly_v2
+select 'public_notice_pre', pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.pre_start_at at time zone 'America/Sao_Paulo')::date)
+from public_notice_clock c
+union all
+select 'public_notice_post', pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.post_start_at at time zone 'America/Sao_Paulo')::date)
+from public_notice_clock c;
+
 select ok((select result ?& array['input','dates','date_count','elapsed_ms'] from monthly_legacy where case_key='feb_28'),'legacy monthly capture serializes canonical payload');
 select is((select result->'dates' from monthly_legacy where case_key='feb_28'),(pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')->'dates'),'monthly dates are deterministic and ordered');
 select is((select result->'dates' from monthly_legacy where case_key='feb_28'),(select result->'dates' from monthly_v2 where case_key='feb_28'),'V1/V2 parity: 28-day February date set');
@@ -165,6 +225,14 @@ select ok((select result->'dates' ? '2035-02-12' from monthly_legacy where case_
 select is((select result->'dates' from monthly_legacy where case_key='expired_awaiting'),(select result->'dates' from monthly_v2 where case_key='expired_awaiting'),'V1/V2 parity: expired AWAITING_PAYMENT person allocation');
 select ok(not (select result->'dates' ? '2035-02-19' from monthly_legacy where case_key='external_person'),'EXTERNAL_ACTIVE PERSON allocation removes the occupied Monday in V1');
 select is((select result->'dates' from monthly_legacy where case_key='external_person'),(select result->'dates' from monthly_v2 where case_key='external_person'),'V1/V2 parity: EXTERNAL_ACTIVE PERSON allocation');
+select ok(not (select result->'dates' ? '2035-01-01' from monthly_legacy where case_key='minimum_notice') and (select result->'dates' ? '2035-01-02' from monthly_legacy where case_key='minimum_notice'),'minimum_booking_notice_minutes excludes only candidates before the deterministic cutoff in V1');
+select is((select result->'dates' from monthly_legacy where case_key='minimum_notice'),(select result->'dates' from monthly_v2 where case_key='minimum_notice'),'V1/V2 parity: minimum_booking_notice_minutes');
+select ok((select result->'dates' ? '2035-01-01' from monthly_legacy where case_key='maximum_horizon') and not (select result->'dates' ? '2035-01-02' from monthly_legacy where case_key='maximum_horizon'),'maximum_booking_horizon_days preserves an in-horizon date and excludes an out-of-horizon date in V1');
+select is((select result->'dates' from monthly_legacy where case_key='maximum_horizon'),(select result->'dates' from monthly_v2 where case_key='maximum_horizon'),'V1/V2 parity: maximum_booking_horizon_days');
+select ok(not (select result->'dates' ? to_char(c.pre_start_at at time zone 'America/Sao_Paulo','YYYY-MM-DD') from monthly_legacy l cross join public_notice_clock c where l.case_key='public_notice_pre'),'public_minimum_booking_notice_hours excludes the pre-cutoff date in V1');
+select is((select result->'dates' from monthly_legacy where case_key='public_notice_pre'),(select result->'dates' from monthly_v2 where case_key='public_notice_pre'),'V1/V2 parity: public notice pre-cutoff date');
+select ok((select result->'dates' ? to_char(c.post_start_at at time zone 'America/Sao_Paulo','YYYY-MM-DD') from monthly_legacy l cross join public_notice_clock c where l.case_key='public_notice_post'),'public_minimum_booking_notice_hours retains the post-cutoff date in V1');
+select is((select result->'dates' from monthly_legacy where case_key='public_notice_post'),(select result->'dates' from monthly_v2 where case_key='public_notice_post'),'V1/V2 parity: public notice post-cutoff date');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from monthly_legacy where case_key='feb_28'),'monthly elapsed time is recorded outside comparison');
 select ok(to_regprocedure('agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)') is not null,'private V2 month engine exists');
 select ok(not has_function_privilege('anon','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE') and not has_function_privilege('authenticated','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE'),'V2 engine is not callable by app roles');
