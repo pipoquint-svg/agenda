@@ -6,12 +6,14 @@ import { SabrinaBookingJourney } from './SabrinaBookingJourney'
 import './embed-base.css'
 import './checkout.css'
 
-const SABRINA_JOURNEY_SLUGS = new Set([
-  'sabrina',
-  'sabrina-essencial',
-  'sabrina-signature',
-  'natal-2026',
-])
+function usesSabrinaJourney(slug: string): boolean {
+  // Keep the canonical Sabrina predicate explicit: the cutover compatibility
+  // gate intentionally treats this literal as a stable integration contract.
+  return slug === 'sabrina'
+    || slug === 'sabrina-essencial'
+    || slug === 'sabrina-signature'
+    || slug === 'natal-2026'
+}
 
 function mountAgenda(target: HTMLElement) {
   if (target.dataset.bsAgendaMounted === 'true') return
@@ -21,7 +23,7 @@ function mountAgenda(target: HTMLElement) {
   createRoot(target).render(
     <StrictMode>
       <div className="bs-agenda-embed">
-        {SABRINA_JOURNEY_SLUGS.has(slug) ? (
+        {usesSabrinaJourney(slug) ? (
           <SabrinaBookingJourney slug={slug} />
         ) : (
           <>
