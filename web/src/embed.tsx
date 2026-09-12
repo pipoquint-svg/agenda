@@ -6,6 +6,13 @@ import { SabrinaBookingJourney } from './SabrinaBookingJourney'
 import './embed-base.css'
 import './checkout.css'
 
+const SABRINA_JOURNEY_SLUGS = new Set([
+  'sabrina',
+  'sabrina-essencial',
+  'sabrina-signature',
+  'natal-2026',
+])
+
 function mountAgenda(target: HTMLElement) {
   if (target.dataset.bsAgendaMounted === 'true') return
   target.dataset.bsAgendaMounted = 'true'
@@ -14,7 +21,7 @@ function mountAgenda(target: HTMLElement) {
   createRoot(target).render(
     <StrictMode>
       <div className="bs-agenda-embed">
-        {slug === 'sabrina' || slug === 'natal-2026' ? (
+        {SABRINA_JOURNEY_SLUGS.has(slug) ? (
           <SabrinaBookingJourney slug={slug} />
         ) : (
           <>
