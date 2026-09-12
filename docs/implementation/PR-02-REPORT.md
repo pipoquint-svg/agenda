@@ -25,7 +25,9 @@ Month-wide candidate generation and month V2 remain PR-03 only. No tenant, front
 
 ## Tests / gate
 
-Pending parity harness, Database Core and CI. Golden output must not be updated.
+Golden output must not be updated.
+
+CI validation of implementation head `66a0d86` passed: Database Core (including the parity harness and concurrency gates), canonical rebuild, migration-history baseline, RLS parity, Edge Auth Contract, pgTAP plan, contract-and-negative-proofs, consolidated audit, and Demand Capture. No golden slot result was changed.
 
 ## Resource-range parity
 
