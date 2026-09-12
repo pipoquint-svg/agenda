@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(23);
+select plan(25);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -81,6 +81,10 @@ insert into public.appointments(id,public_code,service_id,service_employee_id,pr
  ('15800000-0000-0000-0000-000000000041','MONTHLY-CONFIRMED','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020','15800000-0000-0000-0000-000000000040','CONFIRMED','PAID','2035-01-22 08:00 America/Sao_Paulo','2035-01-22 13:00 America/Sao_Paulo','2035-01-22 08:15 America/Sao_Paulo','2035-01-22 12:45 America/Sao_Paulo',270,60,1,100,'2035-01-01 00:00 America/Sao_Paulo');
 insert into public.resource_allocations(resource_id,appointment_id,allocation_type,status,occupied_range) values
  ('15800000-0000-0000-0000-000000000003','15800000-0000-0000-0000-000000000041','APPOINTMENT','CONFIRMED',tstzrange('2035-01-22 08:00 America/Sao_Paulo','2035-01-22 13:00 America/Sao_Paulo','[)'));
+insert into public.checkout_holds(id,public_token_hash,service_id,service_employee_id,selection_hash,people_count,requested_start_at,requested_end_at,core_start_at,core_end_at,pre_service_minutes,status,expires_at) values
+ ('15800000-0000-0000-0000-000000000042',repeat('a',64),'15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020','monthly-active-hold',1,'2035-01-29 08:00 America/Sao_Paulo','2035-01-29 13:00 America/Sao_Paulo','2035-01-29 08:15 America/Sao_Paulo','2035-01-29 12:45 America/Sao_Paulo',15,'ACTIVE',now()+interval '10 minutes');
+insert into public.resource_allocations(resource_id,checkout_hold_id,allocation_type,status,occupied_range) values
+ ('15800000-0000-0000-0000-000000000003','15800000-0000-0000-0000-000000000042','CHECKOUT_HOLD','HELD',tstzrange('2035-01-29 08:00 America/Sao_Paulo','2035-01-29 13:00 America/Sao_Paulo','[)'));
 
 -- January exception matrix: Tuesday is otherwise closed; two Mondays are
 -- otherwise viable and are removed respectively by employee and resource BLOCK.
@@ -102,6 +106,7 @@ insert into monthly_legacy values
  ('employee_block',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
  ('resource_block',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
  ('confirmed',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
+ ('active_hold',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
  ('extras',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
 
 create temp table monthly_v2(case_key text primary key, result jsonb not null);
@@ -114,6 +119,7 @@ insert into monthly_v2 values
  ('employee_block',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
  ('resource_block',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
  ('confirmed',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
+ ('active_hold',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-01-01')),
  ('extras',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
 
 select ok((select result ?& array['input','dates','date_count','elapsed_ms'] from monthly_legacy where case_key='feb_28'),'legacy monthly capture serializes canonical payload');
@@ -135,6 +141,8 @@ select ok(not (select result->'dates' ? '2035-01-15' from monthly_legacy where c
 select is((select result->'dates' from monthly_legacy where case_key='resource_block'),(select result->'dates' from monthly_v2 where case_key='resource_block'),'V1/V2 parity: resource BLOCK');
 select ok(not (select result->'dates' ? '2035-01-22' from monthly_legacy where case_key='confirmed'),'confirmed appointment allocation removes the occupied Monday in V1');
 select is((select result->'dates' from monthly_legacy where case_key='confirmed'),(select result->'dates' from monthly_v2 where case_key='confirmed'),'V1/V2 parity: confirmed appointment allocation');
+select ok(not (select result->'dates' ? '2035-01-29' from monthly_legacy where case_key='active_hold'),'active checkout hold removes the occupied Monday in V1');
+select is((select result->'dates' from monthly_legacy where case_key='active_hold'),(select result->'dates' from monthly_v2 where case_key='active_hold'),'V1/V2 parity: active checkout hold');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from monthly_legacy where case_key='feb_28'),'monthly elapsed time is recorded outside comparison');
 select ok(to_regprocedure('agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)') is not null,'private V2 month engine exists');
 select ok(not has_function_privilege('anon','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE') and not has_function_privilege('authenticated','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE'),'V2 engine is not callable by app roles');
