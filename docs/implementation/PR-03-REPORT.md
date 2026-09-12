@@ -53,7 +53,7 @@ V1's monthly result is an existence-of-date response. The V2 does not call `calc
 
 ### Google semantics
 
-Employee-person readiness is request-constant because it depends only on the validated employee resource. Required booking-resource readiness is evaluated once per distinct materialized resource and applied only to candidates using that resource. Divergences and allocations remain range predicates. No fail-closed condition was relaxed.
+Employee-person readiness is request-constant because it depends only on the validated employee resource. Required booking-resource readiness is structurally deduplicated in two materialized stages: `distinct_resource_ids` derives IDs from `resource_ranges`, then `resource_google_readiness` invokes `google_resource_sync_is_ready` only from that distinct relation. Readiness is applied only to candidates using that resource. Divergences and allocations remain range predicates. No fail-closed condition was relaxed.
 
 ## Gate 03-B
 

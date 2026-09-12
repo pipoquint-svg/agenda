@@ -211,10 +211,13 @@ begin
       v_service.buffer_before_minutes,
       v_service.buffer_after_minutes
     ) r
-  ), resource_google_readiness as materialized (
-    select distinct rr.resource_id,
-      public.google_resource_sync_is_ready(rr.resource_id, 600) as is_ready
+  ), distinct_resource_ids as materialized (
+    select distinct rr.resource_id
     from resource_ranges rr
+  ), resource_google_readiness as materialized (
+    select dri.resource_id,
+      public.google_resource_sync_is_ready(dri.resource_id, 600) as is_ready
+    from distinct_resource_ids dri
   )
   select distinct c.local_date
   from employee_available_candidates c
