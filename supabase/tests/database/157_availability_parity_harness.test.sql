@@ -38,7 +38,7 @@ begin
   return jsonb_build_object('engine',p_engine,'input',jsonb_build_object('service_id',p_service_id,'service_employee_id',p_service_employee_id,'duration_blocks',p_duration_blocks,'contracted_minutes',p_contracted_minutes,'extras',p_extras,'people_count',p_people_count,'local_date',p_local_date),'slots',v_slots,'slot_count',jsonb_array_length(v_slots),'elapsed_ms',round(extract(epoch from clock_timestamp()-v_started)*1000,3));
 end $$;
 
-select plan(7);
+select plan(11);
 
 insert into public.categories(id,name,slug) values ('15700000-0000-0000-0000-000000000001','Parity','parity-harness');
 insert into public.resources(id,name,resource_type) values
@@ -58,6 +58,16 @@ insert into public.availability_rules(service_employee_id,weekday,start_local_ti
  ('15700000-0000-0000-0000-000000000020',1,'09:00','12:00'),('15700000-0000-0000-0000-000000000021',1,'09:00','12:00');
 insert into public.resource_availability_rules(resource_id,weekday,start_local_time,end_local_time) values
  ('15700000-0000-0000-0000-000000000002',1,'08:00','13:00'),('15700000-0000-0000-0000-000000000003',1,'08:00','13:00');
+insert into public.extras(id,name,price,duration_delta_minutes) values
+ ('15700000-0000-0000-0000-000000000030','Parity prepend extra',0,30),
+ ('15700000-0000-0000-0000-000000000031','Parity append extra',0,45);
+insert into public.service_extras(service_id,extra_id,schedule_placement,default_schedule_minutes) values
+ ('15700000-0000-0000-0000-000000000011','15700000-0000-0000-0000-000000000030','PREPEND',30),
+ ('15700000-0000-0000-0000-000000000011','15700000-0000-0000-0000-000000000031','APPEND',45);
+-- Both extras legitimately consume the service studio too; this exercises min/max range merging.
+insert into public.extra_resources(extra_id,resource_id) values
+ ('15700000-0000-0000-0000-000000000030','15700000-0000-0000-0000-000000000003'),
+ ('15700000-0000-0000-0000-000000000031','15700000-0000-0000-0000-000000000003');
 
 create temp table parity_golden(case_key text primary key, result jsonb not null);
 insert into parity_golden values
@@ -71,6 +81,26 @@ select is((select result->'slots' from parity_golden where case_key='blocks'),(s
 select is((select result - 'elapsed_ms' from parity_golden where case_key='fixed'),(pg_temp.availability_parity_capture_slots('LEGACY_FIXED','15700000-0000-0000-0000-000000000010','15700000-0000-0000-0000-000000000020',null,null,'[]',1,'2035-01-15') - 'elapsed_ms'),'normalization is deterministic and excludes volatile timing');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from parity_golden where case_key='fixed'),'benchmark capture records elapsed query time');
 select ok((select result ? 'input' and result ? 'slots' and result ? 'slot_count' from parity_golden where case_key='minutes'),'capture serializes input, slots and count for future V2 comparison');
+select is(
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from public.calculate_booking_resource_ranges_for_duration('15700000-0000-0000-0000-000000000011','[]','2035-01-15 09:00 America/Sao_Paulo',2)),
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from agenda_internal.calculate_booking_resource_ranges_resolved_duration('15700000-0000-0000-0000-000000000011','[]','2035-01-15 09:00 America/Sao_Paulo',60,15,15)),
+  'resolved resource-range helper preserves legacy duration ranges'
+);
+select is(
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from public.calculate_booking_resource_ranges_for_duration('15700000-0000-0000-0000-000000000011','[{"extra_id":"15700000-0000-0000-0000-000000000030","quantity":1}]','2035-01-15 09:00 America/Sao_Paulo',2)),
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from agenda_internal.calculate_booking_resource_ranges_resolved_duration('15700000-0000-0000-0000-000000000011','[{"extra_id":"15700000-0000-0000-0000-000000000030","quantity":1}]','2035-01-15 09:00 America/Sao_Paulo',60,15,15)),
+  'PREPEND extra resource range matches legacy exactly'
+);
+select is(
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from public.calculate_booking_resource_ranges_for_duration('15700000-0000-0000-0000-000000000011','[{"extra_id":"15700000-0000-0000-0000-000000000031","quantity":1}]','2035-01-15 09:00 America/Sao_Paulo',2)),
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from agenda_internal.calculate_booking_resource_ranges_resolved_duration('15700000-0000-0000-0000-000000000011','[{"extra_id":"15700000-0000-0000-0000-000000000031","quantity":1}]','2035-01-15 09:00 America/Sao_Paulo',60,15,15)),
+  'APPEND extra resource range matches legacy exactly'
+);
+select is(
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from public.calculate_booking_resource_ranges_for_duration('15700000-0000-0000-0000-000000000011','[{"extra_id":"15700000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15700000-0000-0000-0000-000000000031","quantity":1}]','2035-01-15 09:00 America/Sao_Paulo',2)),
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from agenda_internal.calculate_booking_resource_ranges_resolved_duration('15700000-0000-0000-0000-000000000011','[{"extra_id":"15700000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15700000-0000-0000-0000-000000000031","quantity":1}]','2035-01-15 09:00 America/Sao_Paulo',60,15,15)),
+  'shared service and extra resource range merges identically'
+);
 select throws_ok($$select pg_temp.availability_parity_capture_slots('UNKNOWN',null,null,null,null,'[]',1,'2035-01-15')$$,'P0001','PARITY_ENGINE_UNKNOWN','unknown engine cannot silently produce a false comparison');
 
 select * from finish();
