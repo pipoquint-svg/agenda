@@ -174,10 +174,10 @@ create temp table public_notice_clock as
 select date_trunc('hour', now()) + interval '1 hour' as pre_start_at,
        date_trunc('hour', now()) + interval '6 hours' as post_start_at;
 insert into public.availability_exceptions(service_employee_id,exception_type,start_at,end_at,reason)
-select '15800000-0000-0000-0000-000000000020', 'OPEN', c.pre_start_at, c.pre_start_at + interval '1 hour', 'monthly-public-notice-pre'
+select '15800000-0000-0000-0000-000000000020'::uuid, 'OPEN', c.pre_start_at, c.pre_start_at + interval '1 hour', 'monthly-public-notice-pre'
 from public_notice_clock c
 union all
-select '15800000-0000-0000-0000-000000000020', 'OPEN', c.post_start_at, c.post_start_at + interval '1 hour', 'monthly-public-notice-post'
+select '15800000-0000-0000-0000-000000000020'::uuid, 'OPEN', c.post_start_at, c.post_start_at + interval '1 hour', 'monthly-public-notice-post'
 from public_notice_clock c;
 insert into public.availability_exceptions(resource_id,exception_type,start_at,end_at,reason)
 select r.resource_id, 'OPEN', c.pre_start_at - interval '15 minutes', c.pre_start_at + interval '75 minutes', 'monthly-public-notice-pre'
