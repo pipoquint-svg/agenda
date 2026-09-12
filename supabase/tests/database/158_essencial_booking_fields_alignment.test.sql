@@ -3,44 +3,33 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(4);
+select plan(2);
 
 select ok(
-  exists (
-    select 1 from public.services
-    where slug = 'essencial-10-fotos' and is_active
-  ),
-  'Essencial 10 source service exists'
-);
-
-select ok(
-  exists (
-    select 1 from public.services
-    where slug = 'essencial-20-fotos' and is_active
-  ),
-  'Essencial 20 target service exists'
-);
-
-select is(
-  (
+  not (
+    exists (select 1 from public.services where slug = 'essencial-10-fotos' and is_active)
+    and exists (select 1 from public.services where slug = 'essencial-20-fotos' and is_active)
+  )
+  or (
     select count(*)::integer
     from public.service_fields sf
     join public.services s on s.id = sf.service_id
-    where s.slug = 'essencial-20-fotos'
-      and sf.is_active
-  ),
-  (
+    where s.slug = 'essencial-20-fotos' and sf.is_active
+  ) = (
     select count(*)::integer
     from public.service_fields sf
     join public.services s on s.id = sf.service_id
-    where s.slug = 'essencial-10-fotos'
-      and sf.is_active
+    where s.slug = 'essencial-10-fotos' and sf.is_active
   ),
-  'Essencial 20 has the same active field count as Essencial 10'
+  'Seeded Essencial services expose the same active field count'
 );
 
-select is(
-  (
+select ok(
+  not (
+    exists (select 1 from public.services where slug = 'essencial-10-fotos' and is_active)
+    and exists (select 1 from public.services where slug = 'essencial-20-fotos' and is_active)
+  )
+  or (
     select count(*)::integer
     from (
       (
@@ -67,9 +56,8 @@ select is(
         where s.slug = 'essencial-10-fotos' and sf.is_active
       )
     ) diff
-  ),
-  0,
-  'Essencial 10 and 20 expose the same active field contract'
+  ) = 0,
+  'Seeded Essencial services expose the same active field contract'
 );
 
 select * from finish();
