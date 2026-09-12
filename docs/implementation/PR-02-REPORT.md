@@ -27,7 +27,7 @@ Month-wide candidate generation and month V2 remain PR-03 only. No tenant, front
 
 Golden output must not be updated.
 
-CI validation of implementation head `66a0d86` passed: Database Core (including the parity harness and concurrency gates), canonical rebuild, migration-history baseline, RLS parity, Edge Auth Contract, pgTAP plan, contract-and-negative-proofs, consolidated audit, and Demand Capture. No golden slot result was changed.
+Final validated head `8b84f6acd8d060456d87b1bf57473e53df9e2df4` passed all required checks: PREPEND, APPEND and merged-resource parity; FIXED, BLOCKS and MINUTES golden parity; Database Core (including concurrency); canonical rebuild; migration-history baseline; RLS parity; Edge Auth Contract; pgTAP plan; contract-and-negative-proofs; consolidated audit; and Demand Capture. No golden slot result was changed. Gate PR-02: PASS.
 
 ## Resource-range parity
 
