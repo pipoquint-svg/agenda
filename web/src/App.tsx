@@ -20,6 +20,7 @@ import { OpsHealthAdmin } from './OpsHealthAdmin'
 import { PasswordRecoveryPage } from './PasswordRecoveryPage'
 import { PreReservationPaymentPage } from './PreReservationPaymentPage'
 import { ResourceAdmin } from './ResourceAdmin'
+import { SabrinaBookingJourney } from './SabrinaBookingJourney'
 import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
 import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
@@ -34,6 +35,11 @@ import './checkout.css'
 function PublicBookingRoute({ slug }: { slug: string }) {
   useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: slug.toUpperCase(), pageSlug: slug }) }, [slug])
   return <><BookingPageDuration slug={slug} /><BookingCheckoutSession /><TrackingConsentBanner /></>
+}
+
+function PublicSabrinaBookingRoute({ slug }: { slug: string }) {
+  useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: 'SABRINA', pageSlug: slug }) }, [slug])
+  return <><SabrinaBookingJourney slug={slug} /><TrackingConsentBanner /></>
 }
 
 function PublicPrivateInviteRoute({ accessToken }: { accessToken: string }) {
@@ -116,8 +122,16 @@ export function App() {
   if (path.startsWith('/admin/catalogo')) return adminPage(<ServiceCatalogAdmin />)
   if (path.startsWith('/admin/agenda')) return adminPage(<AgendaAdmin />)
   if (path.startsWith('/admin/demand')) return adminPage(<DemandCaptureAdmin />)
-  if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicBookingRoute slug="sabrina" />
+
+  if (path === '/agendar/sabrina/essencial' || path === '/sabrina-pierri/essencial') {
+    return <PublicSabrinaBookingRoute slug="sabrina-essencial" />
+  }
+  if (path === '/agendar/sabrina/signature' || path === '/sabrina-pierri/signature') {
+    return <PublicSabrinaBookingRoute slug="sabrina-signature" />
+  }
+  if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicSabrinaBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep' || path === '/agendamento' || path === '/agenda') return <PublicBookingRoute slug="blacksheep" />
+
   const inviteMatch = path.match(/^\/convite-natal\/([A-Za-z0-9_-]{32,})$/)
   if (inviteMatch) return <PublicPrivateInviteRoute accessToken={inviteMatch[1]} />
   if (path === '/pre-reserva/confirmar' || path === '/confirmar-pre-reserva') return <PreReservationPaymentPage />
