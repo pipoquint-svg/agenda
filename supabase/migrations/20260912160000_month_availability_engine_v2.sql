@@ -136,9 +136,9 @@ begin
       and (gs at time zone v_timezone)::date >= v_month_start
       and (gs at time zone v_timezone)::date < v_month_end
   ), candidate_starts as materialized (
-    select local_date, anchor_start_at from weekly_candidates
+    select wc.local_date, wc.anchor_start_at from weekly_candidates wc
     union
-    select local_date, anchor_start_at from open_candidates
+    select oc.local_date, oc.anchor_start_at from open_candidates oc
   ), candidate_schedule as materialized (
     select c.local_date,
       c.anchor_start_at,
@@ -326,7 +326,7 @@ begin
           )
         )
     )
-  order by local_date;
+  order by c.local_date;
 end;
 $function$;
 
