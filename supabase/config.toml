@@ -246,6 +246,9 @@ verify_jwt = false
 [functions.admin-finance-minimal]
 verify_jwt = false
 
+[functions.admin-finance-launches]
+verify_jwt = false
+
 [functions.admin-customer-balance]
 verify_jwt = false
 
