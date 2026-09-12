@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-10",
-    "active_total": 76,
-    "verify_jwt_false": 59,
+    "captured_on": "2026-09-12",
+    "active_total": 77,
+    "verify_jwt_false": 60,
     "verify_jwt_true": 17,
-    "versioned_active": 71,
+    "versioned_active": 72,
     "production_orphans": 5,
     "versioned_inactive": 11
   },
@@ -24,6 +24,7 @@
       "admin-dashboard",
       "admin-external-block",
       "admin-finance",
+      "admin-finance-launches",
       "admin-finance-minimal",
       "admin-google",
       "admin-hour-packages",
