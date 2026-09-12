@@ -38,7 +38,7 @@ begin
   return jsonb_build_object('engine',p_engine,'input',jsonb_build_object('service_id',p_service_id,'service_employee_id',p_service_employee_id,'duration_blocks',p_duration_blocks,'contracted_minutes',p_contracted_minutes,'extras',p_extras,'people_count',p_people_count,'local_date',p_local_date),'slots',v_slots,'slot_count',jsonb_array_length(v_slots),'elapsed_ms',round(extract(epoch from clock_timestamp()-v_started)*1000,3));
 end $$;
 
-select plan(7);
+select plan(8);
 
 insert into public.categories(id,name,slug) values ('15700000-0000-0000-0000-000000000001','Parity','parity-harness');
 insert into public.resources(id,name,resource_type) values
@@ -71,6 +71,11 @@ select is((select result->'slots' from parity_golden where case_key='blocks'),(s
 select is((select result - 'elapsed_ms' from parity_golden where case_key='fixed'),(pg_temp.availability_parity_capture_slots('LEGACY_FIXED','15700000-0000-0000-0000-000000000010','15700000-0000-0000-0000-000000000020',null,null,'[]',1,'2035-01-15') - 'elapsed_ms'),'normalization is deterministic and excludes volatile timing');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from parity_golden where case_key='fixed'),'benchmark capture records elapsed query time');
 select ok((select result ? 'input' and result ? 'slots' and result ? 'slot_count' from parity_golden where case_key='minutes'),'capture serializes input, slots and count for future V2 comparison');
+select is(
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from public.calculate_booking_resource_ranges_for_duration('15700000-0000-0000-0000-000000000011','[]','2035-01-15 09:00 America/Sao_Paulo',2)),
+  (select coalesce(jsonb_agg(jsonb_build_object('resource_id',resource_id,'range',occupied_range::text) order by resource_id),'[]'::jsonb) from agenda_internal.calculate_booking_resource_ranges_resolved_duration('15700000-0000-0000-0000-000000000011','[]','2035-01-15 09:00 America/Sao_Paulo',60,15,15)),
+  'resolved resource-range helper preserves legacy duration ranges'
+);
 select throws_ok($$select pg_temp.availability_parity_capture_slots('UNKNOWN',null,null,null,null,'[]',1,'2035-01-15')$$,'P0001','PARITY_ENGINE_UNKNOWN','unknown engine cannot silently produce a false comparison');
 
 select * from finish();
