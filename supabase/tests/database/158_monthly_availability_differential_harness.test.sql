@@ -93,8 +93,8 @@ insert into public.appointments(id,public_code,service_id,service_employee_id,pr
  ('15800000-0000-0000-0000-000000000044','MONTHLY-EXPIRED-AWAITING','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020','15800000-0000-0000-0000-000000000040','AWAITING_PAYMENT','PENDING','2035-02-12 08:00 America/Sao_Paulo','2035-02-12 13:00 America/Sao_Paulo','2035-02-12 08:15 America/Sao_Paulo','2035-02-12 12:45 America/Sao_Paulo',270,60,1,now()-interval '1 minute',100);
 insert into public.resource_allocations(resource_id,appointment_id,allocation_type,status,occupied_range) values
  ('15800000-0000-0000-0000-000000000002','15800000-0000-0000-0000-000000000044','APPOINTMENT','AWAITING_PAYMENT',tstzrange('2035-02-12 08:00 America/Sao_Paulo','2035-02-12 13:00 America/Sao_Paulo','[)'));
-insert into public.resource_allocations(resource_id,allocation_type,status,occupied_range,reason) values
- ('15800000-0000-0000-0000-000000000002','EXTERNAL_BLOCK','EXTERNAL_ACTIVE',tstzrange('2035-02-19 08:00 America/Sao_Paulo','2035-02-19 13:00 America/Sao_Paulo','[)'),'monthly-external-person');
+insert into public.resource_allocations(resource_id,allocation_type,status,occupied_range,reason,external_source,external_calendar_id,external_event_id) values
+ ('15800000-0000-0000-0000-000000000002','EXTERNAL_BLOCK','EXTERNAL_ACTIVE',tstzrange('2035-02-19 08:00 America/Sao_Paulo','2035-02-19 13:00 America/Sao_Paulo','[)'),'monthly-external-person','GOOGLE','monthly-parity-person','monthly-parity-external-person');
 
 -- January exception matrix: Tuesday is otherwise closed; two Mondays are
 -- otherwise viable and are removed respectively by employee and resource BLOCK.
