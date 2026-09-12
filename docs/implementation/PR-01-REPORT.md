@@ -20,5 +20,12 @@ Run `supabase test db` and `bash scripts/test-concurrency.sh` in a Docker-enable
 ## Risks / compatibility / rollback
 Test-only objects are created inside a transaction and rolled back. Rollback is removal of these three files. Public APIs, holds and resource allocations are untouched.
 
+## CI validation
+
+- Pull request: #436 (`test(agenda): add availability differential parity harness`).
+- Validated head: `f658a84ae7d6024f5dea75c7c95fe423efbb1f13`.
+- The first CI run executed 1,857 database tests and found two failures introduced solely by the new fixture's expected counts: legacy FIXED/BLOCKS produced 5/5 slots, not 4/3. Commit `f658a84` corrected only those expectations; no production rule, algorithm, migration or public contract changed.
+- The validated rerun passed Database Core, canonical rebuild/Core DB, concurrency, ACL/RLS parity, negative/contract proofs, Edge auth contract, pgTAP plan, consolidated audit and Demand Capture. No pre-existing failure was found.
+
 ## Gate
-**Pending CI rerun.** Local execution remains unavailable: `supabase test db` failed before test execution because the CLI is not installed (`command not found`); `npm` is also absent and `pnpm` was blocked while preparing dependencies outside the permitted filesystem. CI initially ran 1,857 database tests and identified two harness-only expected-count errors (actual legacy counts were 5/5, not 4/3); the expectations were corrected without touching production SQL. PASS requires the rerun of the full database suite, `scripts/test-concurrency.sh`, and this harness green. Do not start PR-02 until that gate is recorded PASS.
+**PASS.** CI is the authoritative validation environment because this workstation lacks the Supabase CLI/Docker runtime. The parity harness, full database gate and concurrency gate are green for the validated head. PR-02 remains blocked pending explicit authorization.
