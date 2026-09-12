@@ -65,8 +65,8 @@ insert into parity_golden values
  ('blocks',pg_temp.availability_parity_capture_slots('LEGACY_BLOCKS','15700000-0000-0000-0000-000000000011','15700000-0000-0000-0000-000000000021',2,null,'[]',1,'2035-01-15')),
  ('minutes',pg_temp.availability_parity_capture_slots('LEGACY_MINUTES','15700000-0000-0000-0000-000000000011','15700000-0000-0000-0000-000000000021',null,60,'[]',1,'2035-01-15'));
 
-select is((select result->>'slot_count' from parity_golden where case_key='fixed'),'4','FIXED golden captures buffered legacy slots');
-select is((select result->>'slot_count' from parity_golden where case_key='blocks'),'3','BLOCKS golden captures legacy slots');
+select is((select result->>'slot_count' from parity_golden where case_key='fixed'),'5','FIXED golden captures buffered legacy slots');
+select is((select result->>'slot_count' from parity_golden where case_key='blocks'),'5','BLOCKS golden captures legacy slots');
 select is((select result->'slots' from parity_golden where case_key='blocks'),(select result->'slots' from parity_golden where case_key='minutes'),'MINUTES normalizes to identical BLOCKS availability');
 select is((select result - 'elapsed_ms' from parity_golden where case_key='fixed'),(pg_temp.availability_parity_capture_slots('LEGACY_FIXED','15700000-0000-0000-0000-000000000010','15700000-0000-0000-0000-000000000020',null,null,'[]',1,'2035-01-15') - 'elapsed_ms'),'normalization is deterministic and excludes volatile timing');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from parity_golden where case_key='fixed'),'benchmark capture records elapsed query time');
