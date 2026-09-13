@@ -55,6 +55,36 @@ V1's monthly result is an existence-of-date response. The V2 does not call `calc
 
 Employee-person readiness is request-constant because it depends only on the validated employee resource. Required booking-resource readiness is structurally deduplicated in two materialized stages: `distinct_resource_ids` derives IDs from `resource_ranges`, then `resource_google_readiness` invokes `google_resource_sync_is_ready` only from that distinct relation. Readiness is applied only to candidates using that resource. Divergences and allocations remain range predicates. No fail-closed condition was relaxed.
 
+## Coverage Matrix (03-B)
+
+| Scenario | Coverage type | Fixture/assertion | V1 | V2 | Parity |
+|---|---|---|---|---|---|
+| 28/29/30/31 days; year boundary | DIRECT | `feb_28`, `feb_29`, `apr_30`, `dec_31` | PASS | PASS | PASS |
+| BLOCKS and minutes transport | DIRECT | BLOCKS service through the public contracted-minutes monthly bridge | PASS | PASS | PASS |
+| FIXED | DIRECT | `fixed` | PASS | PASS | PASS |
+| PREPEND, APPEND, merged resource | COMBINED | 158 monthly selection plus 157 resource-range parity | PASS | PASS | PASS |
+| employee OPEN/BLOCK | DIRECT | `employee_open`, `employee_block` | PASS | PASS | PASS |
+| resource OPEN/BLOCK | DIRECT | `employee_open`, `resource_block` with resource windows | PASS | PASS | PASS |
+| confirmed appointment/allocation | DIRECT | `confirmed` | PASS | PASS | PASS |
+| active checkout hold | DIRECT | `active_hold` | PASS | PASS | PASS |
+| expired checkout hold | DIRECT | `expired_person_hold` | PASS | PASS | PASS |
+| expired AWAITING_PAYMENT | DIRECT | `expired_awaiting` | PASS | PASS | PASS |
+| PERSON / EXTERNAL_ACTIVE occupancy | DIRECT | `external_person` | PASS | PASS | PASS |
+| minimum notice minutes | DIRECT | `minimum_notice` with `agenda.test_now` | PASS | PASS | PASS |
+| public notice hours | DIRECT | `public_notice_pre`, `public_notice_post`, relative to `now()` | PASS | PASS | PASS |
+| maximum horizon | DIRECT | `maximum_horizon` | PASS | PASS | PASS |
+| Google healthy | DIRECT | `google_healthy` | PASS | PASS | PASS |
+| material and PERSON stale fail-closed | DIRECT | `google_material_stale`, `google_person_stale` | PASS | PASS | PASS |
+| material and PERSON Google divergence | DIRECT | `google_material_divergence`, `google_person_divergence` | PASS | PASS | PASS |
+
+**NOT YET COVERED = 0** for the legacy monthly contract.
+
 ## Gate 03-B
 
-Implementation and V1 × V2 fixtures are pending Database Core validation. No cutover is included.
+**PASS** — validated on PR #438 head `b70c6bf01a1a516a6cddd37c501bb9d548d90181` before this documentation update. The monthly differential harness has 23 captured V1/V2 cases and 51 pgTAP assertions. Its direct cases establish the complete ordered local-date set, rather than only counts. The final documentation commit requires the same complete CI gate again.
+
+Confirmed structural improvement: V1 enters `public.list_available_slots_for_duration` per local day; V2 executes one month-scoped pipeline and resolves request constants once. Latency improvement is not claimed here; that is Gate 03-C.
+
+## Rollback and deferred work
+
+Rollback is logical and immediate: leave the public bridge on V1 (as it already is) and do not invoke the private V2. PR-04 is the only planned cutover point, contingent on Gate 03-C benchmarks. No cutover, merge, or public contract change is included in PR-03.
