@@ -1,0 +1,46 @@
+name: Gate 05 Migration History Repair
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/agenda-pr05-tenant-foundation
+    paths:
+      - .github/workflows/gate05-migration-history-repair.yml
+
+jobs:
+  repair-history:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+      - name: Link the current project without database password
+        run: supabase link --project-ref sbexdggbwqvyhbkatucs
+      - name: Record verified preflight history
+        run: |
+          supabase migration list --linked | tee migration-history.txt
+      - name: Record verified pre-applied migrations
+        run: |
+          grep -F '`20260910164500` | ` `' migration-history.txt
+          grep -F '`20260910213000` | ` `' migration-history.txt
+          grep -F '`20260912021000` | ` `' migration-history.txt
+          grep -F '`20260912110500` | ` `' migration-history.txt
+          supabase migration repair --linked --status applied 20260910164500 20260910213000 20260912110500 --yes
+      - name: Apply only the verified remaining migration
+        run: |
+          supabase migration list --linked | tee post-repair-history.txt
+          grep -F '`20260910164500` | `20260910164500`' post-repair-history.txt
+          grep -F '`20260910213000` | `20260910213000`' post-repair-history.txt
+          grep -F '`20260912021000` | ` `' post-repair-history.txt
+          grep -F '`20260912110500` | `20260912110500`' post-repair-history.txt
+          supabase db push --linked --include-all
+      - name: Verify aligned history and dry-run
+        run: |
+          supabase migration list --linked
+          supabase db push --linked --dry-run
