@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(39);
+select plan(51);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -252,6 +252,63 @@ select ok((select (result->>'elapsed_ms')::numeric >= 0 from monthly_legacy wher
 select ok(to_regprocedure('agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)') is not null,'private V2 month engine exists');
 select ok(not has_function_privilege('anon','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE') and not has_function_privilege('authenticated','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE'),'V2 engine is not callable by app roles');
 select ok(position('list_available_slots_for_duration' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) > 0 and position('list_available_dates_month_v2' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) = 0,'public monthly bridge remains on V1 before V2 exists');
+
+-- Google fixtures deliberately run after the baseline assertions above so their
+-- mappings cannot change the original deterministic captures.
+insert into public.google_connections(id,account_email,refresh_token_ciphertext,token_encryption_version,scopes,status) values
+ ('15800000-0000-0000-0000-000000000050','monthly-person@example.invalid','fixture',1,array['calendar.events'],'ACTIVE'),
+ ('15800000-0000-0000-0000-000000000051','monthly-studio@example.invalid','fixture',1,array['calendar.events'],'ACTIVE');
+insert into public.google_calendars(id,google_connection_id,google_calendar_id,name,timezone,is_active) values
+ ('15800000-0000-0000-0000-000000000052','15800000-0000-0000-0000-000000000050','monthly-person-calendar','Monthly person','America/Sao_Paulo',true),
+ ('15800000-0000-0000-0000-000000000053','15800000-0000-0000-0000-000000000051','monthly-studio-calendar','Monthly studio','America/Sao_Paulo',true);
+insert into public.google_calendar_resources(google_calendar_id,resource_id) values
+ ('15800000-0000-0000-0000-000000000052','15800000-0000-0000-0000-000000000002'),
+ ('15800000-0000-0000-0000-000000000053','15800000-0000-0000-0000-000000000003');
+insert into public.google_sync_state(google_calendar_id,sync_token,health_status,last_attempt_at,last_success_at,consecutive_failures) values
+ ('15800000-0000-0000-0000-000000000052','monthly-person-sync','HEALTHY',now(),now(),0),
+ ('15800000-0000-0000-0000-000000000053','monthly-studio-sync','HEALTHY',now(),now(),0);
+insert into monthly_legacy values
+ ('google_healthy',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+insert into monthly_v2 values
+ ('google_healthy',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+update public.google_sync_state set last_success_at = now() - interval '11 minutes' where google_calendar_id = '15800000-0000-0000-0000-000000000053';
+insert into monthly_legacy values
+ ('google_material_stale',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+insert into monthly_v2 values
+ ('google_material_stale',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+update public.google_sync_state set last_success_at = now() where google_calendar_id = '15800000-0000-0000-0000-000000000053';
+update public.google_sync_state set last_success_at = now() - interval '11 minutes' where google_calendar_id = '15800000-0000-0000-0000-000000000052';
+insert into monthly_legacy values
+ ('google_person_stale',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+insert into monthly_v2 values
+ ('google_person_stale',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+update public.google_sync_state set last_success_at = now() where google_calendar_id = '15800000-0000-0000-0000-000000000052';
+insert into public.google_calendar_events(id,google_calendar_id,google_event_id,status,start_at,end_at,qualification,normalized_payload) values
+ ('15800000-0000-0000-0000-000000000054','15800000-0000-0000-0000-000000000053','monthly-material-conflict','confirmed','2035-03-05 08:00 America/Sao_Paulo','2035-03-05 13:00 America/Sao_Paulo','BLOCKING','{}'),
+ ('15800000-0000-0000-0000-000000000055','15800000-0000-0000-0000-000000000052','monthly-person-conflict','confirmed','2035-03-12 08:00 America/Sao_Paulo','2035-03-12 13:00 America/Sao_Paulo','BLOCKING','{}');
+insert into public.schedule_divergences(id,resource_id,google_calendar_event_id,desired_range,reason) values
+ ('15800000-0000-0000-0000-000000000056','15800000-0000-0000-0000-000000000003','15800000-0000-0000-0000-000000000054',tstzrange('2035-03-05 08:00 America/Sao_Paulo','2035-03-05 13:00 America/Sao_Paulo','[)'),'GOOGLE_EVENT_CONFLICT');
+insert into monthly_legacy values
+ ('google_material_divergence',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+insert into monthly_v2 values
+ ('google_material_divergence',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+update public.schedule_divergences set status = 'RESOLVED', resolved_at = now(), resolution_notes = 'fixture transition' where id = '15800000-0000-0000-0000-000000000056';
+insert into public.schedule_divergences(id,resource_id,google_calendar_event_id,desired_range,reason) values
+ ('15800000-0000-0000-0000-000000000057','15800000-0000-0000-0000-000000000002','15800000-0000-0000-0000-000000000055',tstzrange('2035-03-12 08:00 America/Sao_Paulo','2035-03-12 13:00 America/Sao_Paulo','[)'),'GOOGLE_EVENT_CONFLICT');
+insert into monthly_legacy values
+ ('google_person_divergence',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+insert into monthly_v2 values
+ ('google_person_divergence',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-03-01'));
+select ok((select result->'dates' ? '2035-03-19' from monthly_legacy where case_key='google_healthy'),'healthy Google resources retain an unrelated available Monday in V1');
+select is((select result->'dates' from monthly_legacy where case_key='google_healthy'),(select result->'dates' from monthly_v2 where case_key='google_healthy'),'V1/V2 parity: Google healthy');
+select ok((select result->'dates' = '[]'::jsonb from monthly_legacy where case_key='google_material_stale'),'stale material Google resource fails closed in V1');
+select is((select result->'dates' from monthly_legacy where case_key='google_material_stale'),(select result->'dates' from monthly_v2 where case_key='google_material_stale'),'V1/V2 parity: stale material Google resource');
+select ok((select result->'dates' = '[]'::jsonb from monthly_legacy where case_key='google_person_stale'),'stale PERSON Google resource fails closed in V1');
+select is((select result->'dates' from monthly_legacy where case_key='google_person_stale'),(select result->'dates' from monthly_v2 where case_key='google_person_stale'),'V1/V2 parity: stale PERSON Google resource');
+select ok(not (select result->'dates' ? '2035-03-05' from monthly_legacy where case_key='google_material_divergence'),'material GOOGLE_EVENT_CONFLICT removes its Monday in V1');
+select is((select result->'dates' from monthly_legacy where case_key='google_material_divergence'),(select result->'dates' from monthly_v2 where case_key='google_material_divergence'),'V1/V2 parity: material GOOGLE_EVENT_CONFLICT');
+select ok(not (select result->'dates' ? '2035-03-12' from monthly_legacy where case_key='google_person_divergence'),'PERSON GOOGLE_EVENT_CONFLICT removes its Monday in V1');
+select is((select result->'dates' from monthly_legacy where case_key='google_person_divergence'),(select result->'dates' from monthly_v2 where case_key='google_person_divergence'),'V1/V2 parity: PERSON GOOGLE_EVENT_CONFLICT');
 
 select * from finish();
 rollback;
