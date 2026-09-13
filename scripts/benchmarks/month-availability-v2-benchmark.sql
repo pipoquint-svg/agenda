@@ -30,6 +30,7 @@ begin
   if s='zero' then insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time) select '15900000-0000-0000-0000-000000000020',d,'08:00','18:00' from generate_series(0,6)d; end if;
   if s='occupancy' then
     delete from public.resource_allocations where appointment_id='15900000-0000-0000-0000-000000000041';
+    delete from public.appointment_change_policy_snapshots where appointment_id='15900000-0000-0000-0000-000000000041';
     delete from public.appointments where id='15900000-0000-0000-0000-000000000041';
     delete from public.customers where id='15900000-0000-0000-0000-000000000040';
   end if;
