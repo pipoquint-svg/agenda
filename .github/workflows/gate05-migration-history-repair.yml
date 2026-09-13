@@ -25,10 +25,22 @@ jobs:
       - name: Record verified preflight history
         run: |
           supabase migration list --linked | tee migration-history.txt
-      - name: Revert verified remote-only history entries
+      - name: Record verified pre-applied migrations
         run: |
-          supabase migration repair --linked --status reverted 20260910220506 20260910224148 20260912110723 20260912131016 20260912131034 --yes
-      - name: Verify repaired history and dry-run
+          grep -F '`20260910164500` | ` `' migration-history.txt
+          grep -F '`20260910213000` | ` `' migration-history.txt
+          grep -F '`20260912021000` | ` `' migration-history.txt
+          grep -F '`20260912110500` | ` `' migration-history.txt
+          supabase migration repair --linked --status applied 20260910164500 20260910213000 20260912110500 --yes
+      - name: Apply only the verified remaining migration
+        run: |
+          supabase migration list --linked | tee post-repair-history.txt
+          grep -F '`20260910164500` | `20260910164500`' post-repair-history.txt
+          grep -F '`20260910213000` | `20260910213000`' post-repair-history.txt
+          grep -F '`20260912021000` | ` `' post-repair-history.txt
+          grep -F '`20260912110500` | `20260912110500`' post-repair-history.txt
+          supabase db push --linked --include-all
+      - name: Verify aligned history and dry-run
         run: |
           supabase migration list --linked
           supabase db push --linked --dry-run
