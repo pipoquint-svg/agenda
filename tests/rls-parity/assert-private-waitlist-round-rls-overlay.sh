@@ -11,11 +11,15 @@ cat >> "$EXPECTED" <<'EOF'
 TABLE|waitlist_private_round_invites|true|false
 TABLE|waitlist_private_round_slots|true|false
 TABLE|waitlist_private_rounds|true|false
+TABLE|tenant_capabilities|true|false
+TABLE|tenant_members|true|false
+TABLE|tenant_settings|true|false
+TABLE|tenants|true|false
 EOF
 sort -o "$EXPECTED" "$EXPECTED"
 
 if ! diff -u "$EXPECTED" "$ACTUAL"; then
-  echo "Unexpected RLS delta beyond the reviewed private-waitlist-round tables." >&2
+  echo "Unexpected RLS delta beyond reviewed private-waitlist-round and tenant-foundation tables." >&2
   exit 1
 fi
 
