@@ -126,6 +126,6 @@ None required by current evidence. The captured plans do not expose a specific t
 
 ## Gate 03-C
 
-**PASS** — every benchmarked scenario preserved complete ordered-date parity, V2 was materially faster in the representative monthly scenarios (2.3209x–18.9621x; frequent availability 4.3019x), and the result was produced reproducibly in the disposable GitHub Actions stack. Benchmark success itself is functional only; final PR approval remains contingent on the complete CI for the final documentation HEAD.
+**PASS** — every benchmarked scenario preserved complete ordered-date parity, V2 was materially faster in the representative monthly scenarios (2.3209x–18.9621x; frequent availability 4.3019x), and the result was produced reproducibly in the disposable GitHub Actions stack. The final documentation head `5e2bf5adfa4f82f225641a89e8b57f9c3a1f9854` completed the full PR CI green, including benchmark, Database Core, canonical rebuild, migration history, RLS, contracts, Edge Auth, pgTAP, Consolidated Audit, Demand Capture, and Mandatory Deploy Gate.
 
 PUBLIC ENDPOINT STILL USES V1. No cutover, merge, V1 removal, HOLD change, or public-contract change is included.

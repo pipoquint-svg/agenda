@@ -4,7 +4,7 @@
 
 PR #438
 Branch: `codex/agenda-pr03-month-engine-v2`
-Current benchmark-code HEAD: `0b7dd14` (documentation update pending CI).
+Current validated HEAD: `5e2bf5adfa4f82f225641a89e8b57f9c3a1f9854`.
 
 Current PR rules:
 - keep PR draft
@@ -32,11 +32,11 @@ Public endpoint still uses V1.
 
 ## Current gate
 
-Gate 03-C is complete once the final documentation-only HEAD completes its CI green.
+Gate 03-C is PASS. The documentation-only HEAD `5e2bf5adfa4f82f225641a89e8b57f9c3a1f9854` is fully green: benchmark, Database Core, canonical rebuild, migration history, RLS, contracts, Edge Auth, pgTAP, Consolidated Audit, Demand Capture, and Mandatory Deploy Gate all passed.
 
 ## Next objective
 
-Monitor the final documentation-only push to green; then update the PR body with the validated 03-C summary and keep the PR draft for human review. Do not merge or cut over.
+Keep the PR draft for human review. Do not merge or cut over. PR-04 remains unstarted.
 
 ## Do not do yet
 
