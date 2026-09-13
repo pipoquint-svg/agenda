@@ -198,6 +198,21 @@ union all
 select 'public_notice_post', pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.post_start_at at time zone 'America/Sao_Paulo')::date)
 from public_notice_clock c;
 
+-- Restore the baseline before the original deterministic replays below.
+update public.services
+set minimum_booking_notice_minutes = 0,
+    maximum_booking_horizon_days = 5000,
+    public_minimum_booking_notice_hours = 0
+where id = '15800000-0000-0000-0000-000000000010';
+delete from public.availability_exceptions
+where reason in ('monthly-public-notice-pre','monthly-public-notice-post');
+insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time)
+values ('15800000-0000-0000-0000-000000000020',1,'09:00','12:00');
+insert into public.resource_availability_rules(resource_id,weekday,start_local_time,end_local_time)
+values
+ ('15800000-0000-0000-0000-000000000002',1,'08:00','13:00'),
+ ('15800000-0000-0000-0000-000000000003',1,'08:00','13:00');
+
 select ok((select result ?& array['input','dates','date_count','elapsed_ms'] from monthly_legacy where case_key='feb_28'),'legacy monthly capture serializes canonical payload');
 select is((select result->'dates' from monthly_legacy where case_key='feb_28'),(pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')->'dates'),'monthly dates are deterministic and ordered');
 select is((select result->'dates' from monthly_legacy where case_key='feb_28'),(select result->'dates' from monthly_v2 where case_key='feb_28'),'V1/V2 parity: 28-day February date set');

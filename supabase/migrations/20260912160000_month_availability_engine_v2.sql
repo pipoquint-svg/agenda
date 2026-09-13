@@ -268,6 +268,17 @@ begin
             where ra.resource_id = rr.resource_id
               and ra.status in ('HELD','AWAITING_PAYMENT','CONFIRMED','BLOCKED','EXTERNAL_ACTIVE')
               and ra.occupied_range && rr.occupied_range
+              and (
+                ra.status <> 'HELD'
+                or ra.allocation_type <> 'CHECKOUT_HOLD'
+                or exists (
+                  select 1
+                  from public.checkout_holds ch
+                  where ch.id = ra.checkout_hold_id
+                    and ch.status = 'ACTIVE'
+                    and ch.expires_at > v_now
+                )
+              )
               and not (
                 ra.status = 'AWAITING_PAYMENT'
                 and ra.appointment_id is not null
