@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(49);
+select plan(51);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -310,6 +310,27 @@ select ok(not (select result->'dates' ? '2035-03-05' from monthly_legacy where c
 select is((select result->'dates' from monthly_legacy where case_key='google_material_divergence'),(select result->'dates' from monthly_v2 where case_key='google_material_divergence'),'V1/V2 parity: material GOOGLE_EVENT_CONFLICT');
 select ok(not (select result->'dates' ? '2035-03-12' from monthly_legacy where case_key='google_person_divergence'),'PERSON GOOGLE_EVENT_CONFLICT removes its Monday in V1');
 select is((select result->'dates' from monthly_legacy where case_key='google_person_divergence'),(select result->'dates' from monthly_v2 where case_key='google_person_divergence'),'V1/V2 parity: PERSON GOOGLE_EVENT_CONFLICT');
+
+-- The public monthly duration bridge accepts contracted minutes for FIXED
+-- services too, resolving them before its unchanged V1 daily invocation.
+insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,buffer_before_minutes,buffer_after_minutes,minimum_people,maximum_people,maximum_booking_horizon_days,duration_mode,booking_block_minutes,minimum_booking_blocks,maximum_booking_blocks,price_per_block) values
+ ('15800000-0000-0000-0000-000000000060','15800000-0000-0000-0000-000000000001','Monthly parity fixed','monthly-parity-fixed',60,100,0,0,1,4,5000,'FIXED',null,null,null,null);
+insert into public.service_employees(id,service_id,employee_id) values
+ ('15800000-0000-0000-0000-000000000061','15800000-0000-0000-0000-000000000060','15800000-0000-0000-0000-000000000004');
+insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent) values
+ ('15800000-0000-0000-0000-000000000060',0,0,0,0,0);
+insert into public.service_resources(service_id,resource_id) values
+ ('15800000-0000-0000-0000-000000000060','15800000-0000-0000-0000-000000000003');
+insert into public.booking_page_services(booking_page_id,service_id,sort_order)
+select id,'15800000-0000-0000-0000-000000000060',1000 from public.booking_pages where slug='blacksheep';
+insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time) values
+ ('15800000-0000-0000-0000-000000000061',1,'09:00','12:00');
+insert into monthly_legacy values
+ ('fixed',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000060','15800000-0000-0000-0000-000000000061',60,'[]',1,'2035-04-01'));
+insert into monthly_v2 values
+ ('fixed',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000060','15800000-0000-0000-0000-000000000061',60,'[]',1,'2035-04-01'));
+select ok((select result->'dates' ? '2035-04-02' from monthly_legacy where case_key='fixed'),'FIXED monthly contract returns a V1 date');
+select is((select result->'dates' from monthly_legacy where case_key='fixed'),(select result->'dates' from monthly_v2 where case_key='fixed'),'V1/V2 parity: FIXED monthly duration contract');
 
 select * from finish();
 rollback;
