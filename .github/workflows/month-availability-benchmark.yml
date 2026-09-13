@@ -1,0 +1,39 @@
+name: Month Availability V2 Benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260912160000_month_availability_engine_v2.sql'
+      - 'supabase/tests/database/158_monthly_availability_differential_harness.test.sql'
+      - 'scripts/benchmark-month-availability-v2.sh'
+      - 'scripts/benchmarks/month-availability-v2.sql'
+      - 'scripts/benchmarks/month-availability-v2-fixture.sql'
+      - '.github/workflows/month-availability-benchmark.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client jq
+      - run: supabase start
+      - run: supabase db reset
+      - name: Benchmark V1 and private V2
+        run: bash scripts/benchmark-month-availability-v2.sh
+      - name: Publish summary
+        run: cat benchmark-results.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: month-availability-v2-benchmark
+          path: |
+            benchmark-results.json
+            benchmark-results.md
+            benchmark-explain.txt
+      - if: always()
+        run: supabase stop --no-backup || true
