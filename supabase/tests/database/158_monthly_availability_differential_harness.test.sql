@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(55);
+select plan(54);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -123,6 +123,26 @@ insert into monthly_legacy values
  ('extras',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
 
 create temp table monthly_v2(case_key text primary key, result jsonb not null);
+create temp table monthly_public(case_key text primary key, result jsonb not null);
+create function pg_temp.capture_public_month_after_v2() returns trigger language plpgsql as $$
+begin
+  insert into monthly_public
+  select new.case_key, jsonb_build_object(
+    'dates', coalesce(jsonb_agg(to_char(local_date, 'YYYY-MM-DD') order by local_date), '[]'::jsonb)
+  )
+  from public.public_list_available_dates_month(
+    new.result->'input'->>'booking_page_slug',
+    (new.result->'input'->>'service_id')::uuid,
+    (new.result->'input'->>'service_employee_id')::uuid,
+    (new.result->'input'->>'contracted_minutes')::integer,
+    new.result->'input'->'extras',
+    (new.result->'input'->>'people_count')::integer,
+    (new.result->'input'->>'month')::date
+  );
+  return new;
+end $$;
+create trigger capture_public_month_after_v2 after insert on monthly_v2
+for each row execute function pg_temp.capture_public_month_after_v2();
 insert into monthly_v2 values
  ('feb_28',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')),
  ('feb_29',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2036-02-01')),
@@ -337,20 +357,8 @@ select is((select result->'dates' from monthly_legacy where case_key='fixed'),(s
 select ok(
   not exists (
     select 1
-    from monthly_v2 v
-    cross join lateral (
-      select coalesce(jsonb_agg(to_char(local_date, 'YYYY-MM-DD') order by local_date), '[]'::jsonb) as dates
-      from public.public_list_available_dates_month(
-        v.result->'input'->>'booking_page_slug',
-        (v.result->'input'->>'service_id')::uuid,
-        (v.result->'input'->>'service_employee_id')::uuid,
-        (v.result->'input'->>'contracted_minutes')::integer,
-        v.result->'input'->'extras',
-        (v.result->'input'->>'people_count')::integer,
-        (v.result->'input'->>'month')::date
-      )
-    ) public_capture
-    where public_capture.dates is distinct from v.result->'dates'
+    from monthly_v2 v join monthly_public p using (case_key)
+    where p.result->'dates' is distinct from v.result->'dates'
   ),
   'public bridge matches V2 for every captured monthly scenario after cutover'
 );
