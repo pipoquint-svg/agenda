@@ -35,7 +35,41 @@ Create only the additive tenant foundation:
 - `tenant_settings`
 - `tenant_capabilities`
 
-Do not add `tenant_id` broadly to existing domain tables yet. Do not change public RPCs, frontend, booking, checkout, holds, Google sync, finance, availability, or `operation_settings.id=1` behavior. BASIC/ADVANCED behavior remains deferred.
+Do not add `tenant_id` broadly to existing domain tables yet. Do not change public RPCs, frontend, booking, checkout, holds, Google sync runtime, finance, availability, or `operation_settings.id=1` behavior. BASIC/ADVANCED behavior remains deferred.
+
+## Google Calendar — mandatory multitenant architecture constraint
+
+PR-05 must record and preserve the following architecture decisions. Do not implement Amelia's fixed `2000 events` model literally and do not expose a user-facing `maximum Google events` setting.
+
+Verified provider facts as of 2026-09-13:
+- Google Calendar `events.list` returns 250 events per page by default;
+- `maxResults` is capped at 2500 events per page;
+- additional results require pagination via `nextPageToken`;
+- the new Google Calendar quota model documents 10,000 requests/minute per project, 600 requests/minute per user per project, and a 1,000,000 requests/day per-project billing threshold;
+- Google notes that some projects with earlier API usage may remain on previously assigned quotas, so actual project quotas must be treated as provider configuration, not hardcoded product guarantees.
+
+Canonical direction:
+
+`Google Calendar -> bounded/paginated ingestion -> local materialization -> availability engine`
+
+Hard requirements for later Google tenant implementation:
+- never enumerate thousands of remote events on every availability request;
+- availability remains local-first, using materialized Google state;
+- use bounded operational windows derived from the bookable horizon plus safety margin, not unbounded calendar history;
+- distinguish provider pagination cursor from incremental `sync_token`;
+- pagination is continuation, never silent truncation;
+- internal per-run budgets may include pages, events and runtime, but exact values are operational/configurable internals rather than product limits;
+- if a run stops before consuming all required pages, coverage is `PARTIAL`/incomplete and continuation must be persisted/enqueued;
+- freshness and completeness are separate dimensions;
+- Google-backed booking is safe only when the required interval is both fresh enough and fully covered; partial/unknown/rebuilding coverage remains fail-closed;
+- synchronization work must be fair at global -> tenant -> connection/calendar levels so one large tenant cannot monopolize workers;
+- retry rate limits with truncated exponential backoff/jitter and avoid synchronized full-sync bursts;
+- preserve idempotent/resumable jobs and local materialization through existing Google event/allocation/divergence structures;
+- track observability needed for capacity planning: requests, pages/events, continuation count, sync lag, partial duration, 429/rate-limit retries, queue age and fail-closed resources by tenant/calendar.
+
+Existing architecture PR #440 contains the detailed documentation for these rules. Incorporate that document into this PR-05 branch (cherry-pick or equivalent), update it with the verified Google pagination/quota facts above, and then close/supersede PR #440 so there is one canonical change path.
+
+Important scope boundary: PR-05 defines tenant identity/foundation and records these Google constraints. It must NOT rewrite the Google worker or add tenant ownership to existing Google tables yet. The runtime tenant-scope/worker implementation remains for the later integrations/jobs tenant gate after core tenant ownership/security are established.
 
 ## Gate 05-A — inspect first
 
@@ -81,13 +115,13 @@ Run canonical rebuild and full authoritative CI. Push is not completion: monitor
 
 Open a draft PR titled approximately `feat(agenda): add multi-tenant foundation`.
 
-The PR body must state: additive foundation only; four tables; BlackSheep bootstrap; no domain tenant cutover; no public/frontend/runtime behavior change; Gate 05-0 result; Gate 05-A findings; tests/CI; forward-only rollback; PR-06 out of scope.
+The PR body must state: additive foundation only; four tables; BlackSheep bootstrap; Google multitenant constraints documented but Google runtime unchanged; no domain tenant cutover; no public/frontend/runtime behavior change; Gate 05-0 result; Gate 05-A findings; tests/CI; forward-only rollback; PR-06 out of scope.
 
 Update this handoff with branch, HEAD, migration, tests, CI and blockers.
 
 ## Stop conditions
 
-Do not merge. Do not deploy PR-05. Do not start PR-06. Do not add tenant ownership to existing domain tables. Do not add cache/Redis/Kafka/microservices/db-per-tenant/partitioning.
+Do not merge. Do not deploy PR-05. Do not start PR-06. Do not add tenant ownership to existing domain tables. Do not rewrite Google sync runtime in this PR. Do not add cache/Redis/Kafka/microservices/db-per-tenant/partitioning.
 
 Stop only when PR-05 is published and authorized gates are green, or when a genuine architecture/business decision requires human approval.
 
