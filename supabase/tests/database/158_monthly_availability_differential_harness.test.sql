@@ -255,12 +255,11 @@ select ok(position('list_available_slots_for_duration' in pg_get_functiondef('ag
 
 -- Google fixtures deliberately run after the baseline assertions above so their
 -- mappings cannot change the original deterministic captures.
-insert into public.google_connections(id,account_email,refresh_token_ciphertext,token_encryption_version,scopes,status) values
- ('15800000-0000-0000-0000-000000000050','monthly-person@example.invalid','fixture',1,array['calendar.events'],'ACTIVE'),
- ('15800000-0000-0000-0000-000000000051','monthly-studio@example.invalid','fixture',1,array['calendar.events'],'ACTIVE');
+insert into public.google_connections(id,account_email,refresh_token_ciphertext,token_encryption_version,scopes,status,owner_type,employee_id) values
+ ('15800000-0000-0000-0000-000000000050','monthly-person@example.invalid','fixture',1,array['calendar.events'],'ACTIVE','EMPLOYEE','15800000-0000-0000-0000-000000000004');
 insert into public.google_calendars(id,google_connection_id,google_calendar_id,name,timezone,is_active) values
  ('15800000-0000-0000-0000-000000000052','15800000-0000-0000-0000-000000000050','monthly-person-calendar','Monthly person','America/Sao_Paulo',true),
- ('15800000-0000-0000-0000-000000000053','15800000-0000-0000-0000-000000000051','monthly-studio-calendar','Monthly studio','America/Sao_Paulo',true);
+ ('15800000-0000-0000-0000-000000000053','15800000-0000-0000-0000-000000000050','monthly-studio-calendar','Monthly studio','America/Sao_Paulo',true);
 insert into public.google_calendar_resources(google_calendar_id,resource_id) values
  ('15800000-0000-0000-0000-000000000052','15800000-0000-0000-0000-000000000002'),
  ('15800000-0000-0000-0000-000000000053','15800000-0000-0000-0000-000000000003');
