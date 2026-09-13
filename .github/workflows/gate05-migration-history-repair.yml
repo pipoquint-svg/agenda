@@ -2,6 +2,11 @@ name: Gate 05 Migration History Repair
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/agenda-pr05-tenant-foundation
+    paths:
+      - .github/workflows/gate05-migration-history-repair.yml
 
 jobs:
   repair-history:
