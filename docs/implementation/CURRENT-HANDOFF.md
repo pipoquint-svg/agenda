@@ -25,7 +25,13 @@ Observed mapping:
 
 Before creating any PR-05 migration, use the supported Supabase CLI migration-history repair workflow to align remote history with the canonical repository versions. Verify actual CLI syntax/version first. Then prove with migration-list plus a dry-run/preview that PR-02/03/04 would not be replayed.
 
-Do not change application schema during Gate 05-0. If actual remote history differs from the mapping above, stop and report instead of guessing.
+The supported CLI workflow has aligned those three mappings and, with explicit authorization, reverted five additional remote-only history entries:
+`20260910220506`, `20260910224148`, `20260912110723`, `20260912131016`, and `20260912131034`.
+
+No application schema was changed. The resulting dry-run is now blocked by four *local-only* migrations that precede the last remote migration:
+`20260910164500_admin_agenda_google_event_display_id.sql`, `20260910213000_admin_customers_operation_scope.sql`, `20260912021000_add_sabrina_contextual_booking_pages.sql`, and `20260912110500_finance_launches_range.sql`.
+
+Do not mark these local migrations applied, execute them, or use `--include-all` without explicit confirmation of their production-schema provenance. Gate 05-0 remains blocked pending that decision.
 
 ## PR-05 objective
 
