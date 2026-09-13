@@ -39,37 +39,25 @@ Do not add `tenant_id` broadly to existing domain tables yet. Do not change publ
 
 ## Google Calendar — mandatory multitenant architecture constraint
 
-PR-05 must record and preserve the following architecture decisions. Do not implement Amelia's fixed `2000 events` model literally and do not expose a user-facing `maximum Google events` setting.
+The detailed decision now lives in this PR-05 branch at:
+`docs/GOOGLE_SYNC_SCALABILITY_ARCHITECTURE_2026-09-13.md`.
 
-Verified provider facts as of 2026-09-13:
-- Google Calendar `events.list` returns 250 events per page by default;
-- `maxResults` is capped at 2500 events per page;
-- additional results require pagination via `nextPageToken`;
-- the new Google Calendar quota model documents 10,000 requests/minute per project, 600 requests/minute per user per project, and a 1,000,000 requests/day per-project billing threshold;
-- Google notes that some projects with earlier API usage may remain on previously assigned quotas, so actual project quotas must be treated as provider configuration, not hardcoded product guarantees.
-
-Canonical direction:
-
-`Google Calendar -> bounded/paginated ingestion -> local materialization -> availability engine`
-
-Hard requirements for later Google tenant implementation:
+PR-05 must preserve these rules:
+- do not implement Amelia's fixed `2000 events` model literally;
+- Google `events.list` is paginated: default 250 events/page, max 2500/page, with `nextPageToken` for continuation;
+- current new-model Google Calendar quotas are 10,000 req/min per project, 600 req/min per user/project, and a 1,000,000 req/day per-project billing threshold; older projects may retain earlier assigned quotas, so these are provider capacity inputs, not product guarantees;
+- canonical flow is `Google Calendar -> bounded/paginated ingestion -> local materialization -> availability engine`;
 - never enumerate thousands of remote events on every availability request;
-- availability remains local-first, using materialized Google state;
-- use bounded operational windows derived from the bookable horizon plus safety margin, not unbounded calendar history;
-- distinguish provider pagination cursor from incremental `sync_token`;
+- use bounded operational windows derived from booking horizon plus safety margin, not unbounded history;
+- provider pagination cursor and incremental `sync_token` are different concepts;
 - pagination is continuation, never silent truncation;
-- internal per-run budgets may include pages, events and runtime, but exact values are operational/configurable internals rather than product limits;
-- if a run stops before consuming all required pages, coverage is `PARTIAL`/incomplete and continuation must be persisted/enqueued;
+- internal page/event/runtime budgets are operational controls, not ordinary user settings;
 - freshness and completeness are separate dimensions;
-- Google-backed booking is safe only when the required interval is both fresh enough and fully covered; partial/unknown/rebuilding coverage remains fail-closed;
-- synchronization work must be fair at global -> tenant -> connection/calendar levels so one large tenant cannot monopolize workers;
-- retry rate limits with truncated exponential backoff/jitter and avoid synchronized full-sync bursts;
-- preserve idempotent/resumable jobs and local materialization through existing Google event/allocation/divergence structures;
-- track observability needed for capacity planning: requests, pages/events, continuation count, sync lag, partial duration, 429/rate-limit retries, queue age and fail-closed resources by tenant/calendar.
+- Google-backed booking is safe only when the required interval is fresh enough and fully covered; PARTIAL/UNKNOWN/REBUILDING remains fail-closed;
+- synchronization fairness must exist at global -> tenant -> connection/calendar levels;
+- later runtime work needs idempotent/resumable jobs, backoff/jitter, observability and no synchronized full-sync bursts.
 
-Existing architecture PR #440 contains the detailed documentation for these rules. Incorporate that document into this PR-05 branch (cherry-pick or equivalent), update it with the verified Google pagination/quota facts above, and then close/supersede PR #440 so there is one canonical change path.
-
-Important scope boundary: PR-05 defines tenant identity/foundation and records these Google constraints. It must NOT rewrite the Google worker or add tenant ownership to existing Google tables yet. The runtime tenant-scope/worker implementation remains for the later integrations/jobs tenant gate after core tenant ownership/security are established.
+PR-05 records these constraints and creates tenant foundation only. It must NOT rewrite the Google worker or add tenant ownership to existing Google tables yet. That implementation belongs to the later integrations/jobs tenant gate after core tenant ownership/security exist.
 
 ## Gate 05-A — inspect first
 
