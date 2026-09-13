@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(51);
+select plan(49);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
