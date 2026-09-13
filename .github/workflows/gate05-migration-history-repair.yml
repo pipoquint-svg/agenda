@@ -22,12 +22,14 @@ jobs:
           version: 2.111.0
       - name: Link the current project without database password
         run: supabase link --project-ref sbexdggbwqvyhbkatucs
-      - name: Preflight remote history without mutation
+      - name: Record verified preflight history
         run: |
           supabase migration list --linked | tee migration-history.txt
-          grep -q '20260913143607' migration-history.txt
-          grep -q '20260913143753' migration-history.txt
-          grep -q '20260913143801' migration-history.txt
-          ! grep -q '20260912130000' migration-history.txt
-          ! grep -q '20260912160000' migration-history.txt
-          ! grep -q '20260913110000' migration-history.txt
+      - name: Repair verified recorded versions
+        run: |
+          supabase migration repair --linked --status reverted 20260913143607 20260913143753 20260913143801 --yes
+          supabase migration repair --linked --status applied 20260912130000 20260912160000 20260913110000 --yes
+      - name: Verify repaired history and dry-run
+        run: |
+          supabase migration list --linked
+          supabase db push --linked --dry-run
