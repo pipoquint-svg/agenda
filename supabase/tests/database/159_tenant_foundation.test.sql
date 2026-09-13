@@ -30,6 +30,8 @@ insert into public.tenants(id, name, slug) values
 insert into public.tenant_members(tenant_id, user_id, role) values
   ('15900000-0000-4000-8000-000000000010', '15900000-0000-4000-8000-000000000001', 'OWNER'),
   ('15900000-0000-4000-8000-000000000011', '15900000-0000-4000-8000-000000000001', 'ADMIN');
+insert into public.tenant_settings(tenant_id)
+values ('15900000-0000-4000-8000-000000000010');
 
 select is((select count(*) from public.tenant_members where user_id = '15900000-0000-4000-8000-000000000001'), 2::bigint, 'one user may belong to multiple tenants');
 select throws_ok(
