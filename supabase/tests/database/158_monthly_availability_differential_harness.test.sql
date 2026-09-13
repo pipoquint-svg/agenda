@@ -175,26 +175,28 @@ select date_trunc('hour', now()) + interval '1 hour' as pre_start_at,
        date_trunc('hour', now()) + interval '6 hours' as post_start_at;
 insert into public.availability_exceptions(service_employee_id,exception_type,start_at,end_at,reason)
 select '15800000-0000-0000-0000-000000000020'::uuid, 'OPEN', c.pre_start_at, c.pre_start_at + interval '1 hour', 'monthly-public-notice-pre'
-from public_notice_clock c
-union all
-select '15800000-0000-0000-0000-000000000020'::uuid, 'OPEN', c.post_start_at, c.post_start_at + interval '1 hour', 'monthly-public-notice-post'
 from public_notice_clock c;
 insert into public.availability_exceptions(resource_id,exception_type,start_at,end_at,reason)
 select r.resource_id, 'OPEN', c.pre_start_at - interval '15 minutes', c.pre_start_at + interval '75 minutes', 'monthly-public-notice-pre'
-from public_notice_clock c cross join (values ('15800000-0000-0000-0000-000000000002'::uuid),('15800000-0000-0000-0000-000000000003'::uuid)) r(resource_id)
-union all
-select r.resource_id, 'OPEN', c.post_start_at - interval '15 minutes', c.post_start_at + interval '75 minutes', 'monthly-public-notice-post'
 from public_notice_clock c cross join (values ('15800000-0000-0000-0000-000000000002'::uuid),('15800000-0000-0000-0000-000000000003'::uuid)) r(resource_id);
 insert into monthly_legacy
 select 'public_notice_pre', pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.pre_start_at at time zone 'America/Sao_Paulo')::date)
-from public_notice_clock c
-union all
-select 'public_notice_post', pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.post_start_at at time zone 'America/Sao_Paulo')::date)
 from public_notice_clock c;
 insert into monthly_v2
 select 'public_notice_pre', pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.pre_start_at at time zone 'America/Sao_Paulo')::date)
-from public_notice_clock c
-union all
+from public_notice_clock c;
+
+delete from public.availability_exceptions where reason = 'monthly-public-notice-pre';
+insert into public.availability_exceptions(service_employee_id,exception_type,start_at,end_at,reason)
+select '15800000-0000-0000-0000-000000000020'::uuid, 'OPEN', c.post_start_at, c.post_start_at + interval '1 hour', 'monthly-public-notice-post'
+from public_notice_clock c;
+insert into public.availability_exceptions(resource_id,exception_type,start_at,end_at,reason)
+select r.resource_id, 'OPEN', c.post_start_at - interval '15 minutes', c.post_start_at + interval '75 minutes', 'monthly-public-notice-post'
+from public_notice_clock c cross join (values ('15800000-0000-0000-0000-000000000002'::uuid),('15800000-0000-0000-0000-000000000003'::uuid)) r(resource_id);
+insert into monthly_legacy
+select 'public_notice_post', pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.post_start_at at time zone 'America/Sao_Paulo')::date)
+from public_notice_clock c;
+insert into monthly_v2
 select 'public_notice_post', pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,(c.post_start_at at time zone 'America/Sao_Paulo')::date)
 from public_notice_clock c;
 
