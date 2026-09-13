@@ -2,15 +2,14 @@
 
 ## Active PR
 
-PR #438
-Branch: `codex/agenda-pr03-month-engine-v2`
-Current validated HEAD: `5e2bf5adfa4f82f225641a89e8b57f9c3a1f9854`.
+PR #439
+Branch: `codex/agenda-pr04-month-engine-cutover`
+Current validated HEAD: `fe2fd062f6e91ca87744488f85dff1e23e779d11`.
 
 Current PR rules:
 - keep PR draft
 - do not merge
-- public monthly endpoint remains on V1
-- do not start PR-04
+- do not start PR-05
 
 ## Completed
 
@@ -28,21 +27,28 @@ Each scenario has ordered full-date V1/V2 parity, two warmups, and seven measure
 
 EXPLAIN is honestly limited to Function Scan for the PL/pgSQL entry point. The benchmark report contains the exact observable rows/timing/buffer values and names no index candidate.
 
-Public endpoint still uses V1.
+PR-03 is merged into `main` as PR #438. Its V2 remains the implementation introduced by the controlled PR-04 cutover below.
 
 ## Current gate
 
-Gate 03-C is PASS. The documentation-only HEAD `5e2bf5adfa4f82f225641a89e8b57f9c3a1f9854` is fully green: benchmark, Database Core, canonical rebuild, migration history, RLS, contracts, Edge Auth, pgTAP, Consolidated Audit, Demand Capture, and Mandatory Deploy Gate all passed.
+## PR-04 — Controlled Month V2 Cutover
+
+PASS on head `fe2fd062f6e91ca87744488f85dff1e23e779d11`.
+
+Migration `20260913110000_month_availability_v2_cutover.sql` preserves the V1 monthly implementation as private `agenda_internal.list_available_dates_month_v1_legacy(...)` (SECURITY DEFINER, fixed empty search path, no EXECUTE for PUBLIC/anon/authenticated) and changes only `agenda_public_bridge.list_available_dates_month_impl(...)` to call V2. The public wrapper signature, return shape, grants, and SECURITY INVOKER/DEFINER boundary remain unchanged.
+
+The harness captures V1 oracle × V2 and public bridge × V2 at the same fixture state for every scenario. Database Core, canonical rebuild, migration history, RLS, contracts, Edge Auth, pgTAP, benchmark, Consolidated Audit, and Demand Capture passed.
+
+Rollback is forward-only: a future migration may repoint the existing bridge to the preserved private V1 oracle. Do not edit applied migrations or remove V1.
 
 ## Next objective
 
-Keep the PR draft for human review. Do not merge or cut over. PR-04 remains unstarted.
+Keep PR #439 draft for human review. Do not merge. The next gate is review/approval of this controlled cutover; PR-05 remains unstarted.
 
 ## Do not do yet
 
 - no merge
-- no public cutover
-- no PR-04
+- no PR-05
 - no tenant work
 - no cache layer
 

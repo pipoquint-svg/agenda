@@ -12,7 +12,7 @@ declare v_started timestamptz := clock_timestamp(); v_dates jsonb;
 begin
   select coalesce(jsonb_agg(to_char(local_date, 'YYYY-MM-DD') order by local_date), '[]'::jsonb)
     into v_dates
-  from public.public_list_available_dates_month(
+  from agenda_internal.list_available_dates_month_v1_legacy(
     p_page_slug, p_service_id, p_service_employee_id, p_contracted_minutes,
     p_extras, p_people_count, p_month
   );
@@ -48,7 +48,7 @@ begin
   );
 end $$;
 
-select plan(51);
+select plan(54);
 
 insert into public.categories(id,name,slug) values ('15800000-0000-0000-0000-000000000001','Monthly parity','monthly-parity');
 insert into public.resources(id,name,resource_type) values
@@ -123,6 +123,26 @@ insert into monthly_legacy values
  ('extras',pg_temp.monthly_availability_capture_legacy('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[{"extra_id":"15800000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15800000-0000-0000-0000-000000000031","quantity":1}]',1,'2035-01-01'));
 
 create temp table monthly_v2(case_key text primary key, result jsonb not null);
+create temp table monthly_public(case_key text primary key, result jsonb not null);
+create function pg_temp.capture_public_month_after_v2() returns trigger language plpgsql as $$
+begin
+  insert into monthly_public
+  select new.case_key, jsonb_build_object(
+    'dates', coalesce(jsonb_agg(to_char(local_date, 'YYYY-MM-DD') order by local_date), '[]'::jsonb)
+  )
+  from public.public_list_available_dates_month(
+    new.result->'input'->>'booking_page_slug',
+    (new.result->'input'->>'service_id')::uuid,
+    (new.result->'input'->>'service_employee_id')::uuid,
+    (new.result->'input'->>'contracted_minutes')::integer,
+    new.result->'input'->'extras',
+    (new.result->'input'->>'people_count')::integer,
+    (new.result->'input'->>'month')::date
+  );
+  return new;
+end $$;
+create trigger capture_public_month_after_v2 after insert on monthly_v2
+for each row execute function pg_temp.capture_public_month_after_v2();
 insert into monthly_v2 values
  ('feb_28',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2035-02-01')),
  ('feb_29',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000010','15800000-0000-0000-0000-000000000020',60,'[]',1,'2036-02-01')),
@@ -251,9 +271,11 @@ select is((select result->'dates' from monthly_legacy where case_key='public_not
 select ok((select result->'dates' ? to_char(c.post_start_at at time zone 'America/Sao_Paulo','YYYY-MM-DD') from monthly_legacy l cross join public_notice_clock c where l.case_key='public_notice_post'),'public_minimum_booking_notice_hours retains the post-cutoff date in V1');
 select is((select result->'dates' from monthly_legacy where case_key='public_notice_post'),(select result->'dates' from monthly_v2 where case_key='public_notice_post'),'V1/V2 parity: public notice post-cutoff date');
 select ok((select (result->>'elapsed_ms')::numeric >= 0 from monthly_legacy where case_key='feb_28'),'monthly elapsed time is recorded outside comparison');
+select ok(to_regprocedure('agenda_internal.list_available_dates_month_v1_legacy(text,uuid,uuid,integer,jsonb,integer,date)') is not null,'private V1 legacy oracle exists after cutover');
+select ok(not has_function_privilege('anon','agenda_internal.list_available_dates_month_v1_legacy(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE') and not has_function_privilege('authenticated','agenda_internal.list_available_dates_month_v1_legacy(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE'),'V1 oracle is not callable by app roles');
 select ok(to_regprocedure('agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)') is not null,'private V2 month engine exists');
 select ok(not has_function_privilege('anon','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE') and not has_function_privilege('authenticated','agenda_internal.list_available_dates_month_v2(text,uuid,uuid,integer,jsonb,integer,date)','EXECUTE'),'V2 engine is not callable by app roles');
-select ok(position('list_available_slots_for_duration' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) > 0 and position('list_available_dates_month_v2' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) = 0,'public monthly bridge remains on V1 before V2 exists');
+select ok(position('list_available_dates_month_v2' in pg_get_functiondef('agenda_public_bridge.list_available_dates_month_impl(text,uuid,uuid,integer,jsonb,integer,date)'::regprocedure)) > 0,'public monthly bridge delegates to V2 after controlled cutover');
 
 -- Google fixtures deliberately run after the baseline assertions above so their
 -- mappings cannot change the original deterministic captures.
@@ -331,6 +353,15 @@ insert into monthly_v2 values
  ('fixed',pg_temp.monthly_availability_capture_v2('blacksheep','15800000-0000-0000-0000-000000000060','15800000-0000-0000-0000-000000000061',60,'[]',1,'2035-04-01'));
 select ok((select result->'dates' ? '2035-04-02' from monthly_legacy where case_key='fixed'),'FIXED monthly contract returns a V1 date');
 select is((select result->'dates' from monthly_legacy where case_key='fixed'),(select result->'dates' from monthly_v2 where case_key='fixed'),'V1/V2 parity: FIXED monthly duration contract');
+
+select ok(
+  not exists (
+    select 1
+    from monthly_v2 v join monthly_public p using (case_key)
+    where p.result->'dates' is distinct from v.result->'dates'
+  ),
+  'public bridge matches V2 for every captured monthly scenario after cutover'
+);
 
 select * from finish();
 rollback;
