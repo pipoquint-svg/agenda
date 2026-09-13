@@ -25,10 +25,9 @@ jobs:
       - name: Record verified preflight history
         run: |
           supabase migration list --linked | tee migration-history.txt
-      - name: Repair verified recorded versions
+      - name: Revert verified remote-only history entries
         run: |
-          supabase migration repair --linked --status reverted 20260913143607 20260913143753 20260913143801 --yes
-          supabase migration repair --linked --status applied 20260912130000 20260912160000 20260913110000 --yes
+          supabase migration repair --linked --status reverted 20260910220506 20260910224148 20260912110723 20260912131016 20260912131034 --yes
       - name: Verify repaired history and dry-run
         run: |
           supabase migration list --linked
