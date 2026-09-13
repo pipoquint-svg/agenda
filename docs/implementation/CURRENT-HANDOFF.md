@@ -1,57 +1,96 @@
 # CURRENT HANDOFF — Agenda
 
-## Active PR
+## Active work
 
-PR #439
-Branch: `codex/agenda-pr04-month-engine-cutover`
-Current validated HEAD: `fe2fd062f6e91ca87744488f85dff1e23e779d11`.
+PR-05 — Tenant Foundation
+Branch: `codex/agenda-pr05-tenant-foundation`
+Base main: `f6021d9fc816b174ec62e31f5a7ad66774e584e8`
 
-Current PR rules:
-- keep PR draft
-- do not merge
-- do not start PR-05
+PR-05 is authorized. Do not merge, do not deploy PR-05, and do not start PR-06.
 
-## Completed
+## Completed before PR-05
 
-### Gate 03-B
-PASS.
+PR-04 is merged and the monthly V2 engine is live in production. Production smoke tests passed for BlackSheep and Sabrina. The public monthly endpoint delegates to V2, V1 remains private as rollback oracle, ACLs are preserved, and post-merge CI completed successfully.
 
-The monthly V1 × V2 parity matrix is complete, including exceptions, occupancy, bounds, duration modes, extras/resource ranges, Google readiness/divergences, calendar shapes, and year boundary.
+Do not reopen PR-02/03/04 decisions in this PR.
 
-### Gate 03-C — representative benchmark
-PASS pending final documentation-head CI.
+## Gate 05-0 — migration history alignment
 
-Authoritative GitHub Actions workflow `Month Availability V2 Benchmark`, run `34757040792`, succeeded on a GitHub-hosted Ubuntu runner using Supabase CLI 2.111.0 and disposable local Supabase/PostgreSQL. The dedicated fixture is transaction-scoped and rolls back after measurement.
+The three performance migrations were applied through the Supabase connector and production recorded execution-time versions rather than the repository filename versions.
 
-Each scenario has ordered full-date V1/V2 parity, two warmups, and seven measured samples per engine. Median results: frequent 1046.270/243.210 ms (4.3019x), low 183.626/40.614 ms (4.5212x), zero 19.493/1.028 ms (18.9621x), resource-heavy 1041.971/236.905 ms (4.3983x), extras 1338.345/362.294 ms (3.6941x), occupancy 548.742/236.437 ms (2.3209x), all V1/V2 respectively. Google/divergence is not reliably timing-benchmarkable in the dedicated fixture; Gate 03-B provides its direct functional parity.
+Observed mapping:
+- `20260913143607` -> `20260912130000_resolved_booking_base_context`
+- `20260913143753` -> `20260912160000_month_availability_engine_v2`
+- `20260913143801` -> `20260913110000_month_availability_v2_cutover`
 
-EXPLAIN is honestly limited to Function Scan for the PL/pgSQL entry point. The benchmark report contains the exact observable rows/timing/buffer values and names no index candidate.
+Before creating any PR-05 migration, use the supported Supabase CLI migration-history repair workflow to align remote history with the canonical repository versions. Verify actual CLI syntax/version first. Then prove with migration-list plus a dry-run/preview that PR-02/03/04 would not be replayed.
 
-PR-03 is merged into `main` as PR #438. Its V2 remains the implementation introduced by the controlled PR-04 cutover below.
+Do not change application schema during Gate 05-0. If actual remote history differs from the mapping above, stop and report instead of guessing.
 
-## Current gate
+## PR-05 objective
 
-## PR-04 — Controlled Month V2 Cutover
+Create only the additive tenant foundation:
+- `tenants`
+- `tenant_members`
+- `tenant_settings`
+- `tenant_capabilities`
 
-PASS on head `fe2fd062f6e91ca87744488f85dff1e23e779d11`.
+Do not add `tenant_id` broadly to existing domain tables yet. Do not change public RPCs, frontend, booking, checkout, holds, Google sync, finance, availability, or `operation_settings.id=1` behavior. BASIC/ADVANCED behavior remains deferred.
 
-Migration `20260913110000_month_availability_v2_cutover.sql` preserves the V1 monthly implementation as private `agenda_internal.list_available_dates_month_v1_legacy(...)` (SECURITY DEFINER, fixed empty search path, no EXECUTE for PUBLIC/anon/authenticated) and changes only `agenda_public_bridge.list_available_dates_month_impl(...)` to call V2. The public wrapper signature, return shape, grants, and SECURITY INVOKER/DEFINER boundary remain unchanged.
+## Gate 05-A — inspect first
 
-The harness captures V1 oracle × V2 and public bridge × V2 at the same fixture state for every scenario. Database Core, canonical rebuild, migration history, RLS, contracts, Edge Auth, pgTAP, benchmark, Consolidated Audit, and Demand Capture passed.
+Audit the current canonical identity/RBAC schema before writing the migration. Determine the existing authenticated user identity, current owner/admin representation, current team/member tables, RLS patterns, and any existing tenant-like objects. Reuse canonical identity rather than inventing a second user system.
 
-Rollback is forward-only: a future migration may repoint the existing bridge to the preserved private V1 oracle. Do not edit applied migrations or remove V1.
+Document how existing BlackSheep owner/admin users can be bootstrapped into tenant membership without changing current permissions.
 
-## Next objective
+## Gate 05-B — foundation migration
 
-Keep PR #439 draft for human review. Do not merge. The next gate is review/approval of this controlled cutover; PR-05 remains unstarted.
+After 05-A passes, create one forward-only additive migration for the four tables.
 
-## Do not do yet
+Required invariants:
+- tenant UUID primary key plus stable unique normalized slug/key;
+- explicit tenant status/lifecycle with no runtime effect yet;
+- `tenant_members` unique on `(tenant_id, user_id)` and one user may belong to multiple tenants;
+- membership semantics must map cleanly to existing RBAC rather than conflict with it;
+- `tenant_settings` at most one row per tenant and only foundation-level settings;
+- `tenant_capabilities` unique on `(tenant_id, capability_key)` with enabled state and optional config, but no plan enforcement;
+- explicit timestamps/checks/FKs/supporting indexes;
+- all four new tables RLS-enabled and closed by default to PUBLIC/anon/authenticated unless a proven runtime need exists;
+- service-role administrative/bootstrap access remains explicit;
+- no new tenant-selection SECURITY DEFINER helper unless Gate 05-A proves it is required.
 
-- no merge
-- no PR-05
-- no tenant work
-- no cache layer
+Bootstrap exactly one current tenant for the BlackSheep operation using stable canonical data. Backfill legitimate current owner/admin membership only from existing canonical identity/RBAC records. Do not guess or hardcode generated auth IDs. Keep bootstrap rebuild-safe and behavior-neutral.
+
+## Gate 05-C — proof
+
+Add focused tests proving:
+- BlackSheep tenant bootstrap exists;
+- tenant slug uniqueness/normalization;
+- multi-tenant membership is allowed but duplicate same-tenant membership is rejected;
+- one settings row per tenant;
+- duplicate capability key per tenant is rejected;
+- FK integrity;
+- anon/authenticated cannot directly access the new tables;
+- service-role boundary is explicit;
+- existing monthly public endpoint still resolves through V2;
+- existing critical booking/checkout tests remain green.
+
+Run canonical rebuild and full authoritative CI. Push is not completion: monitor every workflow to terminal state and fix reversible technical failures autonomously.
+
+## Deliverable
+
+Open a draft PR titled approximately `feat(agenda): add multi-tenant foundation`.
+
+The PR body must state: additive foundation only; four tables; BlackSheep bootstrap; no domain tenant cutover; no public/frontend/runtime behavior change; Gate 05-0 result; Gate 05-A findings; tests/CI; forward-only rollback; PR-06 out of scope.
+
+Update this handoff with branch, HEAD, migration, tests, CI and blockers.
+
+## Stop conditions
+
+Do not merge. Do not deploy PR-05. Do not start PR-06. Do not add tenant ownership to existing domain tables. Do not add cache/Redis/Kafka/microservices/db-per-tenant/partitioning.
+
+Stop only when PR-05 is published and authorized gates are green, or when a genuine architecture/business decision requires human approval.
 
 ## Resume instruction
 
-A short instruction such as `continue pelo handoff` means: verify remote HEAD/CI first, then execute only the currently authorized objective in this file.
+`Sincronize e continue pelo handoff` means: synchronize the remote branch first, read `AGENTS.md` and this file, verify GitHub state, then execute the authorized objective autonomously.
