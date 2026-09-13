@@ -23,15 +23,10 @@ Observed mapping:
 - `20260913143753` -> `20260912160000_month_availability_engine_v2`
 - `20260913143801` -> `20260913110000_month_availability_v2_cutover`
 
-Before creating any PR-05 migration, use the supported Supabase CLI migration-history repair workflow to align remote history with the canonical repository versions. Verify actual CLI syntax/version first. Then prove with migration-list plus a dry-run/preview that PR-02/03/04 would not be replayed.
+Gate 05-0 passed on 2026-09-13 through `.github/workflows/gate05-migration-history-repair.yml`.
+The supported CLI workflow aligned the three canonical performance versions, reverted the five verified remote-only entries, recorded `20260910164500`, `20260910213000`, and `20260912110500` as already applied after production evidence, and applied only `20260912021000_add_sabrina_contextual_booking_pages.sql` after explicit authorization and preflight.
 
-The supported CLI workflow has aligned those three mappings and, with explicit authorization, reverted five additional remote-only history entries:
-`20260910220506`, `20260910224148`, `20260912110723`, `20260912131016`, and `20260912131034`.
-
-No application schema was changed. The resulting dry-run is now blocked by four *local-only* migrations that precede the last remote migration:
-`20260910164500_admin_agenda_google_event_display_id.sql`, `20260910213000_admin_customers_operation_scope.sql`, `20260912021000_add_sabrina_contextual_booking_pages.sql`, and `20260912110500_finance_launches_range.sql`.
-
-Do not mark these local migrations applied, execute them, or use `--include-all` without explicit confirmation of their production-schema provenance. Gate 05-0 remains blocked pending that decision.
+The workflow ended with `supabase migration list --linked` aligned and `supabase db push --linked --dry-run` successful. Production schema work in Gate 05-0 was limited to the authorized `20260912021000` migration.
 
 ## PR-05 objective
 
@@ -70,6 +65,8 @@ PR-05 records these constraints and creates tenant foundation only. It must NOT 
 Audit the current canonical identity/RBAC schema before writing the migration. Determine the existing authenticated user identity, current owner/admin representation, current team/member tables, RLS patterns, and any existing tenant-like objects. Reuse canonical identity rather than inventing a second user system.
 
 Document how existing BlackSheep owner/admin users can be bootstrapped into tenant membership without changing current permissions.
+
+Gate 05-A is complete. `docs/implementation/PR-05-RBAC-AUDIT.md` records that `public.admin_users.auth_user_id` is the canonical Auth identity, with active `OWNER`/`ADMIN` rows as the only bootstrap source. No tenant-like organization table exists; `operation_scope` remains unrelated legacy domain context.
 
 ## Gate 05-B — foundation migration
 
