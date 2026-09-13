@@ -28,6 +28,11 @@ begin
   for i in 1..7 loop foreach e in array case when i%2=1 then array['V1','V2'] else array['V2','V1'] end loop t:=clock_timestamp(); x:=pg_temp.month_dates(e,extras); insert into benchmark_samples values(s,e,i,extract(epoch from clock_timestamp()-t)*1000); end loop; end loop;
   if s='low' then insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time) select '15900000-0000-0000-0000-000000000020',d,'08:00','18:00' from generate_series(0,6)d where d<>1; end if;
   if s='zero' then insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time) select '15900000-0000-0000-0000-000000000020',d,'08:00','18:00' from generate_series(0,6)d; end if;
+  if s='occupancy' then
+    delete from public.resource_allocations where appointment_id='15900000-0000-0000-0000-000000000041';
+    delete from public.appointments where id='15900000-0000-0000-0000-000000000041';
+    delete from public.customers where id='15900000-0000-0000-0000-000000000040';
+  end if;
  end loop;
 end $$;
 \copy (select scenario, min(elapsed_ms) filter(where engine='V1') as v1_min, percentile_cont(.5) within group(order by elapsed_ms) filter(where engine='V1') as v1_median, max(elapsed_ms) filter(where engine='V1') as v1_max, min(elapsed_ms) filter(where engine='V2') as v2_min, percentile_cont(.5) within group(order by elapsed_ms) filter(where engine='V2') as v2_median, max(elapsed_ms) filter(where engine='V2') as v2_max, percentile_cont(.5) within group(order by elapsed_ms) filter(where engine='V1')/nullif(percentile_cont(.5) within group(order by elapsed_ms) filter(where engine='V2'),0) speedup, count(*) filter(where engine='V1') iterations from benchmark_samples group by scenario order by scenario) to 'benchmark-results.csv' csv header;
@@ -35,7 +40,9 @@ end $$;
 \echo frequent availability V2
 explain (analyze,buffers) select * from agenda_internal.list_available_dates_month_v2('blacksheep','15900000-0000-0000-0000-000000000010','15900000-0000-0000-0000-000000000020',60,'[]',1,date '2035-01-01');
 \echo zero availability V2
+delete from public.availability_rules where service_employee_id='15900000-0000-0000-0000-000000000020';
 explain (analyze,buffers) select * from agenda_internal.list_available_dates_month_v2('blacksheep','15900000-0000-0000-0000-000000000010','15900000-0000-0000-0000-000000000020',60,'[]',1,date '2035-01-01');
+insert into public.availability_rules(service_employee_id,weekday,start_local_time,end_local_time) select '15900000-0000-0000-0000-000000000020',d,'08:00','18:00' from generate_series(0,6)d;
 \echo resource-heavy V2
 explain (analyze,buffers) select * from agenda_internal.list_available_dates_month_v2('blacksheep','15900000-0000-0000-0000-000000000010','15900000-0000-0000-0000-000000000020',60,'[{"extra_id":"15900000-0000-0000-0000-000000000030","quantity":1},{"extra_id":"15900000-0000-0000-0000-000000000031","quantity":1}]',1,date '2035-01-01');
 \o
