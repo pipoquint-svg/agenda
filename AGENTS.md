@@ -2,12 +2,14 @@
 
 Before substantive work:
 
-1. Read this file.
-2. Read `docs/implementation/CURRENT-HANDOFF.md`.
-3. Verify the actual branch, PR HEAD, diff, and CI state before acting.
-4. Use the handoff as the current scope and acceptance criteria.
+1. Verify the current branch and working tree.
+2. Fetch `origin` and synchronize the current branch with its remote counterpart before reading the handoff. Preserve any uncommitted local work; never reset, discard, or overwrite local changes just to sync. If local and remote changes conflict, stop only for that genuine conflict.
+3. Read this file.
+4. Read `docs/implementation/CURRENT-HANDOFF.md`.
+5. Verify the actual PR HEAD, diff, and CI state before acting.
+6. Use the handoff as the current scope and acceptance criteria.
 
-A short instruction such as `continue pelo handoff`, `prossiga`, or `continue` means: execute the current handoff without requiring the user to paste the full task again.
+A short instruction such as `continue pelo handoff`, `prossiga`, or `continue` means: synchronize safely, read the current handoff, and execute it without requiring the user to paste the full task again.
 
 ## Autonomous CI loop
 
