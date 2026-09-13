@@ -4,7 +4,7 @@
 
 PR #438
 Branch: `codex/agenda-pr03-month-engine-v2`
-Current validated HEAD before this handoff update: `ec25f99339d9cb61413ba6bd97aeb2883191cee7`
+Current benchmark-code HEAD: `0b7dd14` (documentation update pending CI).
 
 Current PR rules:
 - keep PR draft
@@ -19,54 +19,24 @@ PASS.
 
 The monthly V1 × V2 parity matrix is complete, including exceptions, occupancy, bounds, duration modes, extras/resource ranges, Google readiness/divergences, calendar shapes, and year boundary.
 
-### Gate 03-C0 — benchmark infrastructure smoke test
-PASS.
+### Gate 03-C — representative benchmark
+PASS pending final documentation-head CI.
 
-Authoritative GitHub Actions run:
-- workflow: `Month Availability V2 Benchmark`
-- run id: `34754971151`
-- result: SUCCESS
-- environment: GitHub-hosted Ubuntu runner + Supabase CLI 2.111.0 + disposable local Supabase/PostgreSQL
+Authoritative GitHub Actions workflow `Month Availability V2 Benchmark`, run `34757040792`, succeeded on a GitHub-hosted Ubuntu runner using Supabase CLI 2.111.0 and disposable local Supabase/PostgreSQL. The dedicated fixture is transaction-scoped and rolls back after measurement.
 
-Smoke benchmark scenario:
-- scenario: frequent availability, 31-day month
-- iterations: 7 measured samples per engine after warmup
-- parity: PASS
-- V1 median: 686.795 ms
-- V2 median: 138.583 ms
-- speedup: 4.9558387392393x
-- V1 min/max: 681.419 / 699.532 ms
-- V2 min/max: 134.855 / 143.227 ms
+Each scenario has ordered full-date V1/V2 parity, two warmups, and seven measured samples per engine. Median results: frequent 1046.270/243.210 ms (4.3019x), low 183.626/40.614 ms (4.5212x), zero 19.493/1.028 ms (18.9621x), resource-heavy 1041.971/236.905 ms (4.3983x), extras 1338.345/362.294 ms (3.6941x), occupancy 548.742/236.437 ms (2.3209x), all V1/V2 respectively. Google/divergence is not reliably timing-benchmarkable in the dedicated fixture; Gate 03-B provides its direct functional parity.
 
-EXPLAIN for V2 smoke run:
-- Function Scan on `list_available_dates_month_v2`
-- rows: 31
-- execution time: 134.048 ms
-- shared buffers hit: 15697
-
-Artifacts were published successfully in the benchmark workflow.
-
-Normal PR CI on HEAD `ec25f99339d9cb61413ba6bd97aeb2883191cee7` is fully green, including Database Core, Migration History, RLS, Edge Auth, pgTAP, Consolidated Audit, Demand Capture, and Mandatory Deploy Gate.
+EXPLAIN is honestly limited to Function Scan for the PL/pgSQL entry point. The benchmark report contains the exact observable rows/timing/buffer values and names no index candidate.
 
 Public endpoint still uses V1.
 
 ## Current gate
 
-Gate 03-C overall is NOT complete yet.
-
-Only the benchmark infrastructure smoke subgate (03-C0) is complete.
+Gate 03-C is complete once the final documentation-only HEAD completes its CI green.
 
 ## Next objective
 
-Await explicit authorization before expanding Gate 03-C to representative benchmark scenarios such as:
-- low availability
-- zero availability
-- resource-heavy
-- PREPEND/APPEND extras
-- occupancy
-- Google/divergence only if deterministic
-
-Then complete benchmark analysis, EXPLAIN evidence, largest remaining cost, PR-03 report update, and final Gate 03-C decision.
+Monitor the final documentation-only push to green; then update the PR body with the validated 03-C summary and keep the PR draft for human review. Do not merge or cut over.
 
 ## Do not do yet
 

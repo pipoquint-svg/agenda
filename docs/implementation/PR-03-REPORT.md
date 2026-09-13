@@ -88,3 +88,44 @@ Confirmed structural improvement: V1 enters `public.list_available_slots_for_dur
 ## Rollback and deferred work
 
 Rollback is logical and immediate: leave the public bridge on V1 (as it already is) and do not invoke the private V2. PR-04 is the only planned cutover point, contingent on Gate 03-C benchmarks. No cutover, merge, or public contract change is included in PR-03.
+
+## Benchmark Environment (03-C)
+
+The authoritative benchmark ran in GitHub Actions run `34757040792` on a GitHub-hosted `ubuntu-latest` runner using Supabase CLI `2.111.0`, the repository's disposable local Supabase/PostgreSQL stack, and only `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. It did not use production. The benchmark fixture is dedicated to this purpose (`scripts/benchmarks/month-availability-v2-fixture.sql`) and lives only inside the benchmark session's final `ROLLBACK`.
+
+## Benchmark Method
+
+Each scenario uses semantically identical V1 and V2 inputs and first compares the complete ordered local-date set. A difference raises an error before timing. Each engine receives two unrecorded warmups and seven recorded samples, with V1/V2 execution order alternating by iteration. Results use PostgreSQL `percentile_cont(0.5)` for the median; min/max describe the seven measured samples. Candidate counts are **not directly measured** by this harness and are not inferred from returned dates.
+
+## Benchmark Results
+
+| Scenario | Month | Iterations/engine | V1 median ms | V2 median ms | Speedup | Parity |
+|---|---:|---:|---:|---:|---:|---|
+| frequent availability | 31 days | 7 | 1046.270 | 243.210 | 4.3019x | PASS |
+| low availability | 31 days | 7 | 183.626 | 40.614 | 4.5212x | PASS |
+| zero availability | 31 days | 7 | 19.493 | 1.028 | 18.9621x | PASS |
+| resource-heavy | 31 days | 7 | 1041.971 | 236.905 | 4.3983x | PASS |
+| PREPEND + APPEND extras | 31 days | 7 | 1338.345 | 362.294 | 3.6941x | PASS |
+| occupancy | 31 days | 7 | 548.742 | 236.437 | 2.3209x | PASS |
+
+Google/divergence is **NOT RELIABLY BENCHMARKABLE** in this dedicated timing fixture. Its functional equivalence, including fail-closed readiness and divergence behavior, remains directly proven by Gate 03-B; no synthetic timing result is claimed.
+
+## EXPLAIN / Query Analysis
+
+`EXPLAIN (ANALYZE, BUFFERS)` on the private PL/pgSQL entry point exposes a `Function Scan`, not its internal CTE plan. The observable V2 measurements were: frequent availability, 31 rows, 233.550 ms and 16,286 shared-buffer hits; zero availability, 0 rows, 1.143 ms and 52 hits; resource-heavy, 31 rows, 363.851 ms and 46,364 hits. No reads or temp usage were emitted by these plans. The benchmark artifact retains the exact plans.
+
+The structural comparison is confirmed by code: V1 invokes the daily duration engine once for each local date; V2 executes one month-scoped pipeline, resolves request constants once, and deduplicates resource IDs before readiness evaluation. Counts of individual nested function invocations are **not directly measured** by `EXPLAIN` for this PL/pgSQL function.
+
+## Largest Remaining Cost
+
+The slowest observed V2 representative scenario is PREPEND + APPEND extras (362.294 ms median), followed by the resource-heavy scenario (236.905 ms). The available plan does not decompose the private PL/pgSQL CTEs, so the internal dominant operation is not directly measured. Candidate-specific schedule-profile and resource-range work remains the primary investigation target for a later, separately parity-protected optimization; no further optimization is made in this PR.
+
+## Candidate Indexes
+
+None required by current evidence. The captured plans do not expose a specific table/index node that justifies an index change, so this PR deliberately avoids index spray.
+
+## Gate 03-C
+
+**PASS** — every benchmarked scenario preserved complete ordered-date parity, V2 was materially faster in the representative monthly scenarios (2.3209x–18.9621x; frequent availability 4.3019x), and the result was produced reproducibly in the disposable GitHub Actions stack. Benchmark success itself is functional only; final PR approval remains contingent on the complete CI for the final documentation HEAD.
+
+PUBLIC ENDPOINT STILL USES V1. No cutover, merge, V1 removal, HOLD change, or public-contract change is included.
