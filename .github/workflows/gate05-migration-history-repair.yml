@@ -20,13 +20,14 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.111.0
-      - name: Inspect remote history without database password
-        run: supabase migration list --linked --project-ref sbexdggbwqvyhbkatucs
-      - name: Align recorded migration versions
+      - name: Link the current project without database password
+        run: supabase link --project-ref sbexdggbwqvyhbkatucs
+      - name: Preflight remote history without mutation
         run: |
-          supabase migration repair --linked --project-ref sbexdggbwqvyhbkatucs --status reverted 20260913143607 20260913143753 20260913143801 --yes
-          supabase migration repair --linked --project-ref sbexdggbwqvyhbkatucs --status applied 20260912130000 20260912160000 20260913110000 --yes
-      - name: Verify remote history and preview no replay
-        run: |
-          supabase migration list --linked --project-ref sbexdggbwqvyhbkatucs
-          supabase db push --linked --project-ref sbexdggbwqvyhbkatucs --dry-run
+          supabase migration list --linked | tee migration-history.txt
+          grep -q '20260913143607' migration-history.txt
+          grep -q '20260913143753' migration-history.txt
+          grep -q '20260913143801' migration-history.txt
+          ! grep -q '20260912130000' migration-history.txt
+          ! grep -q '20260912160000' migration-history.txt
+          ! grep -q '20260913110000' migration-history.txt
