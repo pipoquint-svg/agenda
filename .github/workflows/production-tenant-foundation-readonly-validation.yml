@@ -12,7 +12,6 @@ jobs:
     environment: production
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_REF: sbexdggbwqvyhbkatucs
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +30,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          query="$(tr '\n' ' ' < scripts/production-tenant-foundation-readonly-validation.sql)"
-          supabase db query --linked -p "$SUPABASE_DB_PASSWORD" "$query" \
+          supabase db query --linked \
+            --file scripts/production-tenant-foundation-readonly-validation.sql \
+            --output-format json \
             | tee tenant-foundation-validation.txt
           grep -F '"tenant_count": 1' tenant-foundation-validation.txt
           grep -F '"tenant_settings_count": 1' tenant-foundation-validation.txt
