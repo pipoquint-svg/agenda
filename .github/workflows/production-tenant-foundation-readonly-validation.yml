@@ -1,0 +1,55 @@
+name: Production Tenant Foundation Read-only Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: sbexdggbwqvyhbkatucs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Link production project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Record linked migration history
+        run: supabase migration list --linked | tee tenant-foundation-migration-history.txt
+
+      - name: Validate tenant foundation read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          query="$(tr '\n' ' ' < scripts/production-tenant-foundation-readonly-validation.sql)"
+          supabase db query --linked -p "$SUPABASE_DB_PASSWORD" "$query" \
+            | tee tenant-foundation-validation.txt
+          grep -F '"tenant_count": 1' tenant-foundation-validation.txt
+          grep -F '"tenant_settings_count": 1' tenant-foundation-validation.txt
+          grep -F '"missing_expected_memberships_count": 0' tenant-foundation-validation.txt
+          grep -F '"extra_active_memberships_count": 0' tenant-foundation-validation.txt
+          grep -F '"inactive_memberships_count": 0' tenant-foundation-validation.txt
+          grep -F '"operation_finance_memberships_count": 0' tenant-foundation-validation.txt
+          grep -F '"rls_enabled_all": true' tenant-foundation-validation.txt
+          grep -F '"anon_select_denied_all": true' tenant-foundation-validation.txt
+          grep -F '"authenticated_select_denied_all": true' tenant-foundation-validation.txt
+          grep -F '"service_role_crud_granted_all": true' tenant-foundation-validation.txt
+          grep -F '"migration_20260913190000_applied": true' tenant-foundation-validation.txt
+
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenant-foundation-production-validation
+          path: |
+            tenant-foundation-migration-history.txt
+            tenant-foundation-validation.txt
