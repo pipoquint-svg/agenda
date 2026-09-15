@@ -1,6 +1,7 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
+import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 import {
   beginNotificationDelivery,
   markNotificationFailed,
@@ -227,7 +228,10 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
     idempotencyKey: providerIdempotencyKey,
     payloadSnapshot: { template_id: template.id, appointment_id: appointmentId, entity_version: entityVersion, operation_scope: scope },
   })
-  if (delivery.alreadySent) return jsonResponse({ stale: false, skipped: true, reason: 'NOTIFICATION_ALREADY_SENT', provider_message_id: delivery.providerMessageId })
+  if (delivery.alreadySent) {
+    scheduleImmediateAppointmentIntegrations(appointmentId, 'CONFIRMATION_EMAIL_ALREADY_SENT')
+    return jsonResponse({ stale: false, skipped: true, reason: 'NOTIFICATION_ALREADY_SENT', provider_message_id: delivery.providerMessageId })
+  }
 
   try {
     const [{ data: financial, error: financialError }, { data: extras, error: extrasError }, { data: discount, error: discountError }, { data: operationSettings }] = await Promise.all([
@@ -299,6 +303,7 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
       if (tokenDeliveryError) console.error('APPOINTMENT_TOKEN_DELIVERY_RECORD_FAILED')
     }
 
+    scheduleImmediateAppointmentIntegrations(appointmentId, 'CONFIRMATION_EMAIL_SENT')
     return jsonResponse({ stale: false, skipped: false, appointment_id: appointmentId, entity_version: entityVersion, reason, operation_scope: scope, recipient_masked: maskEmail(recipient), provider: 'RESEND', provider_message_id: providerMessageId, template_id: template.id })
   } catch (error) {
     await markNotificationFailed(client, delivery.id, error)
