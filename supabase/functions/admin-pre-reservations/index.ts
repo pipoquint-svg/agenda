@@ -128,11 +128,26 @@ Deno.serve(async (req) => {
         ? clean((data as Record<string, unknown>).appointment_id)
         : null
       if (!appointmentId) throw new Error('CONFIRMED_APPOINTMENT_ID_MISSING')
+
+      let responseData = data
+      if (body.pay_later === true) {
+        const reason = (clean(body.pay_later_reason) ?? 'Reserva manual — pagamento autorizado para depois').slice(0, 500)
+        const { data: unpaid, error: unpaidError } = await client.rpc('service_admin_confirm_appointment_unpaid', {
+          p_appointment_id: appointmentId,
+          p_reason: reason,
+          p_admin_id: admin.adminId,
+        })
+        if (unpaidError) throw new Error(unpaidError.message)
+        if (data && typeof data === 'object' && unpaid && typeof unpaid === 'object') {
+          responseData = { ...(data as Record<string, unknown>), ...(unpaid as Record<string, unknown>), pay_later: true }
+        }
+      }
+
       const { data: appointment, error: appointmentError } = await client
         .from('appointments').select('version').eq('id', appointmentId).maybeSingle()
       if (appointmentError || !appointment) throw new Error('CONFIRMED_APPOINTMENT_LOOKUP_FAILED')
       const confirmation = await sendAppointmentConfirmation(appointmentId, Number(appointment.version))
-      return json({ data: canViewFinance ? data : redactFinance(data), confirmation })
+      return json({ data: canViewFinance ? responseData : redactFinance(responseData), confirmation })
     }
 
     if (action === 'CANCEL') {
