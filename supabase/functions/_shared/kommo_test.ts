@@ -101,19 +101,27 @@ Deno.test('reservation Data field is resolved uniquely and must be date-compatib
   if (!failed) throw new Error('non-date Data field should fail closed')
 })
 
-Deno.test('reservation date is derived in America/Sao_Paulo and encoded as RFC3339', () => {
+Deno.test('reservation datetime is derived in America/Sao_Paulo and encoded as RFC3339', () => {
   const value = kommoReservationDateValue('2026-08-24T01:00:00Z')
-  if (value !== '2026-08-23T12:00:00-03:00') throw new Error(`reservation date timezone mismatch: ${value}`)
+  if (value !== '2026-08-23T22:00:00-03:00') throw new Error(`reservation datetime timezone mismatch: ${value}`)
 })
 
-Deno.test('shared lead card fields are resolved by exact account-wide names', () => {
+Deno.test('shared lead card fields prefer exact Data e horário date_time field', () => {
+  const fields = resolveLeadCardFields([
+    { id: 100, name: 'Data', type: 'date' }, { id: 101, name: 'Data e horário', type: 'date_time' },
+    { id: 102, name: 'SALDO', type: 'monetary' }, { id: 103, name: 'Extras locação', type: 'textarea' },
+  ])
+  if (fields.reservationDate.id !== 101 || fields.reservationDate.type !== 'date_time') throw new Error('Data e horário mapping failed')
+  if (fields.balance.id !== 102) throw new Error('Saldo mapping failed')
+  if (fields.rentalExtras.id !== 103) throw new Error('Extras locação mapping failed')
+})
+
+Deno.test('shared lead card fields fall back to legacy Data when Data e horário is absent', () => {
   const fields = resolveLeadCardFields([
     { id: 101, name: 'Data', type: 'date' }, { id: 102, name: 'SALDO', type: 'monetary' },
     { id: 103, name: 'Extras locação', type: 'textarea' }, { id: 104, name: 'Pai', type: 'text' },
   ])
-  if (fields.reservationDate.id !== 101) throw new Error('Data mapping failed')
-  if (fields.balance.id !== 102) throw new Error('Saldo mapping failed')
-  if (fields.rentalExtras.id !== 103) throw new Error('Extras locação mapping failed')
+  if (fields.reservationDate.id !== 101) throw new Error('legacy Data mapping failed')
 })
 
 Deno.test('lead card field mapping fails closed on ambiguity or incompatible type', () => {
@@ -136,10 +144,10 @@ Deno.test('Venda, Saldo and Extras locação values follow Agenda authority', ()
   if (kommoBalanceValue(545) !== '545.00') throw new Error('Saldo mismatch')
   if (formatRentalExtras([{ name: 'Flash adicional', quantity: 1 }, { name: 'Fundo de papel', quantity: 2 }]) !== 'Flash adicional\n2x Fundo de papel') throw new Error('extras formatting mismatch')
   const payload = buildLeadCardCustomFields({
-    reservationDate: { id: 101, type: 'date' }, balance: { id: 102, type: 'numeric' }, rentalExtras: { id: 103, type: 'textarea' },
+    reservationDate: { id: 101, type: 'date_time' }, balance: { id: 102, type: 'numeric' }, rentalExtras: { id: 103, type: 'textarea' },
   }, '2026-08-24T01:00:00Z', 545, [{ name: 'Flash adicional', quantity: 1 }])
   if (JSON.stringify(payload) !== JSON.stringify([
-    { field_id: 101, values: [{ value: '2026-08-23T12:00:00-03:00' }] },
+    { field_id: 101, values: [{ value: '2026-08-23T22:00:00-03:00' }] },
     { field_id: 102, values: [{ value: '545.00' }] },
     { field_id: 103, values: [{ value: 'Flash adicional' }] },
   ])) throw new Error('lead card payload mismatch')
@@ -147,7 +155,7 @@ Deno.test('Venda, Saldo and Extras locação values follow Agenda authority', ()
 
 Deno.test('zero balance and no extras clear the operational values deterministically', () => {
   const payload = buildLeadCardCustomFields({
-    reservationDate: { id: 101, type: 'date' }, balance: { id: 102, type: 'numeric' }, rentalExtras: { id: 103, type: 'text' },
+    reservationDate: { id: 101, type: 'date_time' }, balance: { id: 102, type: 'numeric' }, rentalExtras: { id: 103, type: 'text' },
   }, '2026-08-23T15:00:00-03:00', 0, [])
   if (payload[1].values[0].value !== '0.00') throw new Error('zero Saldo should be explicit')
   if (payload[2].values[0].value !== '') throw new Error('no extras should clear field')
