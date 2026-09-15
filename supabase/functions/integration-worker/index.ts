@@ -31,6 +31,10 @@ function nestedFunctionErrorCode(text: string): string | null {
   }
 }
 
+function validUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 async function invokeFunction<T = Record<string, unknown>>(name: string, secret: string, body: unknown): Promise<T> {
   const base = Deno.env.get('SUPABASE_URL')
   if (!base) throw new Error('MISSING_ENV:SUPABASE_URL')
@@ -93,6 +97,21 @@ Deno.serve(async (req) => {
 
   try {
     const secret = requireInternal(req)
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>
+    const priorityEntityType = typeof body.priority_entity_type === 'string'
+      ? body.priority_entity_type.trim().toUpperCase()
+      : ''
+    const priorityEntityId = typeof body.priority_entity_id === 'string'
+      ? body.priority_entity_id.trim()
+      : ''
+    const priorityMode = Boolean(priorityEntityType || priorityEntityId)
+
+    if (priorityMode) {
+      if (priorityEntityType !== 'APPOINTMENT' || !validUuid(priorityEntityId)) {
+        throw new Error('INTEGRATION_PRIORITY_ENTITY_INVALID')
+      }
+    }
+
     const client = adminClient()
     const workerId = `edge:${crypto.randomUUID()}`
     const googleIntegrationEnabled = envEnabled('GOOGLE_INTEGRATION_ENABLED')
@@ -107,93 +126,112 @@ Deno.serve(async (req) => {
 
     await client.rpc('release_stale_integration_jobs', { p_stale_after_seconds: 300 })
 
-    const { error: holdExpiryError } = await client.rpc('expire_due_checkout_holds')
-    if (holdExpiryError) throw new Error('CHECKOUT_HOLD_EXPIRY_FAILED')
-
-    const { data: expiredPrivateWaitlistSlots, error: privateWaitlistExpiryError } = await client.rpc('service_expire_waitlist_private_slots')
-    if (privateWaitlistExpiryError) throw new Error('WAITLIST_PRIVATE_SLOT_EXPIRY_FAILED')
-
-    const { error: appointmentHoldExpiryError } = await client.rpc('expire_due_appointment_holds')
-    if (appointmentHoldExpiryError) throw new Error('APPOINTMENT_HOLD_EXPIRY_FAILED')
-
-    const { data: expiredFreeVisits, error: freeVisitExpiryError } = await client.rpc('expire_unconfirmed_free_visits')
-    if (freeVisitExpiryError) throw new Error('FREE_VISIT_CONFIRMATION_EXPIRY_FAILED')
-
+    let expiredPrivateWaitlistSlots = 0
+    let expiredFreeVisits = 0
     let calendarIds: string[] = []
-    if (googleIntegrationEnabled) {
-      const { data: mappings, error: mappingsError } = await client
-        .from('google_calendar_resources')
-        .select('google_calendar_id')
-      if (mappingsError) throw new Error('GOOGLE_CALENDAR_MAPPING_LOOKUP_FAILED')
-      calendarIds = [...new Set((mappings ?? []).map((row: any) => String(row.google_calendar_id)).filter(Boolean))]
-      const minuteBucket = Math.floor(Date.now() / 60000)
-      const fullWindowBucket = Math.floor(Date.now() / GOOGLE_FULL_WINDOW_REFRESH_MS)
 
-      const syncStateByCalendar = new Map<string, { last_full_sync_at?: string | null }>()
-      if (calendarIds.length > 0) {
-        const { data: syncStates, error: syncStatesError } = await client
-          .from('google_sync_state')
-          .select('google_calendar_id, last_full_sync_at')
-          .in('google_calendar_id', calendarIds)
-        if (syncStatesError) throw new Error('GOOGLE_SYNC_STATE_LOOKUP_FAILED')
-        for (const state of syncStates ?? []) syncStateByCalendar.set(String(state.google_calendar_id), state)
-      }
+    if (!priorityMode) {
+      const { error: holdExpiryError } = await client.rpc('expire_due_checkout_holds')
+      if (holdExpiryError) throw new Error('CHECKOUT_HOLD_EXPIRY_FAILED')
 
-      for (const calendarId of calendarIds) {
-        const state = syncStateByCalendar.get(calendarId)
-        const lastFullMs = state?.last_full_sync_at ? Date.parse(state.last_full_sync_at) : Number.NaN
-        const fullWindowDue = !Number.isFinite(lastFullMs) || Date.now() - lastFullMs >= GOOGLE_FULL_WINDOW_REFRESH_MS
-        const idempotencyKey = fullWindowDue
-          ? `google-window-full:${calendarId}:${fullWindowBucket}`
-          : `google-reconcile:${calendarId}:${minuteBucket}`
-        const payload = fullWindowDue
-          ? { source: 'PERIODIC_WINDOW_REFRESH', force_full: true, window_bucket: fullWindowBucket }
-          : { source: 'PERIODIC_RECONCILIATION', minute_bucket: minuteBucket }
+      const { data: expiredPrivateSlots, error: privateWaitlistExpiryError } = await client.rpc('service_expire_waitlist_private_slots')
+      if (privateWaitlistExpiryError) throw new Error('WAITLIST_PRIVATE_SLOT_EXPIRY_FAILED')
+      expiredPrivateWaitlistSlots = Number(expiredPrivateSlots ?? 0)
 
-        const { error: enqueueError } = await client.rpc('enqueue_google_calendar_sync', {
-          p_google_calendar_id: calendarId,
-          p_idempotency_key: idempotencyKey,
-          p_payload_json: payload,
-        })
-        if (enqueueError) throw new Error('GOOGLE_RECONCILIATION_ENQUEUE_FAILED')
-      }
+      const { error: appointmentHoldExpiryError } = await client.rpc('expire_due_appointment_holds')
+      if (appointmentHoldExpiryError) throw new Error('APPOINTMENT_HOLD_EXPIRY_FAILED')
 
-      if (calendarIds.length > 0) {
-        const { data: watches, error: watchesError } = await client
-          .from('google_watch_channels')
-          .select('google_calendar_id, expiration_at, status')
-          .in('google_calendar_id', calendarIds)
-          .eq('status', 'ACTIVE')
-        if (watchesError) throw new Error('GOOGLE_WATCH_LOOKUP_FAILED')
+      const { data: expiredVisits, error: freeVisitExpiryError } = await client.rpc('expire_unconfirmed_free_visits')
+      if (freeVisitExpiryError) throw new Error('FREE_VISIT_CONFIRMATION_EXPIRY_FAILED')
+      expiredFreeVisits = Number(expiredVisits ?? 0)
 
-        const safeWatch = new Set<string>()
-        const threshold = Date.now() + 24 * 60 * 60 * 1000
-        for (const watch of watches ?? []) {
-          if (watch.expiration_at && new Date(watch.expiration_at).getTime() > threshold) safeWatch.add(watch.google_calendar_id)
+      if (googleIntegrationEnabled) {
+        const { data: mappings, error: mappingsError } = await client
+          .from('google_calendar_resources')
+          .select('google_calendar_id')
+        if (mappingsError) throw new Error('GOOGLE_CALENDAR_MAPPING_LOOKUP_FAILED')
+        calendarIds = [...new Set((mappings ?? []).map((row: any) => String(row.google_calendar_id)).filter(Boolean))]
+        const minuteBucket = Math.floor(Date.now() / 60000)
+        const fullWindowBucket = Math.floor(Date.now() / GOOGLE_FULL_WINDOW_REFRESH_MS)
+
+        const syncStateByCalendar = new Map<string, { last_full_sync_at?: string | null }>()
+        if (calendarIds.length > 0) {
+          const { data: syncStates, error: syncStatesError } = await client
+            .from('google_sync_state')
+            .select('google_calendar_id, last_full_sync_at')
+            .in('google_calendar_id', calendarIds)
+          if (syncStatesError) throw new Error('GOOGLE_SYNC_STATE_LOOKUP_FAILED')
+          for (const state of syncStates ?? []) syncStateByCalendar.set(String(state.google_calendar_id), state)
         }
 
         for (const calendarId of calendarIds) {
-          if (safeWatch.has(calendarId)) continue
-          try {
-            await invokeFunction('google-watch', secret, { google_calendar_id: calendarId })
-          } catch (error) {
-            console.error('GOOGLE_WATCH_RENEWAL_FAILED', error instanceof Error ? error.message : 'UNKNOWN')
+          const state = syncStateByCalendar.get(calendarId)
+          const lastFullMs = state?.last_full_sync_at ? Date.parse(state.last_full_sync_at) : Number.NaN
+          const fullWindowDue = !Number.isFinite(lastFullMs) || Date.now() - lastFullMs >= GOOGLE_FULL_WINDOW_REFRESH_MS
+          const idempotencyKey = fullWindowDue
+            ? `google-window-full:${calendarId}:${fullWindowBucket}`
+            : `google-reconcile:${calendarId}:${minuteBucket}`
+          const payload = fullWindowDue
+            ? { source: 'PERIODIC_WINDOW_REFRESH', force_full: true, window_bucket: fullWindowBucket }
+            : { source: 'PERIODIC_RECONCILIATION', minute_bucket: minuteBucket }
+
+          const { error: enqueueError } = await client.rpc('enqueue_google_calendar_sync', {
+            p_google_calendar_id: calendarId,
+            p_idempotency_key: idempotencyKey,
+            p_payload_json: payload,
+          })
+          if (enqueueError) throw new Error('GOOGLE_RECONCILIATION_ENQUEUE_FAILED')
+        }
+
+        if (calendarIds.length > 0) {
+          const { data: watches, error: watchesError } = await client
+            .from('google_watch_channels')
+            .select('google_calendar_id, expiration_at, status')
+            .in('google_calendar_id', calendarIds)
+            .eq('status', 'ACTIVE')
+          if (watchesError) throw new Error('GOOGLE_WATCH_LOOKUP_FAILED')
+
+          const safeWatch = new Set<string>()
+          const threshold = Date.now() + 24 * 60 * 60 * 1000
+          for (const watch of watches ?? []) {
+            if (watch.expiration_at && new Date(watch.expiration_at).getTime() > threshold) safeWatch.add(watch.google_calendar_id)
+          }
+
+          for (const calendarId of calendarIds) {
+            if (safeWatch.has(calendarId)) continue
+            try {
+              await invokeFunction('google-watch', secret, { google_calendar_id: calendarId })
+            } catch (error) {
+              console.error('GOOGLE_WATCH_RENEWAL_FAILED', error instanceof Error ? error.message : 'UNKNOWN')
+            }
           }
         }
       }
     }
 
     const claimJobTypes: string[] = ['APPOINTMENT_CONFIRMED_MESSAGE']
-    if (googleIntegrationEnabled) claimJobTypes.push('GOOGLE_CALENDAR_SYNC', 'GOOGLE_APPOINTMENT_SYNC')
+    if (googleIntegrationEnabled) {
+      if (!priorityMode) claimJobTypes.push('GOOGLE_CALENDAR_SYNC')
+      claimJobTypes.push('GOOGLE_APPOINTMENT_SYNC')
+    }
     if (kommoIntegrationEnabled) claimJobTypes.push('KOMMO_APPOINTMENT_SYNC')
 
-    const { data: claimedJobs, error: claimError } = await client.rpc('claim_integration_jobs', {
-      p_worker_id: workerId,
-      p_job_types: claimJobTypes,
-      p_limit: 10,
-    })
-    if (claimError) throw new Error('INTEGRATION_JOB_CLAIM_FAILED')
-    const jobs: any[] = claimedJobs ?? []
+    const claimResult = priorityMode
+      ? await client.rpc('claim_integration_jobs_for_entity', {
+        p_worker_id: workerId,
+        p_entity_type: priorityEntityType,
+        p_entity_id: priorityEntityId,
+        p_job_types: claimJobTypes,
+        p_limit: 10,
+      })
+      : await client.rpc('claim_integration_jobs', {
+        p_worker_id: workerId,
+        p_job_types: claimJobTypes,
+        p_limit: 10,
+      })
+
+    if (claimResult.error) throw new Error('INTEGRATION_JOB_CLAIM_FAILED')
+    const jobs: any[] = claimResult.data ?? []
 
     const primaryGoogleSyncJob = new Map<string, any>()
     for (const job of jobs) {
@@ -291,11 +329,14 @@ Deno.serve(async (req) => {
 
     return jsonResponse({
       worker_id: workerId,
+      dispatch_mode: priorityMode ? 'PRIORITY_ENTITY' : 'PERIODIC',
+      priority_entity_type: priorityMode ? priorityEntityType : null,
+      priority_entity_id: priorityMode ? priorityEntityId : null,
       google_enabled: googleIntegrationEnabled,
       kommo_enabled: kommoIntegrationEnabled,
       email_worker_enabled: true,
-      expired_private_waitlist_slots: Number(expiredPrivateWaitlistSlots ?? 0),
-      expired_unconfirmed_free_visits: Number(expiredFreeVisits ?? 0),
+      expired_private_waitlist_slots: expiredPrivateWaitlistSlots,
+      expired_unconfirmed_free_visits: expiredFreeVisits,
       calendars_reconciled: calendarIds.length,
       claimed: jobs.length,
       succeeded,

@@ -10,6 +10,8 @@
 -- to service_role: a SECURITY DEFINER read model and a SECURITY INVOKER boundary.
 -- Finance launches adds one server-only SECURITY DEFINER read model restricted to
 -- service_role; anon/authenticated cannot execute it directly.
+-- Immediate integration dispatch adds one server-only SECURITY DEFINER claim RPC,
+-- executable only by service_role.
 do $$
 declare
   v_identity text;
@@ -259,6 +261,35 @@ begin
     raise exception 'ITEM02C_FINANCE_LAUNCHES_RPC_IDENTITY_DRIFT:%', v_identity;
   end if;
 
+  v_identity := 'public.claim_integration_jobs_for_entity(text,text,uuid,text[],integer)';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then
+    raise exception 'ITEM02C_PRIORITY_INTEGRATION_RPC_MISSING:%', v_identity;
+  end if;
+  if not has_function_privilege('service_role', v_oid, 'EXECUTE') then
+    raise exception 'ITEM02C_PRIORITY_INTEGRATION_RPC_NOT_EXECUTABLE:%', v_identity;
+  end if;
+  if has_function_privilege('anon', v_oid, 'EXECUTE')
+     or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     or exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       where p.oid = v_oid
+         and a.grantee = 0
+         and a.privilege_type = 'EXECUTE'
+     ) then
+    raise exception 'ITEM02C_PRIORITY_INTEGRATION_RPC_APP_ROLE_EXPOSURE:%', v_identity;
+  end if;
+  if not exists (
+    select 1 from pg_proc p
+    where p.oid = v_oid
+      and p.prosecdef
+      and pg_get_userbyid(p.proowner) = 'postgres'
+  ) then
+    raise exception 'ITEM02C_PRIORITY_INTEGRATION_RPC_IDENTITY_DRIFT:%', v_identity;
+  end if;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -266,11 +297,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 451 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=451 actual=%', v_public_function_count;
+  if v_public_function_count <> 452 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=452 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 393 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=393 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 394 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=394 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

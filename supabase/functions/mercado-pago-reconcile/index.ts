@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
   reconcileMercadoPagoCandidate,
@@ -243,6 +244,9 @@ Deno.serve(async (req) => {
           succeeded += 1
           if (result.changed) changed += 1
           else stillPending += 1
+          if (result.normalized_status === 'APPROVED') {
+            scheduleImmediateAppointmentIntegrations(candidate.appointment_id, 'MERCADO_PAGO_RECONCILE')
+          }
         } catch (error) {
           const code = safeReconcileCode(error)
           const nonRetryable = code === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED'

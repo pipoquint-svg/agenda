@@ -1,5 +1,6 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { loadInfinitePayRuntime } from '../_shared/infinitepay-runtime.ts'
+import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 import {
   brlToCents,
   checkInfinitePayPayment,
@@ -60,6 +61,7 @@ Deno.serve(async (req) => {
 
     const tx = data as TransactionRow
     if (tx.status === 'APPROVED' && tx.provider_payment_id === signal.transactionNsu) {
+      scheduleImmediateAppointmentIntegrations(tx.appointment_id, 'INFINITEPAY_RECONCILE_REPLAY')
       return jsonResponse({ ok: true, paid: true, idempotent_replay: true, transaction_id: tx.id, appointment_id: tx.appointment_id })
     }
 
@@ -96,6 +98,7 @@ Deno.serve(async (req) => {
     })
     if (applyError) throw new Error('INFINITEPAY_RECONCILE_PAYMENT_APPLY_FAILED')
 
+    scheduleImmediateAppointmentIntegrations(tx.appointment_id, 'INFINITEPAY_RECONCILE')
     return jsonResponse({ ok: true, paid: true, transaction_id: tx.id, appointment_id: tx.appointment_id, state })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'INFINITEPAY_RECONCILE_FAILED'

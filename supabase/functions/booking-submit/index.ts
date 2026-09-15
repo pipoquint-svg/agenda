@@ -3,6 +3,7 @@ import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.
 import { sendPreReservationCreatedEmail } from '../_shared/prebook-email.ts'
 import { sendPaymentResumeEmail } from '../_shared/payment-resume-email.ts'
 import { recordOpsEdgeFailure } from '../_shared/ops-alerts.ts'
+import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -60,6 +61,9 @@ Deno.serve(async(req)=>{
     appointment.payment_resume_email_reason=emailError instanceof Error?emailError.message.split(':')[0]:'PAYMENT_RESUME_EMAIL_FAILED';
     console.error('[OPERATION_ALERT] PAYMENT_RESUME_EMAIL_FAILED',{appointment_id:appointment.appointment_id,code:appointment.payment_resume_email_reason});
    }
+  }
+  if(appointment.pre_reservation!==true){
+   scheduleImmediateAppointmentIntegrations(String(appointment.appointment_id??''),'BOOKING_SUBMIT');
   }
   return response({ok:true,appointment})
  }catch(error){const code=error instanceof Error?error.message:'CHECKOUT_SUBMIT_FAILED';const publicCode=code.split(':')[0];const neutral=['ONLINE_BOOKING_NOT_AVAILABLE','FREE_VISIT_NOT_AVAILABLE'].includes(publicCode)?'ONLINE_BOOKING_NOT_AVAILABLE':publicCode;const status=neutral==='RATE_LIMITED'?429:neutral==='RATE_LIMIT_BACKEND_FAILED'?503:neutral==='CHECKOUT_HOLD_NOT_ACTIVE'?409:neutral==='ONLINE_BOOKING_NOT_AVAILABLE'?403:400;await recordOpsEdgeFailure(adminClient,'booking-submit',neutral,status,publicCode==='CHECKOUT_SUBMIT_FAILED');return response({error:{code:neutral}},status)}
