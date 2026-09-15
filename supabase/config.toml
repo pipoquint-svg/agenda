@@ -46,6 +46,13 @@ verify_jwt = false
 [functions.kommo-sync]
 verify_jwt = false
 
+# Read-only Finance -> Dracma measurement adapter. This is cross-project M2M and therefore
+# authenticates inside the function with DRACMA_FINANCE_REFERENCE_SECRET instead of a user JWT.
+# The Dracma organization -> Agenda tenant mapping is explicit in Edge secrets and the function
+# fails closed while legacy Agenda domain tables remain unscoped for more than one active tenant.
+[functions.finance-paid-sale-reference]
+verify_jwt = false
+
 # Historical Kommo diagnostics are permanently retired. These slugs are kept only as
 # deterministic 410 tombstones and must never read secrets, call Kommo or mutate state.
 [functions.kommo-guard-discovery]
