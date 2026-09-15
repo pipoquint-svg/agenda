@@ -8,17 +8,13 @@ import {
   type FinanceRefundRow,
 } from './contract.ts'
 
-const corsHeaders = {
-  'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type, x-dracma-finance-secret, x-request-id',
-  'access-control-allow-methods': 'POST, OPTIONS',
+const responseHeaders = {
+  'content-type': 'application/json; charset=utf-8',
+  'cache-control': 'no-store',
 }
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  })
+  return new Response(JSON.stringify(body), { status, headers: responseHeaders })
 }
 
 function requiredEnv(name: string): string {
@@ -46,7 +42,8 @@ function requireMachineAuth(req: Request): void {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
+  // This boundary is intentionally server-to-server only. It does not advertise a
+  // browser CORS surface; OPTIONS receives the same method rejection as any non-POST.
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
   try {
