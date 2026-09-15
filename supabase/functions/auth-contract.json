@@ -8,7 +8,7 @@
     "verify_jwt_true": 17,
     "versioned_active": 72,
     "production_orphans": 5,
-    "versioned_inactive": 11
+    "versioned_inactive": 12
   },
   "verify_jwt_true_modes": [
     "gateway_admin"
@@ -114,6 +114,9 @@
     ]
   },
   "inactive": {
+    "dracma_finance_secret": [
+      "finance-paid-sale-reference"
+    ],
     "github_oidc": [
       "birthday-automation-trigger"
     ],
