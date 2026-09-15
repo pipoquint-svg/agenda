@@ -159,6 +159,16 @@ export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedNa
 }
 
 function resolveReservationDateTimeField(fields: KommoCustomField[]): KommoResolvedLeadField {
+  const rentalMatches = fields.filter((field) => normalizeFieldName(field.name) === 'data e horario da locacao')
+  if (rentalMatches.length > 1) throw new Error('KOMMO_RENTAL_DATETIME_FIELD_AMBIGUOUS')
+  if (rentalMatches.length === 1) {
+    const field = rentalMatches[0]
+    const type = String(field.type ?? '').trim().toLowerCase()
+    if (type !== 'date_time') throw new Error('KOMMO_RENTAL_DATETIME_FIELD_INVALID_TYPE')
+    if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_RENTAL_DATETIME_FIELD_INVALID_ID')
+    return { id: Number(field.id), type }
+  }
+
   const dateTimeMatches = fields.filter((field) => normalizeFieldName(field.name) === 'data e horario')
   if (dateTimeMatches.length > 1) throw new Error('KOMMO_RESERVATION_DATETIME_FIELD_AMBIGUOUS')
   if (dateTimeMatches.length === 1) {
