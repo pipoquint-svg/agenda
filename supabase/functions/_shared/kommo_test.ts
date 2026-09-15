@@ -101,9 +101,9 @@ Deno.test('reservation Data field is resolved uniquely and must be date-compatib
   if (!failed) throw new Error('non-date Data field should fail closed')
 })
 
-Deno.test('reservation date is derived in America/Sao_Paulo and encoded as RFC3339', () => {
+Deno.test('reservation date and time are derived in America/Sao_Paulo and encoded as RFC3339', () => {
   const value = kommoReservationDateValue('2026-08-24T01:00:00Z')
-  if (value !== '2026-08-23T12:00:00-03:00') throw new Error(`reservation date timezone mismatch: ${value}`)
+  if (value !== '2026-08-23T22:00:00-03:00') throw new Error(`reservation date timezone mismatch: ${value}`)
 })
 
 Deno.test('shared lead card fields are resolved by exact account-wide names', () => {
@@ -139,7 +139,7 @@ Deno.test('Venda, Saldo and Extras locação values follow Agenda authority', ()
     reservationDate: { id: 101, type: 'date' }, balance: { id: 102, type: 'numeric' }, rentalExtras: { id: 103, type: 'textarea' },
   }, '2026-08-24T01:00:00Z', 545, [{ name: 'Flash adicional', quantity: 1 }])
   if (JSON.stringify(payload) !== JSON.stringify([
-    { field_id: 101, values: [{ value: '2026-08-23T12:00:00-03:00' }] },
+    { field_id: 101, values: [{ value: '2026-08-23T22:00:00-03:00' }] },
     { field_id: 102, values: [{ value: '545.00' }] },
     { field_id: 103, values: [{ value: 'Flash adicional' }] },
   ])) throw new Error('lead card payload mismatch')
