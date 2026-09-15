@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
         throw new Error('INVALID_EXTRA')
       }
 
-      const { data, error } = await client.rpc('service_admin_create_pre_reservation', {
+      const { data, error } = await client.rpc('service_admin_create_manual_appointment', {
         p_customer_id: uuid(body.customer_id, 'CUSTOMER_ID_INVALID'),
         p_service_id: uuid(body.service_id, 'SERVICE_ID_INVALID'),
         p_service_employee_id: uuid(body.service_employee_id, 'SERVICE_EMPLOYEE_ID_INVALID'),
@@ -115,12 +115,56 @@ Deno.serve(async (req) => {
         p_notes: clean(body.notes),
       })
       if (error) throw new Error(error.message)
-      return json({ data: canViewFinance ? data : redactFinance(data) })
+      if (!data || typeof data !== 'object') throw new Error('MANUAL_BOOKING_CREATE_FAILED')
+      const appointmentId = clean((data as Record<string, unknown>).appointment_id)
+      if (!appointmentId) throw new Error('MANUAL_BOOKING_APPOINTMENT_ID_MISSING')
+      const compatible = { ...(data as Record<string, unknown>), pre_reservation_id: appointmentId }
+      return json({ data: canViewFinance ? compatible : redactFinance(compatible) })
     }
 
     if (action === 'CONFIRM') {
+      const id = uuid(body.pre_reservation_id, 'PRE_RESERVATION_ID_INVALID')
+      const { data: manualAppointment, error: manualLookupError } = await client
+        .from('appointments')
+        .select('id,version,status,financial_status,hold_expires_at,commercial_value,origin')
+        .eq('id', id)
+        .eq('origin', 'ADMIN')
+        .maybeSingle()
+      if (manualLookupError) throw new Error('MANUAL_BOOKING_LOOKUP_FAILED')
+
+      if (manualAppointment) {
+        let data: Record<string, unknown> = {
+          appointment_id: id,
+          status: manualAppointment.status,
+          financial_status: manualAppointment.financial_status,
+          hold_expires_at: manualAppointment.hold_expires_at,
+          commercial_value: manualAppointment.commercial_value,
+          manual_booking: true,
+        }
+
+        if (body.pay_later === true) {
+          const reason = (clean(body.pay_later_reason) ?? 'Reserva manual — pagamento autorizado para depois').slice(0, 500)
+          const { data: unpaid, error: unpaidError } = await client.rpc('service_admin_confirm_appointment_unpaid', {
+            p_appointment_id: id,
+            p_reason: reason,
+            p_admin_id: admin.adminId,
+          })
+          if (unpaidError) throw new Error(unpaidError.message)
+          if (unpaid && typeof unpaid === 'object') data = { ...data, ...(unpaid as Record<string, unknown>), pay_later: true }
+        }
+
+        const { data: refreshed, error: refreshedError } = await client
+          .from('appointments')
+          .select('version')
+          .eq('id', id)
+          .maybeSingle()
+        if (refreshedError || !refreshed) throw new Error('CONFIRMED_APPOINTMENT_LOOKUP_FAILED')
+        const confirmation = await sendAppointmentConfirmation(id, Number(refreshed.version))
+        return json({ data: canViewFinance ? data : redactFinance(data), confirmation })
+      }
+
       const { data, error } = await client.rpc('service_admin_confirm_pre_reservation', {
-        p_pre_reservation_id: uuid(body.pre_reservation_id, 'PRE_RESERVATION_ID_INVALID'),
+        p_pre_reservation_id: id,
         p_admin_id: admin.adminId,
       })
       if (error) throw new Error(error.message)
@@ -151,8 +195,18 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'CANCEL') {
+      const id = uuid(body.pre_reservation_id, 'PRE_RESERVATION_ID_INVALID')
+      const { data: manualAppointment, error: manualLookupError } = await client
+        .from('appointments')
+        .select('id,origin,status')
+        .eq('id', id)
+        .eq('origin', 'ADMIN')
+        .maybeSingle()
+      if (manualLookupError) throw new Error('MANUAL_BOOKING_LOOKUP_FAILED')
+      if (manualAppointment) throw new Error('MANUAL_BOOKING_CANCEL_VIA_APPOINTMENT_REQUIRED')
+
       const { data, error } = await client.rpc('service_admin_cancel_pre_reservation', {
-        p_pre_reservation_id: uuid(body.pre_reservation_id, 'PRE_RESERVATION_ID_INVALID'),
+        p_pre_reservation_id: id,
         p_admin_id: admin.adminId,
         p_reason: clean(body.reason),
       })
