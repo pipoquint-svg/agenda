@@ -158,9 +158,23 @@ export function findUniqueLeadDateFieldId(fields: KommoCustomField[], expectedNa
   return resolveUniqueLeadField(fields, expectedName, ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD').id
 }
 
+function resolveReservationDateTimeField(fields: KommoCustomField[]): KommoResolvedLeadField {
+  const dateTimeMatches = fields.filter((field) => normalizeFieldName(field.name) === 'data e horario')
+  if (dateTimeMatches.length > 1) throw new Error('KOMMO_RESERVATION_DATETIME_FIELD_AMBIGUOUS')
+  if (dateTimeMatches.length === 1) {
+    const field = dateTimeMatches[0]
+    const type = String(field.type ?? '').trim().toLowerCase()
+    if (type !== 'date_time') throw new Error('KOMMO_RESERVATION_DATETIME_FIELD_INVALID_TYPE')
+    if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_RESERVATION_DATETIME_FIELD_INVALID_ID')
+    return { id: Number(field.id), type }
+  }
+
+  return resolveUniqueLeadField(fields, 'Data', ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD')
+}
+
 export function resolveLeadCardFields(fields: KommoCustomField[]): KommoLeadCardFields {
   return {
-    reservationDate: resolveUniqueLeadField(fields, 'Data', ['date', 'date_time'], 'KOMMO_RESERVATION_DATE_FIELD'),
+    reservationDate: resolveReservationDateTimeField(fields),
     balance: resolveLeadFieldByTypePriority(fields, 'Saldo', ['numeric', 'monetary', 'text', 'textarea'], 'KOMMO_BALANCE_FIELD'),
     rentalExtras: resolveUniqueLeadField(fields, 'Extras locação', ['text', 'textarea'], 'KOMMO_RENTAL_EXTRAS_FIELD'),
   }
@@ -171,13 +185,24 @@ export function kommoReservationDateValue(startAt: string | null | undefined): s
   const instant = new Date(startAt)
   if (Number.isNaN(instant.getTime())) throw new Error('KOMMO_RESERVATION_START_INVALID')
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
   }).formatToParts(instant)
-  const year = parts.find((part) => part.type === 'year')?.value
-  const month = parts.find((part) => part.type === 'month')?.value
-  const day = parts.find((part) => part.type === 'day')?.value
-  if (!year || !month || !day) throw new Error('KOMMO_RESERVATION_DATE_FORMAT_FAILED')
-  return `${year}-${month}-${day}T12:00:00-03:00`
+  const get = (type: string) => parts.find((part) => part.type === type)?.value
+  const year = get('year')
+  const month = get('month')
+  const day = get('day')
+  const hour = get('hour')
+  const minute = get('minute')
+  const second = get('second')
+  if (!year || !month || !day || !hour || !minute || !second) throw new Error('KOMMO_RESERVATION_DATETIME_FORMAT_FAILED')
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}-03:00`
 }
 
 export function kommoLeadPrice(value: number | null | undefined): number {
