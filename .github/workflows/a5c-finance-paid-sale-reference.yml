@@ -49,6 +49,10 @@ jobs:
             echo 'A5c Finance reference endpoint must not invoke mutation-capable RPCs.' >&2
             exit 1
           fi
+          if grep -Eqi "access-control-allow-origin['\"[:space:]]*:[[:space:]]*['\"]\*['\"]" "$file"; then
+            echo 'A5c M2M endpoint must not advertise wildcard browser CORS.' >&2
+            exit 1
+          fi
 
       - name: Prove custom M2M auth configuration
         shell: bash
