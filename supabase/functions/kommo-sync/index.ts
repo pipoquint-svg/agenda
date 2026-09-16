@@ -24,6 +24,8 @@ const NATAL_2026_SERVICE_IDS = new Set([
 const NATAL_2026_INTERNAL_PIPELINE_ID = 14356959
 const NATAL_2026_ABANDONMENT_STAGE_ID = 111362911 // "incompleta" in Kommo
 const NATAL_2026_CONFIRMED_STAGE_ID = 110892847
+const KOMMO_MANAGE_LINK_FIELD_NAME = 'Link da reserva'
+const PUBLIC_MANAGE_BOOKING_URL = 'https://www.blacksheepestudiocriativo.com.br/gerenciar-reserva'
 
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
@@ -73,6 +75,10 @@ type LeadRoute = {
   pipelineId: number
   stageId: number
   recoverInitialLead: boolean
+}
+
+type LeadCardFields = KommoLeadCardFields & {
+  manageLink: { id: number; type: string }
 }
 
 function natal2026Route(desired: DesiredState): LeadRoute | null {
@@ -149,11 +155,37 @@ async function contactFieldIds(baseUrl: string, token: string): Promise<{ email:
   return { email: Number.isInteger(email) ? email : null, phone: Number.isInteger(phone) ? phone : null }
 }
 
-async function leadCardFieldMapping(baseUrl: string, token: string, isNatal2026: boolean): Promise<KommoLeadCardFields> {
+function validateManageLinkField(field: KommoCustomField): { id: number; type: string } {
+  const type = String(field.type ?? '').trim().toLowerCase()
+  if (!['url', 'text', 'textarea'].includes(type)) throw new Error('KOMMO_MANAGE_LINK_FIELD_INVALID_TYPE')
+  if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_MANAGE_LINK_FIELD_INVALID_ID')
+  return { id: Number(field.id), type }
+}
+
+async function resolveOrCreateManageLinkField(
+  baseUrl: string,
+  token: string,
+  fields: KommoCustomField[],
+): Promise<{ id: number; type: string }> {
+  const matches = fields.filter((field) => normalizeFieldName(field.name) === normalizeFieldName(KOMMO_MANAGE_LINK_FIELD_NAME))
+  if (matches.length > 1) throw new Error('KOMMO_MANAGE_LINK_FIELD_AMBIGUOUS')
+  if (matches.length === 1) return validateManageLinkField(matches[0])
+
+  const payload = await kommoJson<any>(baseUrl, token, '/leads/custom_fields', {
+    method: 'POST',
+    body: JSON.stringify([{ name: KOMMO_MANAGE_LINK_FIELD_NAME, type: 'url' }]),
+  })
+  const created = payload?._embedded?.custom_fields?.[0] ?? (Array.isArray(payload) ? payload[0] : null)
+  if (!created) throw new Error('KOMMO_MANAGE_LINK_FIELD_CREATE_INVALID_RESPONSE')
+  return validateManageLinkField(created as KommoCustomField)
+}
+
+async function leadCardFieldMapping(baseUrl: string, token: string, isNatal2026: boolean): Promise<LeadCardFields> {
   const payload = await kommoJson<any>(baseUrl, token, '/leads/custom_fields?limit=250')
   const fields = (payload?._embedded?.custom_fields ?? []) as KommoCustomField[]
   const base = resolveLeadCardFields(fields)
-  if (!isNatal2026) return base
+  const manageLink = await resolveOrCreateManageLinkField(baseUrl, token, fields)
+  if (!isNatal2026) return { ...base, manageLink }
 
   const matches = fields.filter((field) => normalizeFieldName(field.name) === 'data e horario')
   if (matches.length !== 1) {
@@ -163,7 +195,47 @@ async function leadCardFieldMapping(baseUrl: string, token: string, isNatal2026:
   if (String(field.type ?? '').trim().toLowerCase() !== 'date_time') throw new Error('KOMMO_NATAL_DATETIME_FIELD_INVALID_TYPE')
   if (!Number.isInteger(field.id) || Number(field.id) <= 0) throw new Error('KOMMO_NATAL_DATETIME_FIELD_INVALID_ID')
 
-  return { ...base, reservationDate: { id: Number(field.id), type: 'date_time' } }
+  return { ...base, reservationDate: { id: Number(field.id), type: 'date_time' }, manageLink }
+}
+
+function leadFieldStringValue(lead: any, fieldId: number): string {
+  const field = (lead?.custom_fields_values ?? []).find((candidate: any) => Number(candidate?.field_id) === fieldId)
+  const value = field?.values?.[0]?.value
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+async function issueKommoManageUrl(
+  client: ReturnType<typeof adminClient>,
+  appointmentId: string,
+  entityVersion: number,
+): Promise<string> {
+  const baseRequestId = `kommo-manage:${appointmentId}:v${entityVersion}`
+  const [rescheduleResult, cancelResult] = await Promise.all([
+    client.rpc('service_issue_appointment_action_token', {
+      p_appointment_id: appointmentId,
+      p_scope: 'RESCHEDULE',
+      p_channel: 'INTERNAL',
+      p_destination_masked: 'KOMMO',
+      p_request_id: `${baseRequestId}:RESCHEDULE`,
+    }),
+    client.rpc('service_issue_appointment_action_token', {
+      p_appointment_id: appointmentId,
+      p_scope: 'CANCEL',
+      p_channel: 'INTERNAL',
+      p_destination_masked: 'KOMMO',
+      p_request_id: `${baseRequestId}:CANCEL`,
+    }),
+  ])
+
+  if (rescheduleResult.error || !rescheduleResult.data?.access_token || !rescheduleResult.data?.token_id) {
+    throw new Error('KOMMO_MANAGE_RESCHEDULE_TOKEN_ISSUE_FAILED')
+  }
+  if (cancelResult.error || !cancelResult.data?.access_token || !cancelResult.data?.token_id) {
+    throw new Error('KOMMO_MANAGE_CANCEL_TOKEN_ISSUE_FAILED')
+  }
+
+  const composite = `m1.${String(rescheduleResult.data.access_token)}.${String(cancelResult.data.access_token)}`
+  return `${PUBLIC_MANAGE_BOOKING_URL}#token=${encodeURIComponent(composite)}&scope=RESCHEDULE`
 }
 
 async function searchContactsByPhone(
@@ -424,6 +496,24 @@ Deno.serve(async (req) => {
     if (!leadId && route.recoverInitialLead) leadId = await recoverInitialLeadForContact(client, baseUrl, token, contactId, settings)
     if (!leadId) leadId = await recoverLeadByName(baseUrl, token, leadName)
 
+    const activeManageLink = String(desired.appointment_status ?? '').trim().toUpperCase() === 'CONFIRMED'
+    let existingManageUrl = ''
+    if (leadId) {
+      const existingLead = await kommoJson<any>(baseUrl, token, `/leads/${leadId}`)
+      existingManageUrl = leadFieldStringValue(existingLead, cardFields.manageLink.id)
+    }
+
+    let manageUrl = existingManageUrl
+    if (activeManageLink && (!manageUrl || eventKind === 'RESCHEDULED')) {
+      manageUrl = await issueKommoManageUrl(client, appointmentId, desired.version)
+    }
+    if (!activeManageLink) manageUrl = ''
+
+    customFields.push({
+      field_id: cardFields.manageLink.id,
+      values: [{ value: manageUrl }],
+    })
+
     const leadBody = {
       name: leadName,
       pipeline_id: route.pipelineId,
@@ -477,6 +567,8 @@ Deno.serve(async (req) => {
       lead_price: leadBody.price,
       balance: desired.financial?.contract_balance ?? null,
       extras_count: desired.extras?.length ?? 0,
+      manage_link_field_id: cardFields.manageLink.id,
+      manage_link_set: Boolean(manageUrl),
       natal_datetime_field: isNatal2026 ? cardFields.reservationDate.id : null,
     })
   } catch (error) {
