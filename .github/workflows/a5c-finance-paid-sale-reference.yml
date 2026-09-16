@@ -1,0 +1,61 @@
+name: A5c Finance Paid Sale Reference
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/functions/finance-paid-sale-reference/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/a5c-finance-paid-sale-reference.yml'
+
+jobs:
+  finance-paid-sale-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Unit semantics
+        run: deno test supabase/functions/finance-paid-sale-reference/contract_test.ts
+
+      - name: Type check endpoint
+        run: deno check supabase/functions/finance-paid-sale-reference/index.ts
+
+      - name: Prove read-only Finance boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='supabase/functions/finance-paid-sale-reference/index.ts'
+          grep -Fq "from('tenants')" "$file"
+          grep -Fq "from('kommo_appointment_links')" "$file"
+          grep -Fq "from('appointments')" "$file"
+          grep -Fq "from('payment_transactions')" "$file"
+          grep -Fq "DRACMA_FINANCE_REFERENCE_SECRET" "$file"
+          grep -Fq "DRACMA_FINANCE_ALLOWED_ORGANIZATION_ID" "$file"
+          grep -Fq "DRACMA_FINANCE_TENANT_ID" "$file"
+          grep -Fq "FINANCE_ADAPTER_UNSCOPED_MULTI_TENANT_BLOCKED" "$file"
+          if grep -Eq '\.(insert|update|upsert|delete)\(' "$file"; then
+            echo 'A5c Finance reference endpoint must be read-only.' >&2
+            exit 1
+          fi
+          if grep -Fq '.rpc(' "$file"; then
+            echo 'A5c Finance reference endpoint must not invoke mutation-capable RPCs.' >&2
+            exit 1
+          fi
+          if grep -Eqi "access-control-allow-origin['\"[:space:]]*:[[:space:]]*['\"]\*['\"]" "$file"; then
+            echo 'A5c M2M endpoint must not advertise wildcard browser CORS.' >&2
+            exit 1
+          fi
+
+      - name: Prove custom M2M auth configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '/^\[functions\.finance-paid-sale-reference\]$/{found=1; next} found && /^verify_jwt = false$/{ok=1; exit} found && /^\[/{exit} END{exit ok?0:1}' supabase/config.toml
