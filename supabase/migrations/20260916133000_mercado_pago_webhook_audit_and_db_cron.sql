@@ -162,26 +162,40 @@ $function$;
 revoke all on function public.service_invoke_integration_worker_db_cron() from public, anon, authenticated;
 grant execute on function public.service_invoke_integration_worker_db_cron() to service_role;
 
+-- Do not schedule production HTTP calls in disposable/local stacks. The production
+-- project creates this marker once, out of band, before applying this migration.
 do $$
 declare
   v_jobid bigint;
+  v_is_production boolean;
 begin
+  select exists (
+    select 1
+    from vault.decrypted_secrets
+    where name = 'agenda_production_marker'
+      and decrypted_secret = 'sbexdggbwqvyhbkatucs'
+  ) into v_is_production;
+
+  if not v_is_production then
+    return;
+  end if;
+
   select jobid into v_jobid from cron.job where jobname = 'mercado-pago-reconcile-db-fallback' limit 1;
   if v_jobid is not null then perform cron.unschedule(v_jobid); end if;
 
   select jobid into v_jobid from cron.job where jobname = 'integration-worker-db-fallback' limit 1;
   if v_jobid is not null then perform cron.unschedule(v_jobid); end if;
+
+  perform cron.schedule(
+    'mercado-pago-reconcile-db-fallback',
+    '*/2 * * * *',
+    'select public.service_invoke_mercado_pago_reconcile_cron();'
+  );
+
+  perform cron.schedule(
+    'integration-worker-db-fallback',
+    '*/5 * * * *',
+    'select public.service_invoke_integration_worker_db_cron();'
+  );
 end;
 $$;
-
-select cron.schedule(
-  'mercado-pago-reconcile-db-fallback',
-  '*/2 * * * *',
-  $$select public.service_invoke_mercado_pago_reconcile_cron();$$
-);
-
-select cron.schedule(
-  'integration-worker-db-fallback',
-  '*/5 * * * *',
-  $$select public.service_invoke_integration_worker_db_cron();$$
-);
