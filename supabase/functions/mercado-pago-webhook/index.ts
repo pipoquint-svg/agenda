@@ -72,6 +72,68 @@ function safeRequestId(value: string): string | null {
   return trimmed.length <= 12 ? trimmed : `${trimmed.slice(0, 12)}…`
 }
 
+async function createReceipt(input: {
+  dataId?: string | null
+  eventType?: string | null
+  action?: string | null
+  liveMode?: boolean | null
+  requestId?: string | null
+  signaturePresent?: boolean
+}): Promise<string | null> {
+  try {
+    const { data, error } = await adminClient()
+      .from('mercado_pago_webhook_receipts')
+      .insert({
+        data_id: input.dataId || null,
+        event_type: input.eventType || null,
+        action: input.action || null,
+        live_mode: input.liveMode ?? null,
+        request_id_prefix: safeRequestId(input.requestId ?? ''),
+        signature_present: input.signaturePresent === true,
+        outcome: 'RECEIVED',
+      })
+      .select('id')
+      .maybeSingle()
+    if (error || !data?.id) return null
+    return String(data.id)
+  } catch {
+    return null
+  }
+}
+
+async function finishReceipt(
+  receiptId: string | null,
+  outcome: string,
+  httpStatus: number,
+  detail: string | null = null,
+): Promise<void> {
+  if (!receiptId) return
+  try {
+    await adminClient()
+      .from('mercado_pago_webhook_receipts')
+      .update({
+        completed_at: new Date().toISOString(),
+        outcome,
+        http_status: httpStatus,
+        detail: detail ? detail.slice(0, 160) : null,
+      })
+      .eq('id', receiptId)
+  } catch {
+    // Webhook processing must never depend on observability persistence.
+  }
+}
+
+async function auditedResponse(
+  receiptId: string | null,
+  body: unknown,
+  status: number,
+  outcome: string,
+  detail: string | null = null,
+): Promise<Response> {
+  await finishReceipt(receiptId, outcome, status, detail)
+  return json(body, status)
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
 
@@ -79,7 +141,8 @@ Deno.serve(async (req) => {
   try {
     body = await req.json() as Record<string, unknown>
   } catch {
-    return json({ error: { code: 'INVALID_JSON' } }, 400)
+    const receiptId = await createReceipt({ signaturePresent: Boolean(req.headers.get('x-signature')) })
+    return auditedResponse(receiptId, { error: { code: 'INVALID_JSON' } }, 400, 'INVALID_JSON')
   }
 
   const url = new URL(req.url)
@@ -87,11 +150,17 @@ Deno.serve(async (req) => {
   const signature = req.headers.get('x-signature') ?? ''
   const requestId = req.headers.get('x-request-id') ?? ''
   const type = typeof body.type === 'string' ? body.type : ''
+  const action = typeof body.action === 'string' ? body.action : ''
   const liveMode = typeof body.live_mode === 'boolean' ? body.live_mode : null
+  const receiptId = await createReceipt({
+    dataId,
+    eventType: type,
+    action,
+    liveMode,
+    requestId,
+    signaturePresent: Boolean(signature),
+  })
 
-  // data.id and x-signature are required. Mercado Pago documents that signature
-  // manifest components absent from a notification must be omitted, so an absent
-  // x-request-id is valid input and must not be represented as request-id:;.
   if (!dataId || !signature) {
     console.error('[OPERATION_ALERT] MERCADO_PAGO_WEBHOOK_SIGNATURE_COMPONENT_MISSING', {
       has_data_id: Boolean(dataId),
@@ -100,7 +169,7 @@ Deno.serve(async (req) => {
       event_type: type || null,
       live_mode: liveMode,
     })
-    return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_REQUIRED' } }, 401)
+    return auditedResponse(receiptId, { error: { code: 'MERCADO_PAGO_SIGNATURE_REQUIRED' } }, 401, 'SIGNATURE_REQUIRED')
   }
 
   try {
@@ -120,25 +189,22 @@ Deno.serve(async (req) => {
         event_type: type || null,
         live_mode: liveMode,
       })
-      return json({ error: { code: 'MERCADO_PAGO_SIGNATURE_INVALID' } }, 401)
+      return auditedResponse(receiptId, { error: { code: 'MERCADO_PAGO_SIGNATURE_INVALID' } }, 401, 'SIGNATURE_INVALID')
     }
 
     if (type && type !== 'order' && type !== 'orders') {
-      return json({ ok: true, ignored: 'UNSUPPORTED_EVENT_TYPE' })
+      return auditedResponse(receiptId, { ok: true, ignored: 'UNSUPPORTED_EVENT_TYPE' }, 200, 'IGNORED', 'UNSUPPORTED_EVENT_TYPE')
     }
 
-    // Runtime environment and credential class must match before any provider read.
     const runtime = providerRuntime()
     if (typeof body.live_mode !== 'boolean') {
-      return json({ ok: true, ignored: 'LIVE_MODE_MISSING' })
+      return auditedResponse(receiptId, { ok: true, ignored: 'LIVE_MODE_MISSING' }, 200, 'IGNORED', 'LIVE_MODE_MISSING')
     }
     if (runtime.environment === 'sandbox' && body.live_mode === true) {
-      console.error('Ignoring live Mercado Pago Order event in sandbox')
-      return json({ ok: true, ignored: 'LIVE_EVENT_IN_SANDBOX' })
+      return auditedResponse(receiptId, { ok: true, ignored: 'LIVE_EVENT_IN_SANDBOX' }, 200, 'IGNORED', 'LIVE_EVENT_IN_SANDBOX')
     }
     if (runtime.environment === 'production' && body.live_mode === false) {
-      console.error('Ignoring Mercado Pago test Order event in production')
-      return json({ ok: true, ignored: 'TEST_EVENT_IN_PRODUCTION' })
+      return auditedResponse(receiptId, { ok: true, ignored: 'TEST_EVENT_IN_PRODUCTION' }, 200, 'IGNORED', 'TEST_EVENT_IN_PRODUCTION')
     }
 
     const rawOrder = await getProviderOrder(dataId)
@@ -170,10 +236,11 @@ Deno.serve(async (req) => {
       transaction = data ?? null
     }
 
-    if (!transaction) return json({ ok: true, ignored: 'ORDER_NOT_MANAGED_BY_AGENDA' })
+    if (!transaction) {
+      return auditedResponse(receiptId, { ok: true, ignored: 'ORDER_NOT_MANAGED_BY_AGENDA' }, 200, 'IGNORED', 'ORDER_NOT_MANAGED_BY_AGENDA')
+    }
     if (transaction.method !== 'PIX' && transaction.method !== 'CARD') {
-      console.error('Mercado Pago managed transaction has invalid method')
-      return json({ ok: true, ignored: 'PAYMENT_INTENT_INVALID' })
+      return auditedResponse(receiptId, { ok: true, ignored: 'PAYMENT_INTENT_INVALID' }, 200, 'IGNORED', 'PAYMENT_INTENT_INVALID')
     }
 
     let validationError: unknown = null
@@ -203,16 +270,15 @@ Deno.serve(async (req) => {
         p_payload_json: storedSnapshot,
       })
       if (quarantineError) {
-        console.error('Failed to persist Mercado Pago Order mismatch quarantine')
-        return json({ error: { code: 'PAYMENT_MISMATCH_QUARANTINE_FAILED' } }, 500)
+        return auditedResponse(receiptId, { error: { code: 'PAYMENT_MISMATCH_QUARANTINE_FAILED' } }, 500, 'ERROR', 'PAYMENT_MISMATCH_QUARANTINE_FAILED')
       }
-      return json({ ok: true, ignored: 'PAYMENT_INTENT_MISMATCH' })
+      return auditedResponse(receiptId, { ok: true, ignored: 'PAYMENT_INTENT_MISMATCH' }, 200, 'QUARANTINED', code)
     }
 
     const normalized = normalizeMercadoPagoPaymentStatus(snapshot.status)
     const notificationId = body.id == null ? (requestId || dataId) : String(body.id)
-    const action = typeof body.action === 'string' ? body.action : 'order.updated'
-    const eventKey = `webhook-order:${notificationId}:${action}:${dataId}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`
+    const providerAction = action || 'order.updated'
+    const eventKey = `webhook-order:${notificationId}:${providerAction}:${dataId}:${snapshot.raw_status ?? snapshot.status ?? 'unknown'}:${snapshot.status_detail ?? 'none'}`
 
     const { data: applied, error } = await client.rpc('apply_provider_payment_status', {
       p_transaction_id: transaction.id,
@@ -231,6 +297,7 @@ Deno.serve(async (req) => {
       scheduleImmediateAppointmentIntegrations(appointmentId, 'MERCADO_PAGO_WEBHOOK')
     }
 
+    await finishReceipt(receiptId, 'APPLIED', 200, normalized)
     return json({ ok: true, state: applied })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'MERCADO_PAGO_WEBHOOK_FAILED'
@@ -240,6 +307,6 @@ Deno.serve(async (req) => {
       || code === 'MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED'
       || code === 'MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED'
       || code === 'MISSING_ENV' ? 503 : 500
-    return json({ error: { code } }, status)
+    return auditedResponse(receiptId, { error: { code } }, status, 'ERROR', code)
   }
 })

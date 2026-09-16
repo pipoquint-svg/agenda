@@ -17,10 +17,17 @@ const RECONCILE_MIN_AGE_MS = 2 * 60 * 1000
 const RECONCILE_BUCKET_MS = 5 * 60 * 1000
 const PROVIDER_TIMEOUT_MS = 15_000
 
-function requireInternal(req: Request): void {
+async function requireInternal(req: Request): Promise<void> {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
   const supplied = req.headers.get('x-internal-secret')?.trim() ?? ''
-  if (!expected || supplied !== expected) throw new Error('INTERNAL_AUTH_REQUIRED')
+  if (expected && supplied === expected) return
+
+  const cronSecret = req.headers.get('x-reconcile-secret')?.trim() ?? ''
+  if (!cronSecret) throw new Error('INTERNAL_AUTH_REQUIRED')
+  const { data, error } = await adminClient().rpc('service_verify_mercado_pago_reconcile_cron_secret', {
+    p_secret: cronSecret,
+  })
+  if (error || data !== true) throw new Error('INTERNAL_AUTH_REQUIRED')
 }
 
 function providerRuntime() {
@@ -76,7 +83,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
 
   try {
-    requireInternal(req)
+    await requireInternal(req)
     const client = adminClient()
     const workerId = `mercado-pago:${crypto.randomUUID()}`
     const staleBefore = new Date(Date.now() - RECONCILE_MIN_AGE_MS).toISOString()
