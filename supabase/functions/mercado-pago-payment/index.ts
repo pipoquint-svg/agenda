@@ -273,7 +273,7 @@ async function tryImmediateConfirmationEmail(
       clearTimeout(timer)
     }
   } catch (error) {
-    console.error('[OPERATION_ALERT] IMMEDIATE_CONFIRMIRMATION_EMAIL_FAILED', {
+    console.error('[OPERATION_ALERT] IMMEDIATE_CONFIRMATION_EMAIL_FAILED', {
       code: error instanceof Error ? error.message.split(':')[0] : 'UNKNOWN',
     })
   }
