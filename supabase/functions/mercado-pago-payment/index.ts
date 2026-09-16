@@ -560,7 +560,11 @@ Deno.serve(async (req) => {
     }
 
     providerBody.transactions = {
-      payments: [{ amount, payment_method: paymentMethod }],
+      payments: [{
+        amount,
+        payment_method: paymentMethod,
+        ...(method === 'PIX' ? { expiration_time: 'PT30M' } : {}),
+      }],
     }
 
     let provider: ProviderResult
