@@ -22,7 +22,7 @@ jobs:
         shell: bash
         env:
           OIDC_AUDIENCE: blacksheep-agenda-birthday-scheduler
-          BIRTHDAY_URL: https://jlyvlvmspfjwbcmhmhwz.supabase.co/functions/v1/birthday-automation-trigger
+          BIRTHDAY_URL: https://sbexdggbwqvyhbkatucs.supabase.co/functions/v1/birthday-automation-trigger
         run: |
           set -euo pipefail
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
