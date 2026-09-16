@@ -32,9 +32,53 @@ import './couponAdmin.css'
 import './employeeAdmin.css'
 import './checkout.css'
 
+function BlackSheepVisitCallout() {
+  const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
+  return (
+    <aside style={{ maxWidth: 1040, margin: '24px auto -8px', padding: '0 20px' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 20,
+        flexWrap: 'wrap',
+        padding: '20px 22px',
+        border: '1px solid rgba(17,17,17,.12)',
+        borderRadius: 20,
+        background: '#fff',
+        boxShadow: '0 10px 30px rgba(0,0,0,.04)',
+      }}>
+        <div style={{ maxWidth: 680 }}>
+          <small style={{ fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>Quer conhecer antes de reservar?</small>
+          <h2 style={{ margin: '6px 0 6px', fontSize: 'clamp(1.25rem, 3vw, 1.65rem)' }}>Conhecer o estúdio sem compromisso</h2>
+          <p style={{ margin: 0, lineHeight: 1.5 }}>Agende uma visita gratuita de 30 minutos. O horário fica reservado para você e não há nenhum pagamento.</p>
+        </div>
+        <a
+          href={`${base}/agendar/blacksheep/visita`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 46,
+            padding: '0 18px',
+            borderRadius: 12,
+            background: '#171717',
+            color: '#fff',
+            fontWeight: 700,
+            textDecoration: 'none',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Agendar visita gratuita
+        </a>
+      </div>
+    </aside>
+  )
+}
+
 function PublicBookingRoute({ slug }: { slug: string }) {
   useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: slug.toUpperCase(), pageSlug: slug }) }, [slug])
-  return <><BookingPageDuration slug={slug} /><BookingCheckoutSession /><TrackingConsentBanner /></>
+  return <>{slug === 'blacksheep' ? <BlackSheepVisitCallout /> : null}<BookingPageDuration slug={slug} /><BookingCheckoutSession /><TrackingConsentBanner /></>
 }
 
 function PublicSabrinaBookingRoute({ slug }: { slug: string }) {
@@ -130,6 +174,7 @@ export function App() {
     return <PublicSabrinaBookingRoute slug="sabrina-signature" />
   }
   if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicSabrinaBookingRoute slug="sabrina" />
+  if (path === '/agendar/blacksheep/visita' || path === '/conhecer-o-estudio') return <PublicBookingRoute slug="blacksheep-visita" />
   if (path === '/agendar/blacksheep' || path === '/agendamento' || path === '/agenda') return <PublicBookingRoute slug="blacksheep" />
 
   const inviteMatch = path.match(/^\/convite-natal\/([A-Za-z0-9_-]{32,})$/)
