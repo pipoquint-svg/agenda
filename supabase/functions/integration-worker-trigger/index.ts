@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'npm:jose@6.1.0'
+import { adminClient } from '../_shared/supabase.ts'
 import {
   assertGitHubWorkerClaims,
   GITHUB_OIDC_ISSUER,
@@ -25,6 +26,25 @@ function bearerToken(req: Request): string {
   return match[1]
 }
 
+async function authorizeTrigger(req: Request): Promise<'GITHUB_OIDC' | 'SUPABASE_DB_CRON'> {
+  const cronSecret = req.headers.get('x-db-cron-secret')?.trim() ?? ''
+  if (cronSecret) {
+    const { data, error } = await adminClient().rpc('service_verify_integration_worker_db_cron_secret', {
+      p_secret: cronSecret,
+    })
+    if (!error && data === true) return 'SUPABASE_DB_CRON'
+    throw new Error('DB_CRON_AUTH_INVALID')
+  }
+
+  const token = bearerToken(req)
+  const { payload } = await jwtVerify(token, GITHUB_JWKS, {
+    issuer: GITHUB_OIDC_ISSUER,
+    audience: GITHUB_WORKER_AUDIENCE,
+  })
+  assertGitHubWorkerClaims(payload as Record<string, unknown>)
+  return 'GITHUB_OIDC'
+}
+
 async function invokeWorker(base: string, internalSecret: string, name: string): Promise<{ status: number; result: unknown }> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS)
@@ -46,30 +66,40 @@ async function invokeWorker(base: string, internalSecret: string, name: string):
   } finally { clearTimeout(timeout) }
 }
 
+function settledResult(result: PromiseSettledResult<{ status: number; result: unknown }>) {
+  if (result.status === 'fulfilled') return { ok: true, result: result.value.result }
+  const message = result.reason instanceof Error ? result.reason.message : 'UNKNOWN_ERROR'
+  return { ok: false, error: message.split(':')[0] }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
   try {
-    const token = bearerToken(req)
-    const { payload } = await jwtVerify(token, GITHUB_JWKS, { issuer: GITHUB_OIDC_ISSUER, audience: GITHUB_WORKER_AUDIENCE })
-    assertGitHubWorkerClaims(payload as Record<string, unknown>)
-
+    const source = await authorizeTrigger(req)
     const base = requiredEnv('SUPABASE_URL').replace(/\/$/, '')
     const internalSecret = requiredEnv('INTEGRATION_INTERNAL_SECRET')
-    const integration = await invokeWorker(base, internalSecret, 'integration-worker')
-    const infinitePayWebhook = await invokeWorker(base, internalSecret, 'infinitepay-webhook-worker')
-    const balance = await invokeWorker(base, internalSecret, 'balance-collection-worker')
-    const mercadoPagoReconcile = await invokeWorker(base, internalSecret, 'mercado-pago-reconcile')
-    return json({
-      ok: true,
-      integration_worker: integration.result,
-      infinitepay_webhook_worker: infinitePayWebhook.result,
-      balance_worker: balance.result,
-      mercado_pago_reconcile: mercadoPagoReconcile.result,
-    })
+
+    const [integration, infinitePayWebhook, balance, mercadoPagoReconcile] = await Promise.allSettled([
+      invokeWorker(base, internalSecret, 'integration-worker'),
+      invokeWorker(base, internalSecret, 'infinitepay-webhook-worker'),
+      invokeWorker(base, internalSecret, 'balance-collection-worker'),
+      invokeWorker(base, internalSecret, 'mercado-pago-reconcile'),
+    ])
+
+    const results = {
+      integration_worker: settledResult(integration),
+      infinitepay_webhook_worker: settledResult(infinitePayWebhook),
+      balance_worker: settledResult(balance),
+      mercado_pago_reconcile: settledResult(mercadoPagoReconcile),
+    }
+    const ok = Object.values(results).every((item) => item.ok)
+    return json({ ok, source, ...results }, ok ? 200 : 502)
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'GITHUB_OIDC_INVALID'
+    const message = error instanceof Error ? error.message : 'TRIGGER_AUTH_INVALID'
     console.error('Integration worker trigger rejected', { code: message.split(':')[0] })
-    const status = message.startsWith('MISSING_ENV') ? 503 : message.includes('_HTTP_') || message.includes('_TIMEOUT') ? 502 : 401
+    const status = message.startsWith('MISSING_ENV') ? 503
+      : message.includes('_HTTP_') || message.includes('_TIMEOUT') ? 502
+      : 401
     return json({ error: { code: message.split(':')[0] } }, status)
   }
 })
