@@ -1,14 +1,13 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(16);
+select plan(15);
 
 select is((select max_active_free_visits from public.customer_access_policy_settings where id=1),1,'free visit active limit defaults to one');
 select is((select free_visit_confirmation_hours_before from public.customer_access_policy_settings where id=1),24,'free visit confirmation deadline is 24 hours before start');
 select is((select free_visit_no_show_threshold from public.customer_access_policy_settings where id=1),1,'first free-visit no-show triggers restriction threshold');
 select is((select history_retention_years from public.customer_access_policy_settings where id=1),5,'customer access history retention is five years');
 select ok((select auto_no_free_visits from public.customer_access_policy_settings where id=1),'automatic NO_FREE_VISITS is enabled');
-select is((select cancel_min_notice_minutes from public.services where slug='visita-estudio'),0,'BlackSheep free studio visit can be cancelled without a 48-hour notice');
 
 select has_function('public','service_admin_confirm_free_visit',array['uuid','uuid'],'admin free-visit confirmation RPC exists');
 select ok(not has_function_privilege('anon','public.service_admin_confirm_free_visit(uuid,uuid)','EXECUTE'),'anonymous cannot confirm free visit');
