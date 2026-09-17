@@ -2,6 +2,15 @@
 -- They must not depend on a second administrative confirmation deadline.
 -- Also fixes legacy expiry cleanup so confirmed resource allocations are released.
 
+-- The BlackSheep studio visit is free and without commitment, so a customer
+-- must be able to cancel it at any time before the appointment starts.
+update public.services
+set allow_cancel = true,
+    cancel_min_notice_minutes = 0,
+    updated_at = now()
+where slug = 'visita-estudio'
+  and booking_product_type = 'FREE_VISIT';
+
 create or replace function public.customer_access_appointment_before_insert()
 returns trigger
 language plpgsql
