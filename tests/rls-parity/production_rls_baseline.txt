@@ -71,6 +71,7 @@ TABLE|legacy_amelia_import_batches|true|false
 TABLE|legacy_appointments|true|false
 TABLE|legacy_customer_sources|true|false
 TABLE|legacy_import_batches|true|false
+TABLE|mercado_pago_webhook_receipts|true|false
 TABLE|message_templates|false|false
 TABLE|notification_delivery_logs|true|false
 TABLE|notification_template_configs|true|false

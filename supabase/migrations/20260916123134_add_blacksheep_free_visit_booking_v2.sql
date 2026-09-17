@@ -12,8 +12,11 @@ begin
   where s.slug='locacao-estudio' and s.is_active
   limit 1;
 
+  -- BlackSheep catalog data is production-specific. A clean schema rebuild must
+  -- remain valid even when that operational seed is not present.
   if v_source_service_id is null then
-    raise exception 'SOURCE_BLACKSHEEP_RENTAL_SERVICE_NOT_FOUND';
+    raise notice 'SOURCE_BLACKSHEEP_RENTAL_SERVICE_NOT_FOUND: skipping BlackSheep free-visit seed';
+    return;
   end if;
 
   insert into public.services (
@@ -39,7 +42,7 @@ begin
     1,1,src.minimum_booking_notice_minutes,src.maximum_booking_horizon_days,
     null,src.checkout_hold_minutes,src.payment_hold_minutes,
     src.allow_reschedule,src.reschedule_min_notice_minutes,src.max_reschedules,
-    src.allow_cancel,src.cancel_min_notice_minutes,false,true,5,
+    true,0,false,true,5,
     'FIXED',null,null,null,null,
     'BLACKSHEEP','FREE_VISIT',0,src.service_type_id,
     'FIXED',0,30,src.public_minimum_booking_notice_hours,null,'FULL_ONLY',1,1
@@ -58,6 +61,8 @@ begin
     minimum_people=1,
     maximum_people=1,
     confirmation_percentage=null,
+    allow_cancel=true,
+    cancel_min_notice_minutes=0,
     requires_terms=false,
     is_active=true,
     sort_order=5,
@@ -143,7 +148,8 @@ begin
   limit 1;
 
   if v_source_service_employee_id is null or v_employee_id is null then
-    raise exception 'SOURCE_BLACKSHEEP_SERVICE_EMPLOYEE_NOT_FOUND';
+    raise notice 'SOURCE_BLACKSHEEP_SERVICE_EMPLOYEE_NOT_FOUND: free-visit service created without employee mapping';
+    return;
   end if;
 
   insert into public.service_employees (service_id,employee_id,is_active)
