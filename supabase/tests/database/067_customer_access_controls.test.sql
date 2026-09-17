@@ -27,7 +27,7 @@ select ok(
 );
 select ok(
   pg_get_functiondef('public.customer_access_appointment_before_insert()'::regprocedure) like '%free_visit_confirmed_at%'
-  and pg_get_functiondef('public.customer_access_appointment_before_insert()'::regprocedure) like '%free_visit_confirmation_deadline := NULL%',
+  and regexp_replace(pg_get_functiondef('public.customer_access_appointment_before_insert()'::regprocedure),'[[:space:]]+','','g') like '%free_visit_confirmation_deadline:=null;%',
   'public free visits are auto-confirmed and do not receive an administrative confirmation deadline'
 );
 select ok(
@@ -41,7 +41,7 @@ select ok(
   'unconfirmed free visits are cancelled and their allocations released'
 );
 select ok(
-  pg_get_functiondef('public.expire_unconfirmed_free_visits()'::regprocedure) like '%status = ''CONFIRMED''%',
+  regexp_replace(pg_get_functiondef('public.expire_unconfirmed_free_visits()'::regprocedure),'[[:space:]]+','','g') like '%status=''CONFIRMED'';%',
   'legacy free-visit expiry releases confirmed resource allocations'
 );
 
