@@ -11,6 +11,7 @@ import { CustomerAdmin } from './CustomerAdmin'
 import { DemandCaptureAdmin } from './DemandCaptureAdmin'
 import { DemandCaptureForm } from './DemandCaptureForm'
 import { EmployeeAdmin } from './EmployeeAdmin'
+import { GestanteBookingJourney } from './GestanteBookingJourney'
 import { GestaoEntry } from './GestaoEntry'
 import { GestaoSettingsPage } from './GestaoSettingsPage'
 import { ManageReservation } from './ManageReservation'
@@ -84,6 +85,11 @@ function PublicBookingRoute({ slug }: { slug: string }) {
 function PublicSabrinaBookingRoute({ slug }: { slug: string }) {
   useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: 'SABRINA', pageSlug: slug }) }, [slug])
   return <><SabrinaBookingJourney slug={slug} /><TrackingConsentBanner /></>
+}
+
+function PublicGestanteBookingRoute({ slug }: { slug: 'sabrina-essencial' | 'sabrina-signature' }) {
+  useEffect(() => { trackPublicPage({ pageType: 'BOOKING', brand: 'SABRINA', pageSlug: slug }) }, [slug])
+  return <><GestanteBookingJourney slug={slug} /><TrackingConsentBanner /></>
 }
 
 function PublicPrivateInviteRoute({ accessToken }: { accessToken: string }) {
@@ -168,10 +174,10 @@ export function App() {
   if (path.startsWith('/admin/demand')) return adminPage(<DemandCaptureAdmin />)
 
   if (path === '/agendar/sabrina/essencial' || path === '/sabrina-pierri/essencial') {
-    return <PublicSabrinaBookingRoute slug="sabrina-essencial" />
+    return <PublicGestanteBookingRoute slug="sabrina-essencial" />
   }
   if (path === '/agendar/sabrina/signature' || path === '/sabrina-pierri/signature') {
-    return <PublicSabrinaBookingRoute slug="sabrina-signature" />
+    return <PublicGestanteBookingRoute slug="sabrina-signature" />
   }
   if (path === '/agendar/sabrina' || path === '/sabrina-pierri') return <PublicSabrinaBookingRoute slug="sabrina" />
   if (path === '/agendar/blacksheep/visita' || path === '/conhecer-o-estudio') return <PublicBookingRoute slug="blacksheep-visita" />

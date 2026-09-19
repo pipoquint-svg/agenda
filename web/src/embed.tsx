@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BookingPageDuration } from './BookingPageDuration'
 import { BookingCheckoutSession } from './BookingCheckoutSession'
+import { GestanteBookingJourney } from './GestanteBookingJourney'
 import { SabrinaBookingJourney } from './SabrinaBookingJourney'
 import './embed-base.css'
 import './checkout.css'
@@ -15,6 +16,10 @@ function usesSabrinaJourney(slug: string): boolean {
     || slug === 'natal-2026'
 }
 
+function isGestanteContextualSlug(slug: string): slug is 'sabrina-essencial' | 'sabrina-signature' {
+  return slug === 'sabrina-essencial' || slug === 'sabrina-signature'
+}
+
 function mountAgenda(target: HTMLElement) {
   if (target.dataset.bsAgendaMounted === 'true') return
   target.dataset.bsAgendaMounted = 'true'
@@ -23,7 +28,9 @@ function mountAgenda(target: HTMLElement) {
   createRoot(target).render(
     <StrictMode>
       <div className="bs-agenda-embed">
-        {usesSabrinaJourney(slug) ? (
+        {isGestanteContextualSlug(slug) ? (
+          <GestanteBookingJourney slug={slug} />
+        ) : usesSabrinaJourney(slug) ? (
           <SabrinaBookingJourney slug={slug} />
         ) : (
           <>
