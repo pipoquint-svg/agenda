@@ -1,0 +1,22 @@
+name: Invoice checkout source workspace
+on:
+  push:
+    branches: [fix/invoice-prebook-checkout-20260921]
+    paths: [.github/workflows/invoice-checkout-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Export tracked source for isolated regression testing
+        run: git archive --format=tar HEAD > "$RUNNER_TEMP/agenda-source.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: invoice-checkout-source
+          path: ${{ runner.temp }}/agenda-source.tar
+          retention-days: 1
