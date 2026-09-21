@@ -29,3 +29,7 @@ Tests: 160_invoice_prebook_checkout.test.sql, invoice-prebook-email_test.ts, inv
 ## Validation notes
 
 PRs: Agenda #456 and BlackSheep #113. The invoice fixture includes the mandatory service change policy required by the canonical confirmation guard. No production guard was bypassed to build synthetic reservations. Historical ACL baseline checks remain historical; the current schema separately asserts every new function's privileges and exact invoker/definer mode. Test completion and production deployment are distinct release conditions.
+
+The focused invoice lifecycle completed 42 assertions. BlackSheep HEAD bcd14729cf29943e11febeec50ae39dfa6df91ca passed its five QA jobs and config/auth hardening. Full Database Core run 35658847706 retained artifact 10666545046 and proved the only pgTAP failure was the pre-existing coupon fixture 154 missing its mandatory service change policy (APPOINTMENT_SERVICE_CHANGE_POLICY_MISSING); all other test files, including invoice 160, passed. Commit 3d2ed6d9d6a98e8b27bf5ca233170d2e9b24c68c adds that fixture policy without modifying its five coupon assertions or the production guard.
+
+Database Core now retains complete pgTAP, ACL and RLS evidence while preserving the original test command and failure exit status. Check the final PR HEAD's terminal CI results and release-evidence comment before merge. No merge or deployment is represented by these validation notes. After green gates, the remaining decision is explicit release authorization; the PR-05 tenant-foundation restriction is unchanged.
