@@ -19,6 +19,8 @@ on:
       - 'supabase/migrations/20260909093000_reconcile_recovered_production_function_acls.sql'
       - 'supabase/migrations/20260910213000_admin_customers_operation_scope.sql'
       - 'supabase/migrations/20260915194000_immediate_integration_dispatch.sql'
+      - 'supabase/migrations/20260916133000_mercado_pago_webhook_audit_and_db_cron.sql'
+      - 'supabase/migrations/20260921210000_invoice_prebook_checkout.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -116,7 +118,9 @@ jobs:
             supabase/migrations/20260909100000_public_available_dates_month.sql \
             supabase/migrations/20260910213000_admin_customers_operation_scope.sql \
             supabase/migrations/20260913110000_month_availability_v2_cutover.sql \
-            supabase/migrations/20260915194000_immediate_integration_dispatch.sql
+            supabase/migrations/20260915194000_immediate_integration_dispatch.sql \
+            supabase/migrations/20260916133000_mercado_pago_webhook_audit_and_db_cron.sql \
+            supabase/migrations/20260921210000_invoice_prebook_checkout.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -185,7 +189,9 @@ jobs:
             supabase/migrations/20260909100000_public_available_dates_month.sql \
             supabase/migrations/20260910213000_admin_customers_operation_scope.sql \
             supabase/migrations/20260913110000_month_availability_v2_cutover.sql \
-            supabase/migrations/20260915194000_immediate_integration_dispatch.sql
+            supabase/migrations/20260915194000_immediate_integration_dispatch.sql \
+            supabase/migrations/20260916133000_mercado_pago_webhook_audit_and_db_cron.sql \
+            supabase/migrations/20260921210000_invoice_prebook_checkout.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
