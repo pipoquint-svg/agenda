@@ -12,6 +12,8 @@ insert into public.resources(id,name,resource_type) values('16000000-0000-4000-8
 insert into public.employees(id,name) values('16000000-0000-4000-8000-000000000012','Invoice test employee');
 insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,maximum_booking_horizon_days,requires_terms)
 values('16000000-0000-4000-8000-000000000013','16000000-0000-4000-8000-000000000010','Invoice service','invoice-service',60,850,1,10,5000,false);
+insert into public.service_change_policies(service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,reschedule_repeat_percent,cancellation_late_percent)
+values('16000000-0000-4000-8000-000000000013',0,0,0,0,0);
 insert into public.service_employees(id,service_id,employee_id)
 values('16000000-0000-4000-8000-000000000014','16000000-0000-4000-8000-000000000013','16000000-0000-4000-8000-000000000012');
 insert into public.service_resources(service_id,resource_id)
