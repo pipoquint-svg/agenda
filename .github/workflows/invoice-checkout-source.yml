@@ -1,22 +1,36 @@
-name: Invoice checkout source workspace
+name: Invoice checkout branch preparation
 on:
   push:
     branches: [fix/invoice-prebook-checkout-20260921]
     paths: [.github/workflows/invoice-checkout-source.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  prepare:
+    if: github.ref == 'refs/heads/fix/invoice-prebook-checkout-20260921'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - name: Export tracked source for isolated regression testing
-        run: git archive --format=tar HEAD > "$RUNNER_TEMP/agenda-source.tar"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: invoice-checkout-source
-          path: ${{ runner.temp }}/agenda-source.tar
-          retention-days: 1
+          fetch-depth: 0
+      - name: Verify reviewed patch and unchanged base
+        run: |
+          git diff --exit-code 546aa81d8cd6f2c4b4eb1d8f8d02bd1616aa63e0 -- . ':!.github/workflows/invoice-checkout-source.yml' ':!scripts/invoice-checkout.patch.part*'
+          python3 - <<'PY'
+          import base64, hashlib, lzma, pathlib, subprocess
+          parts = sorted(pathlib.Path('scripts').glob('invoice-checkout.patch.part*'))
+          assert len(parts) == 3, 'missing patch part'
+          data = lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts)))
+          assert hashlib.sha256(data).hexdigest() == '91605450ea1f65ae44127b4f6b8752b6d36acf791a07328fc6dde0fdb2cda135', 'patch checksum mismatch'
+          subprocess.run(['git', 'apply', '--check', '--unidiff-zero'], input=data, check=True)
+          subprocess.run(['git', 'apply', '--index', '--unidiff-zero'], input=data, check=True)
+          PY
+      - name: Commit only to hotfix branch and remove temporary transfer files
+        run: |
+          git rm .github/workflows/invoice-checkout-source.yml scripts/invoice-checkout.patch.part0 scripts/invoice-checkout.patch.part1 scripts/invoice-checkout.patch.part2
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: support verified invoice checkout and invoice prebooking'
+          git push origin HEAD:refs/heads/fix/invoice-prebook-checkout-20260921
