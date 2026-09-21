@@ -25,3 +25,7 @@ Restore independent invoice billing and optional prebooking. This hotfix is isol
 No customer records or existing bookings are rewritten by this migration. Existing Volt booking remains untouched. New behavior is server-authoritative and old checkout payment links cannot create an upfront invoice charge.
 
 Tests: 160_invoice_prebook_checkout.test.sql, invoice-prebook-email_test.ts, invoiceCheckout.test.ts and invoice-prebook-confirm.test.tsx, plus existing regression suites. CI status is recorded on the actual PR head.
+
+## Validation notes
+
+PRs: Agenda #456 and BlackSheep #113. The invoice fixture includes the mandatory service change policy required by the canonical confirmation guard. No production guard was bypassed to build synthetic reservations. Historical ACL baseline checks remain historical; the current schema separately asserts every new function's privileges and exact invoker/definer mode. Test completion and production deployment are distinct release conditions.
