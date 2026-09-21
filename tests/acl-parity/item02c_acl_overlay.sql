@@ -291,6 +291,54 @@ begin
     raise exception 'ITEM02C_PRIORITY_INTEGRATION_RPC_IDENTITY_DRIFT:%', v_identity;
   end if;
 
+
+-- September 16 cron adds four service-only functions; invoice adds one service-only and seven private.
+
+  foreach v_identity in array array[
+    'public.service_verify_mercado_pago_reconcile_cron_secret(text)',
+    'public.service_verify_integration_worker_db_cron_secret(text)',
+    'public.service_invoke_mercado_pago_reconcile_cron()',
+    'public.service_invoke_integration_worker_db_cron()',
+    'public.service_confirm_invoice_prebook_by_token(text)'
+  ] loop
+    v_oid := to_regprocedure(v_identity);
+    if v_oid is null then raise exception 'ITEM02C_INVOICE_CRON_FUNCTION_MISSING:%', v_identity; end if;
+    if has_function_privilege('service_role', v_oid, 'EXECUTE') is distinct from true then
+      raise exception 'ITEM02C_INVOICE_CRON_SERVICE_BOUNDARY:%', v_identity;
+    end if;
+    if has_function_privilege('anon', v_oid, 'EXECUTE') or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+                  where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE') then
+      raise exception 'ITEM02C_INVOICE_CRON_PUBLIC_EXPOSURE:%', v_identity;
+    end if;
+    if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres') then
+      raise exception 'ITEM02C_INVOICE_CRON_OWNER_DRIFT:%', v_identity;
+    end if;
+  end loop;
+
+  foreach v_identity in array array[
+    'public.invoice_checkout_result(uuid)',
+    'public.attach_checkout_pre_reservation(uuid,jsonb,boolean)',
+    'public.submit_checkout_benefits_before_invoice(text,text,text,uuid[],jsonb,inet,text,text,text,boolean)',
+    'public.confirm_linked_invoice_prebook(uuid,uuid,boolean)',
+    'public.confirm_standalone_pre_reservation(uuid,uuid)',
+    'public.payment_context_before_invoice(text)',
+    'public.prebook_context_before_invoice(text)'
+  ] loop
+    v_oid := to_regprocedure(v_identity);
+    if v_oid is null then raise exception 'ITEM02C_INVOICE_CRON_FUNCTION_MISSING:%', v_identity; end if;
+    if has_function_privilege('service_role', v_oid, 'EXECUTE') is distinct from false then
+      raise exception 'ITEM02C_INVOICE_CRON_SERVICE_BOUNDARY:%', v_identity;
+    end if;
+    if has_function_privilege('anon', v_oid, 'EXECUTE') or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+                  where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE') then
+      raise exception 'ITEM02C_INVOICE_CRON_PUBLIC_EXPOSURE:%', v_identity;
+    end if;
+    if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres') then
+      raise exception 'ITEM02C_INVOICE_CRON_OWNER_DRIFT:%', v_identity;
+    end if;
+  end loop;
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -298,11 +346,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 460 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=460 actual=%', v_public_function_count;
+  if v_public_function_count <> 464 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=464 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 395 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=395 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 399 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=399 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
