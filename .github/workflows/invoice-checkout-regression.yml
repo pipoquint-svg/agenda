@@ -1,0 +1,44 @@
+name: Invoice Checkout Regression
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  invoice-notification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Invoice prebook notifications never demand upfront payment
+        run: deno test supabase/functions/_shared/invoice-prebook-email_test.ts
+  invoice-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+      - name: Start disposable canonical database
+        run: supabase start
+      - name: Run invoice identity, billing, confirmation and expiry regressions
+        run: |
+          set -euo pipefail
+          supabase test db supabase/tests/database/160_invoice_prebook_checkout.test.sql 2>&1 | tee /tmp/invoice-lifecycle.log
+      - name: Retain regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoice-lifecycle-evidence
+          path: /tmp/invoice-lifecycle.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Stop disposable stack
+        if: always()
+        run: supabase stop --no-backup || true

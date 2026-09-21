@@ -51,7 +51,7 @@ Deno.serve(async(req)=>{
     appointment.pre_reservation_email_reason=emailError instanceof Error?emailError.message.split(':')[0]:'PRE_RESERVATION_EMAIL_FAILED';
     console.error('[OPERATION_ALERT] PRE_RESERVATION_EMAIL_FAILED',{appointment_id:appointment.appointment_id,code:appointment.pre_reservation_email_reason});
    }
-  }else if(checkoutMode==='PAY_NOW'&&String(appointment.status??'')==='AWAITING_PAYMENT'){
+  }else if(appointment.payment_required!==false&&checkoutMode==='PAY_NOW'&&String(appointment.status??'')==='AWAITING_PAYMENT'){
    try{
     const delivery=await sendPaymentResumeEmail(client,{appointmentId:String(appointment.appointment_id??'')});
     appointment.payment_resume_email_sent=delivery.sent;

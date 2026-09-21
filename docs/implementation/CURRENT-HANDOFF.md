@@ -1,6 +1,21 @@
 # CURRENT HANDOFF — Agenda
 
-## Active work
+## Invoice checkout hotfix — separately authorized on 2026-09-21
+
+The user explicitly requested independent prebooking plus invoicing and normal checkout for authorized invoice customers. This is an isolated production-bug correction, not a change to PR-05's scope or authorization.
+
+- Branch: `fix/invoice-prebook-checkout-20260921`.
+- Agenda PR: #456. Functional code and regression fixture at `871a32e5c72850713edbcb3b44bf1adcb2d454d4`.
+- BlackSheep frontend PR: `pipoquint-svg/black-sheep#113`, HEAD `bcd14729cf29943e11febeec50ae39dfa6df91ca`.
+- Forward-only migration: `20260921210000_invoice_prebook_checkout.sql`.
+- Verified: 42 focused invoice database assertions passed in run `35658214878`; invoice email tests passed. BlackSheep QA and all five Gestão suites passed in run `35657074689`.
+- Current full Agenda database, ACL/RLS, concurrency, HTTP and browser gates must still be checked to terminal state on the actual PR HEAD. Native documentation commits create a new HEAD; do not mistake an earlier green run for final approval.
+- No production schema, customer record, reservation, payment, or integration job was modified by this hotfix work. No PR has been merged or deployed. Preserve Volt reservation `31A0F1260B1B`.
+- Exact next objective: verify current PR diff/HEAD and finish all required CI, fixing only real reproducible regressions. Then obtain/verify the release authorization and use the canonical deployment procedure: backend migration and five affected Edge Functions before both frontends. Do not claim live behavior until production version and non-charging smoke checks are verified.
+
+The contractual flows, identity checks, invoice due-date basis, expiry behavior and release sequence are documented in `docs/INVOICE_CHECKOUT_2026-09-21.md`. Historical ACL goldens were not rewritten: historical schema and current schema are verified separately, with explicit new-function privilege boundaries.
+
+## Separate active work — PR-05 remains unchanged below
 
 PR-05 — Tenant Foundation
 Branch: `codex/agenda-pr05-tenant-foundation`
@@ -24,7 +39,7 @@ Observed mapping:
 - `20260913143801` -> `20260913110000_month_availability_v2_cutover`
 
 Gate 05-0 passed on 2026-09-13 through `.github/workflows/gate05-migration-history-repair.yml`.
-The supported CLI workflow aligned the three canonical performance versions, reverted the five verified remote-only entries, recorded `20260910164500`, `20260910213000`, and `20260912110500` as already applied after production evidence, and applied only `20260912021000_add_sabrina_contextual_booking_pages.sql` after explicit authorization and preflight.
+The supported CLI workflow aligned the three canonical performance versions, reverted the five verified remote-only entries, recorded `20260910164500`, `20260910213000`, `20260912110500` as already applied after production evidence, and applied only `20260912021000_add_sabrina_contextual_booking_pages.sql` after explicit authorization and preflight.
 
 The workflow ended with `supabase migration list --linked` aligned and `supabase db push --linked --dry-run` successful. Production schema work in Gate 05-0 was limited to the authorized `20260912021000` migration.
 
@@ -77,7 +92,7 @@ Required invariants:
 - explicit tenant status/lifecycle with no runtime effect yet;
 - `tenant_members` unique on `(tenant_id, user_id)` and one user may belong to multiple tenants;
 - membership semantics must map cleanly to existing RBAC rather than conflict with it;
-- `tenant_settings` at most one row per tenant and only foundation-level settings;
+- `tenant_settings` at most one row per tenant;
 - `tenant_capabilities` unique on `(tenant_id, capability_key)` with enabled state and optional config, but no plan enforcement;
 - explicit timestamps/checks/FKs/supporting indexes;
 - all four new tables RLS-enabled and closed by default to PUBLIC/anon/authenticated unless a proven runtime need exists;

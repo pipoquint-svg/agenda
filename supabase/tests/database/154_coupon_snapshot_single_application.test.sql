@@ -24,6 +24,15 @@ insert into public.services (
   60, 100, 1, 10, 5000, false
 );
 
+-- Promotion captures a mandatory policy snapshot even when the service has no terms.
+-- Complete the synthetic service instead of bypassing the production snapshot guard.
+insert into public.service_change_policies (
+  service_id, notice_hours, reschedule_first_early_percent,
+  reschedule_first_late_percent, reschedule_repeat_percent, cancellation_late_percent
+) values (
+  '95400000-0000-0000-0000-000000000010', 0, 0, 0, 0, 0
+);
+
 insert into public.service_employees (id, service_id, employee_id)
 values (
   '95400000-0000-0000-0000-000000000020',

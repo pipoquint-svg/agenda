@@ -19,6 +19,11 @@ const corsHeaders = {
 }
 
 type PaymentContext = {
+  billing_mode?: string
+  payment_required?: boolean
+  invoice_due_at?: string | null
+  invoice_due_days?: number | null
+  requires_manual_confirmation?: boolean
   appointment_id: string
   public_code: string
   appointment_status: string
@@ -212,6 +217,11 @@ Deno.serve(async (req) => {
     const context = await loadContext(token)
     await assertInfinitePayAppointment(context.appointment_id)
 
+    if (req.method === 'GET' && context.billing_mode === 'INVOICE') {
+      return response({ appointment: { ...context }, financial: { ...context }, payment_provider: {
+        provider: 'INFINITEPAY', hosted_checkout: true, method_selected_at_provider: true, hosted_checkout_available: false,
+      } })
+    }
     if (req.method === 'GET') {
       return response({
         appointment: {
@@ -261,6 +271,7 @@ Deno.serve(async (req) => {
       return response(applied, applied.paid ? 200 : 202)
     }
 
+    if (context.billing_mode === 'INVOICE') throw new Error('INVOICE_CHECKOUT_PAYMENT_NOT_REQUIRED')
     if (input.action !== 'CREATE') throw new Error('INFINITEPAY_ACTION_INVALID')
     const paymentKind = input.payment_kind === 'FULL' ? 'FULL' : input.payment_kind === 'MINIMUM' ? 'MINIMUM' : ''
     const requestKey = typeof input.request_key === 'string' ? input.request_key.trim() : ''

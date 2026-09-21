@@ -1,3 +1,4 @@
+import { invoicePrebookEmail } from './invoice-prebook-email.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from './email-provider.ts'
 import { isRecipientAllowed, isScopeEnabled, maskEmail, normalizedEmail } from './transactional-email.ts'
 import {
@@ -45,7 +46,7 @@ export async function sendPreReservationCreatedEmail(
 
   const { data: appointment, error: appointmentError } = await client
     .from('appointments')
-    .select('id,public_code,service_id,primary_customer_id,status,start_at,end_at,duration_minutes,service_name_snapshot,source_pre_reservation_id')
+    .select('id,public_code,service_id,primary_customer_id,status,start_at,end_at,duration_minutes,service_name_snapshot,source_pre_reservation_id,billing_mode_snapshot,invoice_due_at')
     .eq('id', input.appointmentId)
     .maybeSingle()
   if (appointmentError || !appointment) throw new Error('APPOINTMENT_LOOKUP_FAILED')
@@ -54,7 +55,7 @@ export async function sendPreReservationCreatedEmail(
   }
 
   const [prebookResult, serviceResult, customerResult] = await Promise.all([
-    client.from('pre_reservations').select('id,status,expires_at').eq('id', appointment.source_pre_reservation_id).maybeSingle(),
+    client.from('pre_reservations').select('id,status,expires_at,requires_manual_confirmation_snapshot').eq('id', appointment.source_pre_reservation_id).maybeSingle(),
     client.from('services').select('id,name,operation_scope').eq('id', appointment.service_id).maybeSingle(),
     client.from('customers').select('id,name,email').eq('id', appointment.primary_customer_id).maybeSingle(),
   ])
@@ -107,7 +108,10 @@ export async function sendPreReservationCreatedEmail(
     'pre_reservation.expires_at': dateTime(prebook.expires_at),
     'pre_reservation.payment_url': paymentUrl,
   }
-  const message = renderNotificationMessage(template, values, sender.brandName)
+  values['invoice.due_at'] = dateTime(appointment.invoice_due_at)
+  const variant = appointment.billing_mode_snapshot === 'INVOICE'
+    ? invoicePrebookEmail(template, prebook.requires_manual_confirmation_snapshot === true) : template
+  const message = renderNotificationMessage(variant, values, sender.brandName)
   const idempotencyKey = `notification:${template.id}:${prebook.id}:EMAIL:CUSTOMER`
   const delivery = await beginNotificationDelivery(client, {
     templateId: template.id,
@@ -123,6 +127,8 @@ export async function sendPreReservationCreatedEmail(
       pre_reservation_id: prebook.id,
       expires_at: prebook.expires_at,
       operation_scope: scope,
+      billing_mode: appointment.billing_mode_snapshot,
+      template_variant: appointment.billing_mode_snapshot === 'INVOICE' ? 'INVOICE' : 'PAYMENT',
       recipient_masked: maskEmail(recipient),
     },
   })

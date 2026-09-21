@@ -104,7 +104,7 @@ export function BookingCheckoutSession() {
       {!stored && manage?.status === 'CONFIRMED' ? (
         <section className="booking-card checkout-result">
           <small>Reserva confirmada</small>
-          <h2>Pagamento confirmado</h2>
+          <h2>Seu horário está confirmado</h2>
           <p>Código da reserva: <strong>{manage.publicCode}</strong></p>
         </section>
       ) : null}

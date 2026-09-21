@@ -166,7 +166,22 @@ jobs:
           SQL
 
       - name: Run database test contract
-        run: bash scripts/test-database-core-gates.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-database-core-gates.sh 2>&1 | tee /tmp/database-core-pgtap.log
+
+      - name: Retain canonical database test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-core-evidence-${{ github.run_id }}-${{ github.job }}
+          path: |
+            /tmp/database-core-pgtap.log
+            /tmp/db-core-acl-overlay.log
+            /tmp/db-core-rls-baseline.txt
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Run Gate A concurrency test
         run: bash scripts/test-concurrency.sh
