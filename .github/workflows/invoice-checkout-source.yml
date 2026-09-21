@@ -28,6 +28,8 @@ jobs:
           PY
       - name: Commit only to hotfix branch and remove temporary transfer files
         run: |
+          # The CI workflow change will be written using the authorized connector separately.
+          git restore --source=HEAD --staged --worktree .github/workflows/db-core.yml
           git rm .github/workflows/invoice-checkout-source.yml scripts/invoice-checkout.patch.part0 scripts/invoice-checkout.patch.part1 scripts/invoice-checkout.patch.part2
           git diff --cached --check
           git config user.name 'github-actions[bot]'
