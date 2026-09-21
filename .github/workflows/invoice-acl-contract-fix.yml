@@ -1,0 +1,61 @@
+name: Invoice ACL contract preparation
+on:
+  push:
+    branches: [fix/invoice-prebook-checkout-20260921]
+    paths: [.github/workflows/invoice-acl-contract-fix.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/fix/invoice-prebook-checkout-20260921'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert each added function boundary before reconciling aggregate counts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/acl-parity/item02c_acl_overlay.sql')
+          s = p.read_text()
+          assert s.count('v_public_function_count <> 460') == 1
+          assert s.count('v_service_role_execute_count <> 395') == 1
+          s = s.replace('v_public_function_count <> 460', 'v_public_function_count <> 464').replace('expected=460 actual=', 'expected=464 actual=')
+          s = s.replace('v_service_role_execute_count <> 395', 'v_service_role_execute_count <> 399').replace('expected=395 actual=', 'expected=399 actual=')
+          service = ['service_verify_mercado_pago_reconcile_cron_secret(text)', 'service_verify_integration_worker_db_cron_secret(text)', 'service_invoke_mercado_pago_reconcile_cron()', 'service_invoke_integration_worker_db_cron()', 'service_confirm_invoice_prebook_by_token(text)']
+          private = ['invoice_checkout_result(uuid)', 'attach_checkout_pre_reservation(uuid,jsonb,boolean)', 'submit_checkout_benefits_before_invoice(text,text,text,uuid[],jsonb,inet,text,text,text,boolean)', 'confirm_linked_invoice_prebook(uuid,uuid,boolean)', 'confirm_standalone_pre_reservation(uuid,uuid)', 'payment_context_before_invoice(text)', 'prebook_context_before_invoice(text)']
+          blocks = []
+          for names, executable in [(service, True), (private, False)]:
+              entries = ',\n'.join("    'public." + n + "'" for n in names)
+              block = '''
+            foreach v_identity in array array[
+          ENTRIES
+            ] loop
+              v_oid := to_regprocedure(v_identity);
+              if v_oid is null then raise exception 'ITEM02C_INVOICE_CRON_FUNCTION_MISSING:%', v_identity; end if;
+              if has_function_privilege('service_role', v_oid, 'EXECUTE') is distinct from EXECUTABLE then
+                raise exception 'ITEM02C_INVOICE_CRON_SERVICE_BOUNDARY:%', v_identity;
+              end if;
+              if has_function_privilege('anon', v_oid, 'EXECUTE') or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+                 or exists (select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+                            where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE') then
+                raise exception 'ITEM02C_INVOICE_CRON_PUBLIC_EXPOSURE:%', v_identity;
+              end if;
+              if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres') then
+                raise exception 'ITEM02C_INVOICE_CRON_OWNER_DRIFT:%', v_identity;
+              end if;
+            end loop;
+          '''.replace('ENTRIES', entries).replace('EXECUTABLE', str(executable).lower())
+              blocks.append(block)
+          anchor = '  select count(*)::integer,\n'
+          assert s.count(anchor) == 1
+          s = s.replace(anchor, '\n-- September 16 cron adds four service-only functions; invoice adds one service-only and seven private.\n' + ''.join(blocks) + anchor)
+          p.write_text(s)
+          PY
+          git rm .github/workflows/invoice-acl-contract-fix.yml
+          git add tests/acl-parity/item02c_acl_overlay.sql
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: verify invoice and cron function privileges explicitly'
+          git push origin HEAD:refs/heads/fix/invoice-prebook-checkout-20260921
