@@ -1,0 +1,32 @@
+name: Invoice helper identity proof
+on:
+  push:
+    branches: [fix/invoice-prebook-checkout-20260921]
+    paths: [.github/workflows/invoice-acl-helper-identity.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/fix/invoice-prebook-checkout-20260921'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require exact security mode for private helpers and service wrappers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/acl-parity/item02c_acl_overlay.sql')
+          s=p.read_text()
+          old="p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres'"
+          new="p.oid=v_oid and p.prosecdef=(v_identity <> all(array['public.invoice_checkout_result(uuid)','public.attach_checkout_pre_reservation(uuid,jsonb,boolean)','public.confirm_linked_invoice_prebook(uuid,uuid,boolean)']::text[])) and pg_get_userbyid(p.proowner)='postgres'"
+          assert s.count(old)==2, 'unexpected security assertion count'
+          p.write_text(s.replace(old,new))
+          PY
+          git rm .github/workflows/invoice-acl-helper-identity.yml
+          git add tests/acl-parity/item02c_acl_overlay.sql
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: assert exact invoker and definer identities for invoice helpers'
+          git push origin HEAD:refs/heads/fix/invoice-prebook-checkout-20260921
