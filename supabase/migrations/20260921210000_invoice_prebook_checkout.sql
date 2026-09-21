@@ -528,10 +528,12 @@ begin
     execute v_def;
   end loop;
   v_def:=pg_get_functiondef('public.service_claim_infinitepay_checkout_by_token(text,text,text)'::regprocedure);
-  v_anchor:='  -- One unresolved hosted checkout';
+  v_anchor:=$anchor$  if coalesce(v_appointment.payment_provider_snapshot,'MERCADO_PAGO')<>'INFINITEPAY' then
+    raise exception using errcode='P0001',message='PAYMENT_PROVIDER_MISMATCH';
+  end if;$anchor$;
   if position(v_anchor in v_def)=0 then raise exception 'INVOICE_CLAIM_GUARD_ANCHOR_MISSING'; end if;
-  execute replace(v_def,v_anchor,$guard$  if v_appointment.billing_mode_snapshot='INVOICE' then raise exception 'INVOICE_CHECKOUT_PAYMENT_NOT_REQUIRED'; end if;
-$guard$ || v_anchor);
+  execute replace(v_def,v_anchor,v_anchor || E'\n' ||
+    $guard$  if v_appointment.billing_mode_snapshot='INVOICE' then raise exception 'INVOICE_CHECKOUT_PAYMENT_NOT_REQUIRED'; end if;$guard$);
 end;
 $$;
 
