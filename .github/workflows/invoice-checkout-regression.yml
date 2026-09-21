@@ -1,0 +1,19 @@
+name: Invoice Checkout Regression
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  invoice-notification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Invoice prebook notifications never demand upfront payment
+        run: deno test supabase/functions/_shared/invoice-prebook-email_test.ts
