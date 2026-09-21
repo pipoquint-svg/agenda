@@ -1,3 +1,4 @@
+-- Invoice checkout adds eight functions (seven private helpers/legacy bodies and one service-only RPC).
 \set ON_ERROR_STOP on
 
 -- Item 2C proves the current production ACL contract plus explicitly authorized
@@ -297,11 +298,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 452 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=452 actual=%', v_public_function_count;
+  if v_public_function_count <> 460 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=460 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 394 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=394 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 395 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=395 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

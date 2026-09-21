@@ -1,3 +1,4 @@
+import { InvoiceBookingState } from './InvoiceBookingState'
 import { useEffect, useMemo, useState } from 'react'
 import { CardPayment, initMercadoPago } from '@mercadopago/sdk-react'
 import {
@@ -221,6 +222,8 @@ export function PaymentPanel({ accessToken, onConfirmed, mode = 'BOOKING' }: {
       setBusy(false)
     }
   }
+
+  if (context?.appointment.billing_mode==='INVOICE') return <InvoiceBookingState result={{...context.appointment,cash_due:context.financial.contract_balance}} accessToken={accessToken} onConfirmed={onConfirmed}/>
 
   if (confirmed) {
     return (

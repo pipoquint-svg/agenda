@@ -1,3 +1,5 @@
+import { InvoiceVerification } from './InvoiceVerification'
+import { InvoiceBookingState } from './InvoiceBookingState'
 import { useEffect, useMemo, useState } from 'react'
 import {
   bindCheckoutCustomer,
@@ -244,6 +246,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({})
   const [packages, setPackages] = useState<CheckoutPackage[]>([])
   const [packageId, setPackageId] = useState('')
+  const [customerSessionToken,setCustomerSessionToken]=useState('')
   const [prebookOption, setPrebookOption] = useState<CheckoutPrebookOption | null>(null)
   const [checkoutMode, setCheckoutMode] = useState<CheckoutMode>('PAY_NOW')
   const [acceptedTerms, setAcceptedTerms] = useState<Record<string, boolean>>({})
@@ -334,6 +337,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     setCoupon(null)
     setPackages([])
     setPackageId('')
+    setCustomerSessionToken('')
     setPrebookOption(null)
     setAcceptedTerms({})
     setResult(null)
@@ -539,9 +543,10 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         phone: customer.phone,
         taxId: customer.taxId,
       })
+      setCustomerSessionToken('')
       const [nextPackages, nextPrebook] = await Promise.all([
         listCheckoutPackages(hold.checkout_hold_token).catch(() => [] as CheckoutPackage[]),
-        loadCheckoutPrebookOption(hold.checkout_hold_token).catch(() => null),
+        loadCheckoutPrebookOption(hold.checkout_hold_token),
       ])
       setPackages(nextPackages)
       setPrebookOption(nextPrebook)
@@ -604,6 +609,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     const termsReady = !context.service.requires_terms
       || (context.terms.length > 0 && context.terms.every((term) => acceptedTerms[term.id]))
     if (!termsReady) return setError('Aceite todos os termos para continuar.')
+    if (prebookOption?.billing_mode==='INVOICE'&&!customerSessionToken) return setError('Confirme sua identidade pelo código enviado ao e-mail cadastrado.')
     if (!checkoutMode) return setError('Escolha se deseja pagar agora ou fazer uma pré-reserva.')
 
     const payloadAnswers: ServiceAnswer[] = context.fields
@@ -615,8 +621,8 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     setError('')
     try {
       const appointment = (checkoutMode === 'PREBOOK'
-        ? await submitPreReservationCheckout({ token: hold.checkout_hold_token, termVersionIds, answers: payloadAnswers })
-        : await submitBookingCheckout({ token: hold.checkout_hold_token, termVersionIds, answers: payloadAnswers })) as FinalResult
+        ? await submitPreReservationCheckout({ token: hold.checkout_hold_token, customerSessionToken, termVersionIds, answers: payloadAnswers })
+        : await submitBookingCheckout({ token: hold.checkout_hold_token, customerSessionToken, termVersionIds, answers: payloadAnswers })) as FinalResult
       setResult(appointment)
       sessionStorage.removeItem('bs_checkout_hold')
 
@@ -830,12 +836,13 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
 
               {packages.length > 0 ? <div className="sby-review-block"><strong>Usar pacote/crédito disponível</strong><div className="sby-package-list"><label className={!packageId ? 'selected' : ''}><input type="radio" name="package" checked={!packageId} onChange={() => void choosePackage('')} /><span>Não usar pacote</span></label>{packages.map((item) => <label key={item.hour_package_id} className={packageId === item.hour_package_id ? 'selected' : ''}><input type="radio" name="package" checked={packageId === item.hour_package_id} disabled={!item.usable} onChange={() => void choosePackage(item.hour_package_id)} /><span>{item.name}<small>{item.usable ? `Saldo a pagar: ${money.format(numeric(item.cash_due))}` : 'Saldo insuficiente'}</small></span></label>)}</div></div> : null}
 
-              {prebookOption?.eligible ? <div className="sby-review-block"><strong>Como deseja reservar?</strong><div className="sby-mode-grid"><label className={checkoutMode === 'PAY_NOW' ? 'selected' : ''}><input type="radio" name="mode" checked={checkoutMode === 'PAY_NOW'} onChange={() => setCheckoutMode('PAY_NOW')} /><span>Pagar agora<small>Confirme a reserva pelo pagamento.</small></span></label><label className={checkoutMode === 'PREBOOK' ? 'selected' : ''}><input type="radio" name="mode" checked={checkoutMode === 'PREBOOK'} onChange={() => setCheckoutMode('PREBOOK')} /><span>Pré-reservar<small>Proteja o horário por {prebookOption.hold_minutes} minutos.</small></span></label></div></div> : null}
+              {prebookOption?.billing_mode==='INVOICE'&&hold?<><p>Faturamento em {prebookOption.invoice_due_days} dias após o serviço, sem pagamento antecipado.</p><InvoiceVerification key={hold.checkout_hold_token} holdToken={hold.checkout_hold_token} onVerified={setCustomerSessionToken}/></>:null}
+              {prebookOption?.eligible ? <div className="sby-review-block"><strong>Como deseja reservar?</strong><div className="sby-mode-grid"><label className={checkoutMode === 'PAY_NOW' ? 'selected' : ''}><input type="radio" name="mode" checked={checkoutMode === 'PAY_NOW'} onChange={() => setCheckoutMode('PAY_NOW')} /><span>{prebookOption?.billing_mode==='INVOICE'?'Concluir com faturamento':'Pagar agora'}<small>{prebookOption?.billing_mode==='INVOICE'?'Sem pagamento antecipado.':'Confirme a reserva pelo pagamento.'}</small></span></label><label className={checkoutMode === 'PREBOOK' ? 'selected' : ''}><input type="radio" name="mode" checked={checkoutMode === 'PREBOOK'} onChange={() => setCheckoutMode('PREBOOK')} /><span>Pré-reservar<small>Proteja o horário por {prebookOption.hold_minutes} minutos.</small></span></label></div></div> : null}
 
               {context.terms.length > 0 ? <div className="sby-review-block"><strong>Termos</strong>{context.terms.map((term) => <label className="sby-term" key={term.id}><input type="checkbox" checked={acceptedTerms[term.id] ?? false} onChange={(event) => setAcceptedTerms((current) => ({ ...current, [term.id]: event.target.checked }))} /><span>Li e aceito {term.name}</span></label>)}</div> : null}
 
               <div className="sby-total"><span>Valor da reserva</span><strong>{money.format(displayedTotal)}</strong></div>
-              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy} onClick={() => void submitReview()}>{busy ? 'Gerando reserva…' : checkoutMode === 'PREBOOK' ? 'Criar pré-reserva' : 'Confirmar e ir ao pagamento'}</button></div>
+              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy||(prebookOption?.billing_mode==='INVOICE'&&!customerSessionToken)} onClick={() => void submitReview()}>{busy ? 'Gerando reserva…' : checkoutMode === 'PREBOOK' ? 'Criar pré-reserva' : prebookOption?.billing_mode==='INVOICE' ? 'Concluir com faturamento' : 'Confirmar e ir ao pagamento'}</button></div>
             </>
           ) : null}
 
@@ -846,7 +853,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
             </>
           ) : null}
 
-          {step === 'CONFIRMATION' && result ? (
+          {step === 'CONFIRMATION' && result?.billing_mode==='INVOICE' ? <InvoiceBookingState result={result} accessToken={result.access_token}/> : step === 'CONFIRMATION' && result ? (
             <div className="sby-confirmation" aria-live="polite">
               <span>✓</span>
               <small>{result.pre_reservation ? 'Pré-reserva criada' : 'Reserva confirmada'}</small>

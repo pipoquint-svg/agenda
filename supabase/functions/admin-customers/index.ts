@@ -332,6 +332,9 @@ Deno.serve(async (req) => {
     const financialChange = !currentTerms
       || String(currentTerms.billing_mode ?? '') !== billingMode
       || Number(currentTerms.invoice_due_days ?? -1) !== Number(invoiceDueDays ?? -1)
+      || ((billingMode === 'INVOICE' || currentTerms.billing_mode === 'INVOICE')
+        && (currentTerms.requires_manual_confirmation !== body.requires_manual_confirmation
+          || currentTerms.is_active !== body.is_active))
     if (financialChange && !(await hasAdminPermission(admin.adminId, 'FINANCE_MANAGE'))) throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
 
     const { data, error } = await client.rpc('service_admin_set_customer_commercial_terms', {

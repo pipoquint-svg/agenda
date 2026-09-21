@@ -1,3 +1,4 @@
+import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 import { adminClient } from '../_shared/supabase.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 
@@ -10,7 +11,7 @@ const corsHeaders = {
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8' },
+    headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   })
 }
 
@@ -34,14 +35,20 @@ Deno.serve(async (req) => {
     })
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
-    const { data, error } = await client.rpc('public_get_pre_reservation_context', {
+    const action = typeof body.action === 'string' ? body.action : 'CONTEXT'
+    if (!['CONTEXT', 'CONFIRM_INVOICE'].includes(action)) throw new Error('ACTION_INVALID')
+    const { data, error } = await client.rpc(action === 'CONFIRM_INVOICE'
+      ? 'service_confirm_invoice_prebook_by_token' : 'public_get_pre_reservation_context', {
       p_access_token: token(body.access_token),
     })
     if (error) throw new Error(error.message)
+    if (action === 'CONFIRM_INVOICE' && data?.status === 'CONFIRMED') {
+      scheduleImmediateAppointmentIntegrations(String(data.appointment_id), 'INVOICE_PREBOOK_CONFIRMED')
+    }
     return json({ data })
   } catch (error) {
     const raw = error instanceof Error ? error.message : 'PRE_RESERVATION_ACCESS_FAILED'
-    const code = raw.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|PRE_RESERVATION_TOKEN_REQUIRED|PRE_RESERVATION_TOKEN_INVALID|PRE_RESERVATION_TOKEN_EXPIRED)/)?.[1]
+    const code = raw.match(/(RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|PRE_RESERVATION_TOKEN_REQUIRED|PRE_RESERVATION_TOKEN_INVALID|PRE_RESERVATION_TOKEN_EXPIRED|INVOICE_MANUAL_CONFIRMATION_REQUIRED|CUSTOMER_NOT_AUTHORIZED_FOR_INVOICE|PRE_RESERVATION_NOT_ACTIVE|APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_EXPIRED|APPOINTMENT_TOKEN_REVOKED|TOKEN_SCOPE_DENIED)/)?.[1]
       ?? raw.split(':')[0]
     const status = code === 'RATE_LIMITED' ? 429
       : code === 'RATE_LIMIT_BACKEND_FAILED' ? 503

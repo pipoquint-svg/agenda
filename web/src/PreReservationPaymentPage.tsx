@@ -25,7 +25,7 @@ export function PreReservationPaymentPage() {
       <section className="checkout-card payment-card">
         <span className="agenda-eyebrow">BlackSheep Estúdio Criativo</span>
         <h1>Confirme sua pré-reserva</h1>
-        <p>O horário só se torna uma reserva confirmada após a aprovação do pagamento dentro do prazo informado no e-mail.</p>
+        <p>Confira abaixo as condições de confirmação desta pré-reserva e o prazo informado no e-mail.</p>
         <PaymentPanel accessToken={token} />
       </section>
     </main>

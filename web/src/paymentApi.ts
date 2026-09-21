@@ -1,8 +1,9 @@
+import type { InvoiceFields } from './invoiceCheckoutApi'
 import { functionsBaseUrl, publicApiKey } from './supabase'
 import { trackAppointmentConfirmed, trackFunnelStep, trackPaymentInfo } from './tracking'
 
 export type PublicPaymentContext = {
-  appointment: {
+  appointment: InvoiceFields & {
     public_code: string
     appointment_status: string
     financial_status: string

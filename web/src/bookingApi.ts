@@ -1,3 +1,4 @@
+import type { InvoiceFields } from './invoiceCheckoutApi'
 import { functionsBaseUrl, publicApiKey, supabase } from './supabase'
 import {
   attributionForBackend,
@@ -155,7 +156,7 @@ export type CheckoutPackage = {
   cash_due: number | string
 }
 
-export type AppointmentCheckoutResult = {
+export type AppointmentCheckoutResult = InvoiceFields & {
   appointment_id: string
   public_code: string
   status: 'AWAITING_PAYMENT' | 'CONFIRMED'
@@ -382,15 +383,15 @@ export async function bindCheckoutCustomer(input: {
   return result
 }
 
-export async function listCheckoutPackages(token: string): Promise<CheckoutPackage[]> {
+export async function listCheckoutPackages(token: string, customerSessionToken?: string): Promise<CheckoutPackage[]> {
   return callPublicGateway<CheckoutPackage[]>('booking-checkout', {
-    action: 'LIST_PACKAGES', checkout_hold_token: token,
+    action: 'LIST_PACKAGES', checkout_hold_token: token, customer_session_token: customerSessionToken ?? null,
   })
 }
 
-export async function selectCheckoutPackage(token: string, packageId: string): Promise<void> {
+export async function selectCheckoutPackage(token: string, packageId: string, customerSessionToken?: string): Promise<void> {
   await callPublicGateway<unknown>('booking-checkout', {
-    action: 'SELECT_PACKAGE', checkout_hold_token: token, hour_package_id: packageId,
+    action: 'SELECT_PACKAGE', checkout_hold_token: token, hour_package_id: packageId, customer_session_token: customerSessionToken ?? null,
   })
   const context = checkoutContextCache.get(token)
   trackFunnelStep('hour_package_selected', {
@@ -400,9 +401,9 @@ export async function selectCheckoutPackage(token: string, packageId: string): P
   })
 }
 
-export async function clearCheckoutPackage(token: string): Promise<void> {
+export async function clearCheckoutPackage(token: string, customerSessionToken?: string): Promise<void> {
   await callPublicGateway<unknown>('booking-checkout', {
-    action: 'CLEAR_PACKAGE', checkout_hold_token: token,
+    action: 'CLEAR_PACKAGE', checkout_hold_token: token, customer_session_token: customerSessionToken ?? null,
   })
   const context = checkoutContextCache.get(token)
   trackFunnelStep('hour_package_selected', {
@@ -416,6 +417,7 @@ export async function submitBookingCheckout(input: {
   token: string
   termVersionIds: string[]
   answers: ServiceAnswer[]
+  customerSessionToken?: string
 }): Promise<AppointmentCheckoutResult> {
   const res = await fetch(`${functionsBaseUrl}/booking-submit`, {
     method: 'POST',
@@ -426,6 +428,7 @@ export async function submitBookingCheckout(input: {
     },
     body: JSON.stringify({
       checkout_hold_token: input.token,
+      customer_session_token: input.customerSessionToken ?? null,
       term_version_ids: input.termVersionIds,
       answers: input.answers,
     }),

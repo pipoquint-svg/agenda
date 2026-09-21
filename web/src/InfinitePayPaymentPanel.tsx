@@ -1,3 +1,4 @@
+import { InvoiceBookingState } from './InvoiceBookingState'
 import { useEffect, useState } from 'react'
 import {
   createInfinitePayCheckout,
@@ -107,6 +108,8 @@ export function InfinitePayPaymentPanel({ accessToken, onConfirmed, mode = 'BOOK
       </section>
     )
   }
+
+  if (context.appointment.billing_mode === 'INVOICE') return <InvoiceBookingState result={{...context.appointment,cash_due:context.financial.contract_balance}} accessToken={accessToken} onConfirmed={onConfirmed}/>
 
   const available = context.payment_provider.hosted_checkout_available
   const amount = kind === 'FULL'

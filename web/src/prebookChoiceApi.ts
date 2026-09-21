@@ -1,7 +1,8 @@
+import type { InvoiceFields } from './invoiceCheckoutApi'
 import { functionsBaseUrl, publicApiKey } from './supabase'
 import type { AppointmentCheckoutResult, ServiceAnswer } from './bookingApi'
 
-export type CheckoutPrebookOption = {
+export type CheckoutPrebookOption = InvoiceFields & {
   eligible: boolean
   available: boolean
   active_count: number
@@ -45,10 +46,12 @@ export async function submitPreReservationCheckout(input: {
   token: string
   termVersionIds: string[]
   answers: ServiceAnswer[]
+  customerSessionToken?: string
 }): Promise<PrebookCheckoutResult> {
   return post<PrebookCheckoutResult>('booking-submit', {
     checkout_hold_token: input.token,
     checkout_mode: 'PREBOOK',
+    customer_session_token: input.customerSessionToken ?? null,
     term_version_ids: input.termVersionIds,
     answers: input.answers,
   }, 'appointment')

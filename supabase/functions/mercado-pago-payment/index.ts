@@ -18,6 +18,12 @@ const corsHeaders = {
 }
 
 type PaymentContext = {
+  billing_mode?: string
+  payment_required?: boolean
+  invoice_due_at?: string | null
+  invoice_due_days?: number | null
+  requires_manual_confirmation?: boolean
+
   appointment_id: string
   public_code: string
   appointment_status: string
@@ -361,6 +367,14 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET') {
       const context = await loadContext(token)
+      if (context.billing_mode === 'INVOICE' && context.payment_required === false) {
+        return response({
+          appointment: { ...context },
+          financial: { ...context, minimum_available: false, full_available: false, pix_discount_percent: 0 },
+          payer: { name: '', email: '', tax_id: '' },
+          payment_methods: { pix_available: false, card_backend_available: false },
+        })
+      }
       const { data: previewData, error: previewError } = await client.rpc('service_get_public_payment_method_preview', {
         p_access_token: token,
       })
@@ -428,6 +442,7 @@ Deno.serve(async (req) => {
     if (req.method !== 'POST') return response({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
     const input = await req.json()
     const context = await loadContext(token)
+    if (context.billing_mode === 'INVOICE' && input?.action !== 'SYNC') throw new Error('INVOICE_CHECKOUT_PAYMENT_NOT_REQUIRED')
 
     if (input?.action === 'SYNC') {
       const providerOrderId = typeof input?.provider_payment_id === 'string' ? input.provider_payment_id.trim() : ''
@@ -659,7 +674,7 @@ Deno.serve(async (req) => {
       'CARD_INSTALLMENT_LIMIT_INVALID',
     ])
 
-    const knownCode = rawCode.match(/(APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|PAYMENT_POLICY_FULL_NOT_ALLOWED|PAYMENT_POLICY_MINIMUM_NOT_ALLOWED|BALANCE_COLLECTION_POLICY_DENIED|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|CARD_INSTALLMENTS_POLICY_EXCEEDED|CARD_INSTALLMENT_LIMIT_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PROVIDER_COMMERCIAL_DESCRIPTION_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
+    const knownCode = rawCode.match(/(INVOICE_CHECKOUT_PAYMENT_NOT_REQUIRED|APPOINTMENT_TOKEN_INVALID|APPOINTMENT_TOKEN_REVOKED|APPOINTMENT_TOKEN_EXPIRED|TOKEN_SCOPE_DENIED|APPOINTMENT_NOT_PAYABLE|PAYMENT_HOLD_EXPIRED|APPOINTMENT_ALREADY_PAID|CONFIRMATION_PAYMENT_ALREADY_SATISFIED|INVALID_PAYMENT_KIND|PUBLIC_PAYMENT_METHOD_NOT_ALLOWED|PAYMENT_REQUEST_KEY_INVALID|PAYMENT_POLICY_FULL_NOT_ALLOWED|PAYMENT_POLICY_MINIMUM_NOT_ALLOWED|BALANCE_COLLECTION_POLICY_DENIED|CARD_DATA_INVALID|CARD_TOKEN_INVALID|CARD_PAYMENT_METHOD_INVALID|CARD_INSTALLMENTS_INVALID|CARD_INSTALLMENTS_POLICY_EXCEEDED|CARD_INSTALLMENT_LIMIT_INVALID|PAYER_TAX_ID_INVALID|PROVIDER_PAYMENT_ID_INVALID|PROVIDER_COMMERCIAL_DESCRIPTION_INVALID|PAYMENT_NOT_FOUND|RATE_LIMITED|RATE_LIMIT_BACKEND_FAILED|MERCADO_PAGO_3DS_MODE_INVALID|MERCADO_PAGO_ENV_INVALID|MERCADO_PAGO_SANDBOX_TOKEN_REQUIRED|MERCADO_PAGO_PRODUCTION_TOKEN_REQUIRED|REAL_CHARGES_DISABLED|MISSING_ENV)/)?.[1]
     const mismatchCode = rawCode.startsWith('MERCADO_PAGO_') && (rawCode.includes('MISMATCH') || rawCode === 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED')
       ? 'MERCADO_PAGO_PAYMENT_VALIDATION_FAILED'
       : null

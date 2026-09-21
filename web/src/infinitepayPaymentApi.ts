@@ -1,7 +1,8 @@
+import type { InvoiceFields } from './invoiceCheckoutApi'
 import { functionsBaseUrl, publicApiKey } from './supabase'
 
 export type InfinitePayContext = {
-  appointment: {
+  appointment: InvoiceFields & {
     public_code: string
     appointment_status: string
     financial_status: string
