@@ -311,7 +311,7 @@ begin
                   where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE') then
       raise exception 'ITEM02C_INVOICE_CRON_PUBLIC_EXPOSURE:%', v_identity;
     end if;
-    if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres') then
+    if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef=(v_identity <> all(array['public.invoice_checkout_result(uuid)','public.attach_checkout_pre_reservation(uuid,jsonb,boolean)','public.confirm_linked_invoice_prebook(uuid,uuid,boolean)']::text[])) and pg_get_userbyid(p.proowner)='postgres') then
       raise exception 'ITEM02C_INVOICE_CRON_OWNER_DRIFT:%', v_identity;
     end if;
   end loop;
@@ -335,7 +335,7 @@ begin
                   where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE') then
       raise exception 'ITEM02C_INVOICE_CRON_PUBLIC_EXPOSURE:%', v_identity;
     end if;
-    if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres') then
+    if not exists (select 1 from pg_proc p where p.oid=v_oid and p.prosecdef=(v_identity <> all(array['public.invoice_checkout_result(uuid)','public.attach_checkout_pre_reservation(uuid,jsonb,boolean)','public.confirm_linked_invoice_prebook(uuid,uuid,boolean)']::text[])) and pg_get_userbyid(p.proowner)='postgres') then
       raise exception 'ITEM02C_INVOICE_CRON_OWNER_DRIFT:%', v_identity;
     end if;
   end loop;
