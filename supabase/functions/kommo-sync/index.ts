@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import {
   buildContactCustomFields,
   buildLeadCardCustomFields,
@@ -30,7 +31,7 @@ const PUBLIC_MANAGE_BOOKING_URL = 'https://www.blacksheepestudiocriativo.com.br/
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
-  if (!expected || supplied !== expected) throw new Error('INTERNAL_AUTH_REQUIRED')
+  if (!expected || !timingSafeEqual(supplied, expected)) throw new Error('INTERNAL_AUTH_REQUIRED')
 }
 
 type DesiredState = {
@@ -266,11 +267,12 @@ async function disambiguateContactsByEmail(
   const normalizedEmail = email?.trim() ?? ''
   if (!normalizedEmail) return []
 
-  const emailMatches: KommoContact[] = []
-  for (const candidate of candidates) {
-    const detailed = await kommoJson<KommoContact>(baseUrl, token, `/contacts/${candidate.id}`)
-    if (exactContactCandidates([detailed], normalizedEmail, null).length === 1) emailMatches.push(detailed)
-  }
+  const detailed = await Promise.all(
+    candidates.map((candidate) => kommoJson<KommoContact>(baseUrl, token, `/contacts/${candidate.id}`)),
+  )
+  const emailMatches = detailed.filter(
+    (contact) => exactContactCandidates([contact], normalizedEmail, null).length === 1,
+  )
 
   return emailMatches.length === 1 ? emailMatches : []
 }
@@ -377,17 +379,15 @@ async function recoverInitialLeadForContact(
     .filter((id: number) => Number.isInteger(id) && id > 0)
   const alreadyClaimed = new Set<number>(claimedLeadIds)
 
-  const matches: number[] = []
-  for (const leadId of leadIds) {
-    if (alreadyClaimed.has(leadId)) continue
-    const lead = await kommoJson<any>(baseUrl, token, `/leads/${leadId}`)
-    if (
-      Number(lead?.pipeline_id) === Number(settings.pipeline_id) &&
+  const candidateLeadIds = leadIds.filter((leadId) => !alreadyClaimed.has(leadId))
+  const candidateLeads = await Promise.all(
+    candidateLeadIds.map((leadId) => kommoJson<any>(baseUrl, token, `/leads/${leadId}`)),
+  )
+  const matches = candidateLeadIds.filter((_leadId, index) => {
+    const lead = candidateLeads[index]
+    return Number(lead?.pipeline_id) === Number(settings.pipeline_id) &&
       Number(lead?.status_id) === Number(settings.stage_initial_contact_id)
-    ) {
-      matches.push(leadId)
-    }
-  }
+  })
 
   if (matches.length > 1) throw new Error('KOMMO_INITIAL_LEAD_AMBIGUOUS')
   return matches[0] ?? null
