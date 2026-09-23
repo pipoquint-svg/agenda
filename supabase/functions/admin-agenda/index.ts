@@ -57,12 +57,16 @@ function customerId(url: URL): string {
   return uuid(clean(url.searchParams.get('id')), 'CUSTOMER_ID_INVALID')
 }
 
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
 function redactKeys(value: unknown, keys: Set<string>): unknown {
   if (Array.isArray(value)) return value.map((item) => redactKeys(item, keys))
   if (!value || typeof value !== 'object') return value
-  const result: Record<string, unknown> = {}
+  // Object.create(null) has no prototype, so assigning a `__proto__` key below
+  // can never reach Object.prototype's setter and reassign the object's prototype.
+  const result: Record<string, unknown> = Object.create(null)
   for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    if (keys.has(key)) continue
+    if (keys.has(key) || UNSAFE_OBJECT_KEYS.has(key)) continue
     result[key] = redactKeys(nested, keys)
   }
   return result
