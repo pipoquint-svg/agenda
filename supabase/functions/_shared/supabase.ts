@@ -21,10 +21,22 @@ function secretKey(): string {
   return value
 }
 
+// Memoized at module scope: the client only wraps a fixed service-role key and
+// carries no per-request auth state (caller JWTs are passed as call arguments,
+// e.g. client.auth.getUser(jwt), never stored as session state), so it is safe
+// to reuse across concurrent requests within the same isolate. This removes the
+// redundant createClient() construction that several handlers previously paid
+// for multiple times per request (once directly, once inside requireAdmin/
+// requireAdminPermission, etc.).
+let cachedAdminClient: SupabaseClient | null = null
+
 export function adminClient(): SupabaseClient {
-  return createClient(requiredEnv('SUPABASE_URL'), secretKey(), {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
+  if (!cachedAdminClient) {
+    cachedAdminClient = createClient(requiredEnv('SUPABASE_URL'), secretKey(), {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  }
+  return cachedAdminClient
 }
 
 export async function requireAdmin(req: Request): Promise<{ adminId: string; authUserId: string }> {

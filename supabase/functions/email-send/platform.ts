@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
@@ -14,7 +15,7 @@ import {
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
-  if (!expected || supplied !== expected) throw new Error('INTERNAL_AUTH_REQUIRED')
+  if (!expected || !timingSafeEqual(supplied, expected)) throw new Error('INTERNAL_AUTH_REQUIRED')
 }
 
 function numeric(value: unknown): number {

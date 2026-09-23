@@ -1,4 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { sha256Hex } from '../_shared/google.ts'
 
 const IMMEDIATE_SYNC_TIMEOUT_MS = 20_000
@@ -132,7 +133,7 @@ Deno.serve(async (req) => {
     if (channel.expiration_at && new Date(channel.expiration_at).getTime() <= Date.now()) return new Response(null, { status: 204 })
 
     const suppliedHash = await sha256Hex(token)
-    if (suppliedHash !== channel.channel_token_hash) return new Response(null, { status: 204 })
+    if (!timingSafeEqual(suppliedHash, channel.channel_token_hash)) return new Response(null, { status: 204 })
 
     const key = `google-calendar-sync:${channel.google_calendar_id}:${channelId}:${messageNumber}`
     const { error: enqueueError } = await client.rpc('enqueue_google_calendar_sync', {

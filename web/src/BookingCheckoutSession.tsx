@@ -3,6 +3,7 @@ import { BookingCheckout } from './BookingCheckout'
 import { PaymentPanel } from './PaymentPanel'
 import type { CheckoutHold } from './bookingApi'
 import './payment.css'
+import './checkout.css'
 
 type StoredHold = {
   token: string

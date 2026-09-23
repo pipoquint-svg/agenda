@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { ChangePolicyEditor, defaultChangePolicy } from './ChangePolicyEditor'
+import './serviceSettingsAdmin.css'
 import {
   createService,
   listServiceSettings,

@@ -37,6 +37,7 @@ jobs:
           deno test supabase/functions/_shared/notification-email_test.ts
           deno test supabase/functions/_shared/ops-alerts_test.ts
           deno test --allow-env supabase/functions/_shared/email-provider_test.ts
+          deno test supabase/functions/_shared/timing-safe-equal_test.ts
 
       - name: Type-check every Edge Function
         run: |

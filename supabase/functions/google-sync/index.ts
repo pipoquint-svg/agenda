@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse, requireAdminPermission } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { decryptRefreshToken, googleJson, normalizeGoogleEvent, refreshAccessToken, sha256Hex } from '../_shared/google.ts'
 import { managedEventNeedsRepair, type ManagedAppointmentDesiredState } from '../_shared/managed-event.ts'
 
@@ -10,7 +11,7 @@ const FULL_SYNC_FUTURE_MARGIN_DAYS = 30
 async function authorize(req: Request): Promise<void> {
   const internal = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
-  if (internal && supplied === internal) return
+  if (internal && timingSafeEqual(supplied, internal)) return
   await requireAdminPermission(req, 'INTEGRATIONS_MANAGE')
 }
 

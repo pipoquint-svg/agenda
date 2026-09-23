@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
@@ -20,7 +21,7 @@ const PROVIDER_TIMEOUT_MS = 15_000
 async function requireInternal(req: Request): Promise<void> {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
   const supplied = req.headers.get('x-internal-secret')?.trim() ?? ''
-  if (expected && supplied === expected) return
+  if (expected && timingSafeEqual(supplied, expected)) return
 
   const cronSecret = req.headers.get('x-reconcile-secret')?.trim() ?? ''
   if (!cronSecret) throw new Error('INTERNAL_AUTH_REQUIRED')
