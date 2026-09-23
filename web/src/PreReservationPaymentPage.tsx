@@ -1,5 +1,6 @@
 import { PaymentPanel } from './PaymentPanel'
 import './payment.css'
+import './checkout.css'
 
 function accessToken(): string {
   return new URLSearchParams(window.location.search).get('token')?.trim() ?? ''

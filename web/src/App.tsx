@@ -1,36 +1,43 @@
-import { useEffect, type ReactElement } from 'react'
-import { AdminBalancesPage } from './AdminBalancesPage'
-import { AdminDashboard } from './AdminDashboard'
-import { AgendaAdmin } from './AgendaAdmin'
-import { BalanceCollectionPage } from './BalanceCollectionPage'
-import { BirthdaySettingsAdmin } from './BirthdaySettingsAdmin'
-import { BookingCheckoutSession } from './BookingCheckoutSession'
-import { BookingPageDuration } from './BookingPageDuration'
-import { CouponAdmin } from './CouponAdmin'
-import { CustomerAdmin } from './CustomerAdmin'
-import { DemandCaptureAdmin } from './DemandCaptureAdmin'
-import { DemandCaptureForm } from './DemandCaptureForm'
-import { EmployeeAdmin } from './EmployeeAdmin'
-import { GestaoEntry } from './GestaoEntry'
-import { GestaoSettingsPage } from './GestaoSettingsPage'
-import { ManageReservation } from './ManageReservation'
-import { NotificationsAdmin } from './NotificationsAdmin'
-import { OperationSettingsAdmin } from './OperationSettingsAdmin'
-import { OpsHealthAdmin } from './OpsHealthAdmin'
-import { PasswordRecoveryPage } from './PasswordRecoveryPage'
-import { PreReservationPaymentPage } from './PreReservationPaymentPage'
-import { ResourceAdmin } from './ResourceAdmin'
-import { SabrinaBookingJourney } from './SabrinaBookingJourney'
-import { ServiceCatalogAdmin } from './ServiceCatalogAdmin'
-import { ServiceSettingsAdmin } from './ServiceSettingsAdmin'
+import { Suspense, lazy, useEffect, type ReactElement } from 'react'
 import { TrackingConsentBanner } from './TrackingConsentBanner'
-import { WaitlistPrivateInvitePage } from './WaitlistPrivateInvitePage'
 import { trackPublicPage } from './tracking'
-import './agendaAdmin.css'
-import './serviceSettingsAdmin.css'
-import './couponAdmin.css'
-import './employeeAdmin.css'
-import './checkout.css'
+
+// Route-level components are lazy-loaded so a visitor to any single page (public
+// booking or one admin screen) only downloads that page's code, not every other
+// page + admin panel + the Mercado Pago SDK in the same bundle.
+const AdminBalancesPage = lazy(() => import('./AdminBalancesPage').then((m) => ({ default: m.AdminBalancesPage })))
+const AdminDashboard = lazy(() => import('./AdminDashboard').then((m) => ({ default: m.AdminDashboard })))
+const AgendaAdmin = lazy(() => import('./AgendaAdmin').then((m) => ({ default: m.AgendaAdmin })))
+const BalanceCollectionPage = lazy(() => import('./BalanceCollectionPage').then((m) => ({ default: m.BalanceCollectionPage })))
+const BirthdaySettingsAdmin = lazy(() => import('./BirthdaySettingsAdmin').then((m) => ({ default: m.BirthdaySettingsAdmin })))
+const BookingCheckoutSession = lazy(() => import('./BookingCheckoutSession').then((m) => ({ default: m.BookingCheckoutSession })))
+const BookingPageDuration = lazy(() => import('./BookingPageDuration').then((m) => ({ default: m.BookingPageDuration })))
+const CouponAdmin = lazy(() => import('./CouponAdmin').then((m) => ({ default: m.CouponAdmin })))
+const CustomerAdmin = lazy(() => import('./CustomerAdmin').then((m) => ({ default: m.CustomerAdmin })))
+const DemandCaptureAdmin = lazy(() => import('./DemandCaptureAdmin').then((m) => ({ default: m.DemandCaptureAdmin })))
+const DemandCaptureForm = lazy(() => import('./DemandCaptureForm').then((m) => ({ default: m.DemandCaptureForm })))
+const EmployeeAdmin = lazy(() => import('./EmployeeAdmin').then((m) => ({ default: m.EmployeeAdmin })))
+const GestaoEntry = lazy(() => import('./GestaoEntry').then((m) => ({ default: m.GestaoEntry })))
+const GestaoSettingsPage = lazy(() => import('./GestaoSettingsPage').then((m) => ({ default: m.GestaoSettingsPage })))
+const ManageReservation = lazy(() => import('./ManageReservation').then((m) => ({ default: m.ManageReservation })))
+const NotificationsAdmin = lazy(() => import('./NotificationsAdmin').then((m) => ({ default: m.NotificationsAdmin })))
+const OperationSettingsAdmin = lazy(() => import('./OperationSettingsAdmin').then((m) => ({ default: m.OperationSettingsAdmin })))
+const OpsHealthAdmin = lazy(() => import('./OpsHealthAdmin').then((m) => ({ default: m.OpsHealthAdmin })))
+const PasswordRecoveryPage = lazy(() => import('./PasswordRecoveryPage').then((m) => ({ default: m.PasswordRecoveryPage })))
+const PreReservationPaymentPage = lazy(() => import('./PreReservationPaymentPage').then((m) => ({ default: m.PreReservationPaymentPage })))
+const ResourceAdmin = lazy(() => import('./ResourceAdmin').then((m) => ({ default: m.ResourceAdmin })))
+const SabrinaBookingJourney = lazy(() => import('./SabrinaBookingJourney').then((m) => ({ default: m.SabrinaBookingJourney })))
+const ServiceCatalogAdmin = lazy(() => import('./ServiceCatalogAdmin').then((m) => ({ default: m.ServiceCatalogAdmin })))
+const ServiceSettingsAdmin = lazy(() => import('./ServiceSettingsAdmin').then((m) => ({ default: m.ServiceSettingsAdmin })))
+const WaitlistPrivateInvitePage = lazy(() => import('./WaitlistPrivateInvitePage').then((m) => ({ default: m.WaitlistPrivateInvitePage })))
+
+function RouteLoadingFallback() {
+  return (
+    <div role="status" aria-live="polite" style={{ padding: '48px 20px', textAlign: 'center', color: '#666' }}>
+      Carregando…
+    </div>
+  )
+}
 
 function BlackSheepVisitCallout() {
   const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
@@ -132,7 +139,7 @@ function applicationPath(): string {
   return path
 }
 
-export function App() {
+function AppRoutes() {
   const path = applicationPath()
   const adminPage = (content: ReactElement) => <><EnvironmentBanner />{content}</>
 
@@ -184,4 +191,12 @@ export function App() {
   if (path === '/reserva/saldo' || path === '/pagar-saldo') return <BalanceCollectionPage />
   const params = new URLSearchParams(window.location.search)
   return <PublicDemandRoute brand={params.get('brand')?.trim() ?? ''} campaign={params.get('campaign')?.trim() || null} />
+}
+
+export function App() {
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <AppRoutes />
+    </Suspense>
+  )
 }

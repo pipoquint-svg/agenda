@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { BalanceCollectionApiError, verifyBalanceCollection } from './balanceCollectionApi'
 import { PaymentPanel } from './PaymentPanel'
+import './checkout.css'
 
 function collectionId(): string {
   return new URLSearchParams(window.location.search).get('collection')?.trim() ?? ''

@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import './agendaAdmin.css'
 import {
   AdminAgendaApiError,
   getAdminAgenda,
