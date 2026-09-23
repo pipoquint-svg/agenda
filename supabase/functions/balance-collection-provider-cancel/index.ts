@@ -1,10 +1,11 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 
 function requireInternal(req: Request): void {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
-  if (!expected || supplied !== expected) throw new Error('INTERNAL_AUTH_REQUIRED')
+  if (!expected || !timingSafeEqual(supplied, expected)) throw new Error('INTERNAL_AUTH_REQUIRED')
 }
 
 async function stableKey(value: string): Promise<string> {

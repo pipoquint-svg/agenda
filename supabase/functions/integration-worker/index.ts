@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 
 const INTERNAL_CALL_TIMEOUT_MS = 15_000
 const GOOGLE_SYNC_TIMEOUT_MS = 45_000
@@ -7,7 +8,7 @@ const GOOGLE_FULL_WINDOW_REFRESH_MS = 7 * 24 * 60 * 60 * 1000
 function requireInternal(req: Request): string {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
   const supplied = req.headers.get('x-internal-secret')
-  if (!expected || supplied !== expected) throw new Error('INTERNAL_AUTH_REQUIRED')
+  if (!expected || !timingSafeEqual(supplied, expected)) throw new Error('INTERNAL_AUTH_REQUIRED')
   return expected
 }
 

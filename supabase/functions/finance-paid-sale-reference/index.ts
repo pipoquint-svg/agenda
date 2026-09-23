@@ -1,4 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import {
   FINANCE_PAID_SALE_CONTRACT,
   firstQualifyingPaidSaleCharge,
@@ -38,7 +39,7 @@ function positiveLeadId(value: unknown): number {
 function requireMachineAuth(req: Request): void {
   const expected = requiredEnv('DRACMA_FINANCE_REFERENCE_SECRET')
   const supplied = req.headers.get('x-dracma-finance-secret')?.trim() ?? ''
-  if (!supplied || supplied !== expected) throw new Error('FINANCE_REFERENCE_AUTH_REQUIRED')
+  if (!supplied || !timingSafeEqual(supplied, expected)) throw new Error('FINANCE_REFERENCE_AUTH_REQUIRED')
 }
 
 Deno.serve(async (req) => {
