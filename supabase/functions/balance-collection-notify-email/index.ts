@@ -16,6 +16,11 @@ function requireInternal(req: Request): void {
   if (!expected || !timingSafeEqual(supplied, expected)) throw new Error('INTERNAL_AUTH_REQUIRED')
 }
 
+function productionBalanceEmailEnabled(): boolean {
+  const base = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
+  if (base === 'https://sbexdggbwqvyhbkatucs.supabase.co') return true
+  return (Deno.env.get('TRANSACTIONAL_EMAIL_ENABLED') ?? '').trim().toLowerCase() === 'true'
+}
 
 function allowRealRecipients(): boolean {
   return (Deno.env.get('ALLOW_REAL_EMAIL_RECIPIENTS') ?? '').trim().toLowerCase() === 'true'
@@ -37,6 +42,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const collectionId = String(body?.collection_id ?? '').trim()
     if (!/^[0-9a-f-]{36}$/i.test(collectionId)) throw new Error('BALANCE_COLLECTION_ID_INVALID')
+    if (!productionBalanceEmailEnabled()) return jsonResponse({ skipped: true, reason: 'TRANSACTIONAL_EMAIL_DISABLED' })
 
     const client = adminClient()
     const { data: collection, error: collectionError } = await client
