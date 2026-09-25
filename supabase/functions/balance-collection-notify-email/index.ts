@@ -63,7 +63,8 @@ Deno.serve(async (req) => {
     const { data: description, error: descriptionError } = await client.rpc('appointment_commercial_description', { p_appointment_id: appointment.id })
     if (descriptionError) throw new Error('COMMERCIAL_DESCRIPTION_FAILED')
     const commercialDescription = String(description ?? appointment.service_name_snapshot ?? 'Locação de estúdio')
-    const baseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const configuredBaseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const baseUrl = configuredBaseUrl || 'https://www.blacksheepestudiocriativo.com.br'
     if (!/^https:\/\//i.test(baseUrl)) throw new Error('PUBLIC_BOOKING_BASE_URL_INVALID')
     const payUrl = `${baseUrl}/reserva/saldo?collection=${encodeURIComponent(collection.id)}`
 
