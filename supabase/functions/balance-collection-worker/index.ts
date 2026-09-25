@@ -14,6 +14,12 @@ function envEnabled(name: string): boolean {
   return (Deno.env.get(name) ?? '').trim().toLowerCase() === 'true'
 }
 
+function productionBalanceEmailWorkerEnabled(): boolean {
+  const base = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
+  return base === 'https://sbexdggbwqvyhbkatucs.supabase.co'
+    || envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED')
+}
+
 function retryDelaySeconds(attempt: number): number | null {
   const schedule = [30,120,600,1800]
   return schedule[attempt - 1] ?? null
@@ -43,7 +49,9 @@ Deno.serve(async (req) => {
     const secret = requireInternal(req)
     const client = adminClient()
     const workerId = `balance:${crypto.randomUUID()}`
-    const emailEnabled = envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED')
+    // Automatic balance delivery is a production business invariant. Other
+    // environments remain fail-closed unless explicitly enabled.
+    const emailEnabled = productionBalanceEmailWorkerEnabled()
 
     // Kommo delivery remains fail-closed until its provider gate is explicitly enabled.
     const kommoDeliveryEnabled = false

@@ -25,6 +25,8 @@ export type AdminBalanceRow = {
   collection_sequence: number | null
   collection_expires_at: string | null
   collection_status: string | null
+  collection_issued_at: string | null
+  collection_email_delivered_at: string | null
 }
 
 export async function verifyBalanceCollection(input: { collectionId: string; email: string }): Promise<{
@@ -69,6 +71,40 @@ export async function reissueBalanceCollection(input: { appointmentId: string; a
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new BalanceCollectionApiError(body?.error?.code ?? 'ADMIN_BALANCE_COLLECTION_FAILED')
+}
+
+export async function sendBalanceCollection(input: {
+  appointmentId: string
+  accessToken: string
+}): Promise<{
+  collection_created?: boolean
+  data?: {
+    id?: string
+    status?: string
+    amount_snapshot?: number | string
+    issued_at?: string | null
+    expires_at?: string | null
+    email_delivered_at?: string | null
+  }
+  delivery?: {
+    skipped?: boolean
+    reason?: string
+    recipient_masked?: string
+    provider_message_id?: string | null
+  }
+}> {
+  const response = await fetch(`${functionsBaseUrl}/admin-balance-collections`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json', apikey: publicApiKey,
+      authorization: `Bearer ${input.accessToken}`,
+      'x-request-id': crypto.randomUUID(),
+    },
+    body: JSON.stringify({ action: 'SEND_PAYMENT_LINK', appointment_id: input.appointmentId }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new BalanceCollectionApiError(body?.error?.code ?? 'ADMIN_BALANCE_COLLECTION_FAILED')
+  return body
 }
 
 export async function recordManualBalancePayment(input: {

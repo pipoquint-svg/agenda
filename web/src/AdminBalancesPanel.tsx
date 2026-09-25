@@ -3,7 +3,7 @@ import {
   BalanceCollectionApiError,
   listAdminBalances,
   recordManualBalancePayment,
-  reissueBalanceCollection,
+  sendBalanceCollection,
   type AdminBalanceRow,
 } from './balanceCollectionApi'
 
@@ -23,6 +23,9 @@ function actionError(error: unknown): string {
   if (code==='BALANCE_COLLECTION_REISSUE_NOT_ALLOWED') return 'Esta cobrança ainda não está em um estado que permita reemissão.'
   if (code==='BALANCE_PROVIDER_CLEANUP_PENDING') return 'Ainda existe uma cobrança anterior pendente no provedor. Resolva essa divergência antes de reemitir.'
   if (code==='MANUAL_PAYMENT_EXCEEDS_BALANCE') return 'O valor informado é maior que o saldo em aberto.'
+  if (code==='EMAIL_RECIPIENT_NOT_ALLOWED') return 'O e-mail do cliente não está autorizado para envio.'
+  if (code==='BALANCE_EMAIL_RUNTIME_MISSING') return 'O serviço de envio de cobrança está indisponível no momento.'
+  if (code.startsWith('EMAIL_PROVIDER_')) return 'O provedor de e-mail não concluiu o envio. Tente novamente.'
   return 'Não foi possível concluir a operação financeira.'
 }
 
@@ -38,6 +41,7 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
   const [paymentRow,setPaymentRow]=useState<AdminBalanceRow|null>(null)
   const [amount,setAmount]=useState('')
   const [method,setMethod]=useState<'CASH'|'OTHER'>('CASH')
+  const [sendingId,setSendingId]=useState<string|null>(null)
 
   const load=useCallback(async()=>{
     setLoading(true);setError('')
@@ -48,13 +52,23 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
 
   useEffect(()=>{void load()},[load])
 
-  async function reissue(row: AdminBalanceRow){
-    setError('');setNotice('')
+  async function sendCharge(row: AdminBalanceRow){
+    setError('');setNotice('');setSendingId(row.appointment_id)
     try{
-      await reissueBalanceCollection({appointmentId:row.appointment_id,accessToken})
-      setNotice('Nova cobrança emitida. O novo link terá validade de 48 horas.')
+      const result=await sendBalanceCollection({appointmentId:row.appointment_id,accessToken})
+      const deliveredAt=result.data?.email_delivered_at
+      const expiresAt=result.data?.expires_at
+      const amountValue=result.data?.amount_snapshot ?? row.balance_value
+      const recipient=result.delivery?.recipient_masked
+      const alreadySent=result.delivery?.reason==='NOTIFICATION_ALREADY_SENT'
+      if(alreadySent){
+        setNotice(`Esta cobrança já havia sido enviada. Valor ${money(amountValue)}${expiresAt?` · link válido até ${dateTime(expiresAt)}`:''}.`)
+      }else{
+        setNotice(`Cobrança enviada${recipient?` para ${recipient}`:''}. Valor ${money(amountValue)}${expiresAt?` · link válido até ${dateTime(expiresAt)}`:''}${deliveredAt?'':''}.`)
+      }
       await load()
     }catch(cause){setError(actionError(cause))}
+    finally{setSendingId(null)}
   }
 
   function openPayment(row: AdminBalanceRow){
@@ -95,13 +109,11 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
     <div className="dashboard-pending-list">
       {rows.map(row=>{
         const active=row.collection_status==='PENDING'
-        const terminal=row.collection_status==='EXPIRED'||row.collection_status==='CANCELLED_SETTLED'||row.collection_status==='CANCELLED_NO_SHOW'
-        const canReissue=terminal&&!active
-        const reissueTitle=active
-          ? `Cobrança ativa até ${dateTime(row.collection_expires_at)}`
-          : canReissue
-            ? 'Emitir novo link com validade de 48 horas'
-            : 'A reemissão só é permitida após o encerramento da cobrança anterior'
+        const delivered=Boolean(row.collection_email_delivered_at)
+        const expired=row.collection_status==='EXPIRED'
+        const noCollection=!row.collection_status
+        const sending=sendingId===row.appointment_id
+        const actionLabel=active&&!delivered?'Enviar cobrança':expired?'Reemitir cobrança':noCollection?'Emitir cobrança':'Emitir cobrança'
         return <article key={row.appointment_id}>
           <div>
             <strong>{row.customer_name ?? 'Cliente'}</strong>
@@ -112,17 +124,22 @@ export function AdminBalancesPanel({ accessToken, operationScope }: {
             <span>Total: {money(row.total_value)}</span>
             <span>Pago: {money(row.paid_value)}</span>
             <strong>Em aberto: {money(row.balance_value)}</strong>
-            {active?<small>Cobrança ativa até {dateTime(row.collection_expires_at)}</small>:<small>{row.collection_status==='EXPIRED'?'Cobrança vencida':'Sem cobrança ativa'}</small>}
+            {delivered
+              ? <small>Cobrança enviada em {dateTime(row.collection_email_delivered_at)} · válida até {dateTime(row.collection_expires_at)}</small>
+              : active
+                ? <small>Cobrança emitida e ainda não enviada · válida até {dateTime(row.collection_expires_at)}</small>
+                : <small>{expired?'Cobrança vencida':'Sem cobrança ativa'}</small>}
           </div>
           <div className="agenda-header-actions">
             <button className="secondary" type="button" onClick={()=>openPayment(row)}>Registrar pagamento presencial</button>
-            <button
-              className="secondary"
-              type="button"
-              disabled={!canReissue}
-              title={reissueTitle}
-              onClick={()=>void reissue(row)}
-            >Reemitir cobrança</button>
+            {delivered
+              ? <button className="secondary" type="button" disabled title={`Enviada em ${dateTime(row.collection_email_delivered_at)}`}>Cobrança enviada</button>
+              : <button
+                  className="secondary"
+                  type="button"
+                  disabled={sending}
+                  onClick={()=>void sendCharge(row)}
+                >{sending?'Enviando…':actionLabel}</button>}
           </div>
         </article>
       })}

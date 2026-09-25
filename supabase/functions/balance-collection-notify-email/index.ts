@@ -16,7 +16,9 @@ function requireInternal(req: Request): void {
   if (!expected || !timingSafeEqual(supplied, expected)) throw new Error('INTERNAL_AUTH_REQUIRED')
 }
 
-function enabled(): boolean {
+function productionBalanceEmailEnabled(): boolean {
+  const base = (Deno.env.get('SUPABASE_URL') ?? '').trim().toLowerCase().replace(/\/+$/, '')
+  if (base === 'https://sbexdggbwqvyhbkatucs.supabase.co') return true
   return (Deno.env.get('TRANSACTIONAL_EMAIL_ENABLED') ?? '').trim().toLowerCase() === 'true'
 }
 
@@ -40,7 +42,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const collectionId = String(body?.collection_id ?? '').trim()
     if (!/^[0-9a-f-]{36}$/i.test(collectionId)) throw new Error('BALANCE_COLLECTION_ID_INVALID')
-    if (!enabled()) return jsonResponse({ skipped: true, reason: 'TRANSACTIONAL_EMAIL_DISABLED' })
+    if (!productionBalanceEmailEnabled()) return jsonResponse({ skipped: true, reason: 'TRANSACTIONAL_EMAIL_DISABLED' })
 
     const client = adminClient()
     const { data: collection, error: collectionError } = await client
@@ -67,7 +69,8 @@ Deno.serve(async (req) => {
     const { data: description, error: descriptionError } = await client.rpc('appointment_commercial_description', { p_appointment_id: appointment.id })
     if (descriptionError) throw new Error('COMMERCIAL_DESCRIPTION_FAILED')
     const commercialDescription = String(description ?? appointment.service_name_snapshot ?? 'Locação de estúdio')
-    const baseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const configuredBaseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const baseUrl = configuredBaseUrl || 'https://www.blacksheepestudiocriativo.com.br'
     if (!/^https:\/\//i.test(baseUrl)) throw new Error('PUBLIC_BOOKING_BASE_URL_INVALID')
     const payUrl = `${baseUrl}/reserva/saldo?collection=${encodeURIComponent(collection.id)}`
 

@@ -72,6 +72,19 @@ async function persistInternalCancelDivergence(client: ReturnType<typeof adminCl
   })
 }
 
+async function sendCollectionEmail(collectionId: string): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
+  const base = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/$/, '') ?? ''
+  const secret = Deno.env.get('INTEGRATION_INTERNAL_SECRET')?.trim() ?? ''
+  if (!base || !secret) throw new Error('BALANCE_EMAIL_RUNTIME_MISSING')
+  const response = await fetch(`${base}/functions/v1/balance-collection-notify-email`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-internal-secret': secret },
+    body: JSON.stringify({ collection_id: collectionId }),
+  })
+  const body = await response.json().catch(() => ({})) as Record<string, unknown>
+  return { ok: response.ok, status: response.status, body }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
 
@@ -95,7 +108,28 @@ Deno.serve(async (req) => {
       if (scope) query = query.eq('operation_scope', scope)
       const { data, error } = await query
       if (error) throw new Error(mode === 'overdue' ? 'ADMIN_OVERDUE_BALANCES_QUERY_FAILED' : 'ADMIN_OPEN_BALANCES_QUERY_FAILED')
-      return json({ mode, rows: data ?? [], generated_at: new Date().toISOString() })
+      const rows = data ?? []
+      const collectionIds = rows
+        .map((row: Record<string, unknown>) => typeof row.active_collection_id === 'string' ? row.active_collection_id : null)
+        .filter((value: string | null): value is string => Boolean(value))
+      let collectionById = new Map<string, Record<string, unknown>>()
+      if (collectionIds.length > 0) {
+        const { data: collections, error: collectionError } = await client
+          .from('appointment_balance_collections')
+          .select('id,issued_at,email_delivered_at')
+          .in('id', collectionIds)
+        if (collectionError) throw new Error('ADMIN_BALANCE_COLLECTION_DETAIL_QUERY_FAILED')
+        collectionById = new Map((collections ?? []).map((item: Record<string, unknown>) => [String(item.id), item]))
+      }
+      const enrichedRows = rows.map((row: Record<string, unknown>) => {
+        const detail = typeof row.active_collection_id === 'string' ? collectionById.get(row.active_collection_id) : undefined
+        return {
+          ...row,
+          collection_issued_at: detail?.issued_at ?? null,
+          collection_email_delivered_at: detail?.email_delivered_at ?? null,
+        }
+      })
+      return json({ mode, rows: enrichedRows, generated_at: new Date().toISOString() })
     }
 
     if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -104,6 +138,69 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
     const action = typeof body.action === 'string' ? body.action.trim().toUpperCase() : ''
     const appointmentId = uuid(body.appointment_id)
+
+    if (action === 'SEND_PAYMENT_LINK') {
+      const { data: latestCollection, error: latestCollectionError } = await client
+        .from('appointment_balance_collections')
+        .select('id,status,amount_snapshot,issued_at,expires_at,email_delivered_at')
+        .eq('appointment_id', appointmentId)
+        .order('sequence', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (latestCollectionError) throw new Error('BALANCE_COLLECTION_LOOKUP_FAILED')
+
+      let collection = latestCollection as Record<string, unknown> | null
+      const expiresAt = collection?.expires_at ? new Date(String(collection.expires_at)).getTime() : 0
+      const active = collection?.status === 'PENDING' && Number.isFinite(expiresAt) && expiresAt > Date.now()
+      let collectionCreated = false
+
+      if (!active) {
+        const { data: reissued, error: reissueError } = await client.rpc('service_admin_reissue_balance_collection', {
+          p_appointment_id: appointmentId,
+          p_admin_id: admin.adminId,
+        })
+        if (reissueError) throw new Error(reissueError.message)
+        const collectionId = reissued && typeof reissued === 'object' && typeof (reissued as Record<string, unknown>).collection_id === 'string'
+          ? String((reissued as Record<string, unknown>).collection_id)
+          : ''
+        if (!collectionId) throw new Error('BALANCE_COLLECTION_REISSUE_RESULT_INVALID')
+        const { data: freshCollection, error: freshCollectionError } = await client
+          .from('appointment_balance_collections')
+          .select('id,status,amount_snapshot,issued_at,expires_at,email_delivered_at')
+          .eq('id', collectionId)
+          .maybeSingle()
+        if (freshCollectionError || !freshCollection) throw new Error('BALANCE_COLLECTION_LOOKUP_FAILED')
+        collection = freshCollection as Record<string, unknown>
+        collectionCreated = true
+      }
+
+      const collectionId = typeof collection?.id === 'string' ? collection.id : ''
+      if (!collectionId) throw new Error('BALANCE_COLLECTION_NOT_FOUND')
+      const delivery = await sendCollectionEmail(collectionId)
+      if (!delivery.ok) {
+        const errorBody = delivery.body.error && typeof delivery.body.error === 'object'
+          ? delivery.body.error as Record<string, unknown>
+          : {}
+        const code = typeof errorBody.code === 'string' ? errorBody.code : 'BALANCE_EMAIL_SEND_FAILED'
+        throw new Error(code)
+      }
+      const skipped = delivery.body.skipped === true
+      const reason = typeof delivery.body.reason === 'string' ? delivery.body.reason : ''
+      if (skipped && reason && reason !== 'NOTIFICATION_ALREADY_SENT') throw new Error(reason)
+
+      const { data: deliveredCollection, error: deliveredCollectionError } = await client
+        .from('appointment_balance_collections')
+        .select('id,status,amount_snapshot,issued_at,expires_at,email_delivered_at')
+        .eq('id', collectionId)
+        .maybeSingle()
+      if (deliveredCollectionError || !deliveredCollection) throw new Error('BALANCE_COLLECTION_LOOKUP_FAILED')
+
+      return json({
+        data: deliveredCollection,
+        delivery: delivery.body,
+        collection_created: collectionCreated,
+      }, collectionCreated ? 201 : 200)
+    }
 
     if (action === 'REISSUE') {
       const { data, error } = await client.rpc('service_admin_reissue_balance_collection', {
@@ -207,6 +304,9 @@ Deno.serve(async (req) => {
       : code === 'BALANCE_PROVIDER_CLEANUP_PENDING' ? 409
       : code === 'BALANCE_COLLECTION_NOT_DUE' ? 409
       : code === 'APPOINTMENT_ALREADY_SETTLED' ? 409
+      : code === 'EMAIL_RECIPIENT_NOT_ALLOWED' ? 409
+      : code === 'BALANCE_EMAIL_RUNTIME_MISSING' ? 503
+      : code.startsWith('EMAIL_PROVIDER_') ? 502
       : 400
     return json({ error: { code } }, status)
   }
