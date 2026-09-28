@@ -82,7 +82,10 @@ Deno.serve(async (req) => {
       : { pending_items: [] as unknown[] }
 
     try {
-      output.operational_alerts = await listDashboardOpsIncidents(client, new Date())
+      const operationalAlerts = await listDashboardOpsIncidents(client, new Date())
+      output.operational_alerts = canSeeFinance
+        ? operationalAlerts
+        : operationalAlerts.filter((item) => item.category !== 'PAYMENT_STUCK')
       output.operational_alerts_status = 'AVAILABLE'
     } catch {
       console.error('[ADMIN_DASHBOARD] OPS_ALERTS_QUERY_FAILED')
