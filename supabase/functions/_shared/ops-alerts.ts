@@ -277,6 +277,38 @@ export async function listCurrentOpsIncidents(
   return buildOpsIncidents(await queryOpsSnapshot(client, now), now)
 }
 
+export async function listDashboardOpsIncidents(
+  client: OpsClient,
+  now = new Date(),
+): Promise<OpsIncident[]> {
+  const standard = await listCurrentOpsIncidents(client, now)
+  const divergences = await listActionableScheduleDivergences(client, now.toISOString(), now)
+
+  const divergenceGroups = new Map<string, typeof divergences>()
+  for (const row of divergences) {
+    if (row.status !== 'OPEN' || validDate(row.detected_at) > now.getTime()) continue
+    const source = safeSegment(row.source, 'SCHEDULE')
+    const code = sanitizeOpsCode(row.reason)
+    const key = `${source}:${code}`
+    divergenceGroups.set(key, [...(divergenceGroups.get(key) ?? []), row])
+  }
+
+  const immediateDivergences = [...divergenceGroups.entries()].map(([key, rows]) => {
+    const [source, code] = key.split(':')
+    return incident(
+      'SCHEDULE_DIVERGENCE',
+      source,
+      code,
+      rows.length,
+      minimumIso(rows.map((row) => row.detected_at), now),
+    )
+  })
+
+  const byFingerprint = new Map(standard.map((item) => [item.fingerprint, item]))
+  for (const item of immediateDivergences) byFingerprint.set(item.fingerprint, item)
+  return [...byFingerprint.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint))
+}
+
 export async function runOpsAlertCycle(
   client: OpsClient,
   options: {
