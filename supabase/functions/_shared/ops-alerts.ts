@@ -270,6 +270,13 @@ async function queryOpsSnapshot(client: OpsClient, now: Date): Promise<OpsSnapsh
   }
 }
 
+export async function listCurrentOpsIncidents(
+  client: OpsClient,
+  now = new Date(),
+): Promise<OpsIncident[]> {
+  return buildOpsIncidents(await queryOpsSnapshot(client, now), now)
+}
+
 export async function runOpsAlertCycle(
   client: OpsClient,
   options: {
@@ -278,8 +285,7 @@ export async function runOpsAlertCycle(
   },
 ): Promise<{ incident_count: number; notified_count: number; categories: OpsIncidentCategory[] }> {
   const now = options.now ?? new Date()
-  const snapshot = await queryOpsSnapshot(client, now)
-  const incidents = buildOpsIncidents(snapshot, now)
+  const incidents = await listCurrentOpsIncidents(client, now)
   const { data: existingData, error: stateError } = await client.from('ops_alert_states').select('fingerprint,category,source,code,occurrence_count,first_detected_at,last_notified_at,notification_count,resolved_at')
   if (stateError) throw new Error('OPS_ALERT_STATE_QUERY_FAILED')
   const states = (existingData ?? []) as OpsAlertState[]
