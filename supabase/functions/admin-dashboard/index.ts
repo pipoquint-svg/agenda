@@ -1,3 +1,4 @@
+import { listCurrentOpsIncidents } from '../_shared/ops-alerts.ts'
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
 
 const corsHeaders = {
@@ -79,6 +80,15 @@ Deno.serve(async (req) => {
     const output: Record<string, unknown> = data && typeof data === 'object' && !Array.isArray(data)
       ? { ...(data as Record<string, unknown>) }
       : { pending_items: [] as unknown[] }
+
+    try {
+      output.operational_alerts = await listCurrentOpsIncidents(client, new Date())
+      output.operational_alerts_status = 'AVAILABLE'
+    } catch {
+      console.error('[ADMIN_DASHBOARD] OPS_ALERTS_QUERY_FAILED')
+      output.operational_alerts = []
+      output.operational_alerts_status = 'UNAVAILABLE'
+    }
 
     const [recentResult, movementsResult] = await Promise.all([
       client
