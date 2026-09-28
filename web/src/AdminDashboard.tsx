@@ -126,7 +126,7 @@ function pendingMoment(item: DashboardPendingItem): string | null {
 function operationalAlertLabel(category: DashboardOperationalAlert['category']): string {
   const labels: Record<DashboardOperationalAlert['category'], string> = {
     PAYMENT_STUCK: 'Pagamento travado',
-    EDGE_FAILURE: 'Falha crítica de função',
+    EDGE_FAILURE: 'Falha de função',
     INTEGRATION_FAILURES: 'Falhas de integração',
     SCHEDULE_DIVERGENCE: 'Conflito de agenda',
     EMAIL_FAILURE: 'Falha de e-mail',
@@ -230,6 +230,8 @@ export function AdminDashboard() {
 
   const metrics = dashboard.metrics
   const occupancy = dashboard.occupancy
+  const operationalAlerts = dashboard.operational_alerts ?? []
+  const operationalAlertsStatus = dashboard.operational_alerts_status ?? 'AVAILABLE'
 
   return (
     <main className="admin-shell dashboard-shell">
@@ -247,7 +249,7 @@ export function AdminDashboard() {
         </div>
       </header>
 
-      {dashboard.operational_alerts_status === 'UNAVAILABLE' ? (
+      {operationalAlertsStatus === 'UNAVAILABLE' ? (
         <section className="dashboard-ops-alert dashboard-ops-alert--warning" role="alert">
           <div className="dashboard-ops-alert__header">
             <div>
@@ -258,18 +260,18 @@ export function AdminDashboard() {
             <a className="secondary agenda-link-button" href={operationalHealthHref()}>Ver saúde do sistema</a>
           </div>
         </section>
-      ) : dashboard.operational_alerts.length > 0 ? (
+      ) : operationalAlerts.length > 0 ? (
         <section className="dashboard-ops-alert dashboard-ops-alert--active" role="alert" aria-live="polite">
           <div className="dashboard-ops-alert__header">
             <div>
               <span className="dashboard-ops-alert__eyebrow">Atenção operacional</span>
-              <h2>{dashboard.operational_alerts.length === 1 ? '1 alerta ativo exige atenção' : `${dashboard.operational_alerts.length} alertas ativos exigem atenção`}</h2>
+              <h2>{operationalAlerts.length === 1 ? '1 alerta ativo exige atenção' : `${operationalAlerts.length} alertas ativos exigem atenção`}</h2>
               <p>Incidentes atuais detectados diretamente no estado operacional da agenda.</p>
             </div>
             <a className="secondary agenda-link-button" href={operationalHealthHref()}>Ver saúde do sistema</a>
           </div>
           <div className="dashboard-ops-alert__list">
-            {dashboard.operational_alerts.map((alert) => (
+            {operationalAlerts.map((alert) => (
               <article key={alert.fingerprint} data-severity={operationalAlertSeverity(alert.category)}>
                 <div>
                   <strong>{operationalAlertLabel(alert.category)}</strong>
