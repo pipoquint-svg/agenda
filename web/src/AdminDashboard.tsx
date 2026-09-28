@@ -138,10 +138,21 @@ function operationalAlertSeverity(category: DashboardOperationalAlert['category'
   return category === 'PAYMENT_STUCK' || category === 'SCHEDULE_DIVERGENCE' ? 'critical' : 'warning'
 }
 
-function operationalHealthHref(): string {
+function adminAreaHref(section: 'agenda' | 'pagamentos' | 'saude'): string {
   const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
   const path = window.location.pathname
-  return `${base}${path.includes('/gestao') ? '/gestao/saude' : '/admin/saude'}`
+  const root = path.includes('/gestao') ? '/gestao' : '/admin'
+  return `${base}${root}/${section}`
+}
+
+function operationalAlertAction(alerts: DashboardOperationalAlert[]): { href: string; label: string } {
+  if (alerts.some((alert) => alert.category === 'SCHEDULE_DIVERGENCE')) {
+    return { href: adminAreaHref('agenda'), label: 'Abrir agenda' }
+  }
+  if (alerts.some((alert) => alert.category === 'PAYMENT_STUCK')) {
+    return { href: adminAreaHref('pagamentos'), label: 'Abrir pagamentos' }
+  }
+  return { href: adminAreaHref('saude'), label: 'Ver saúde do sistema' }
 }
 
 export function AdminDashboard() {
@@ -232,6 +243,7 @@ export function AdminDashboard() {
   const occupancy = dashboard.occupancy
   const operationalAlerts = dashboard.operational_alerts ?? []
   const operationalAlertsStatus = dashboard.operational_alerts_status ?? 'AVAILABLE'
+  const alertAction = operationalAlertAction(operationalAlerts)
 
   return (
     <main className="admin-shell dashboard-shell">
@@ -257,7 +269,7 @@ export function AdminDashboard() {
               <h2>Não foi possível verificar os alertas agora</h2>
               <p>A agenda continua disponível, mas a leitura de saúde operacional falhou. Abra a tela de saúde para diagnóstico.</p>
             </div>
-            <a className="secondary agenda-link-button" href={operationalHealthHref()}>Ver saúde do sistema</a>
+            <a className="secondary agenda-link-button" href={adminAreaHref('saude')}>Ver saúde do sistema</a>
           </div>
         </section>
       ) : operationalAlerts.length > 0 ? (
@@ -268,7 +280,7 @@ export function AdminDashboard() {
               <h2>{operationalAlerts.length === 1 ? '1 alerta ativo exige atenção' : `${operationalAlerts.length} alertas ativos exigem atenção`}</h2>
               <p>Incidentes atuais detectados diretamente no estado operacional da agenda.</p>
             </div>
-            <a className="secondary agenda-link-button" href={operationalHealthHref()}>Ver saúde do sistema</a>
+            <a className="secondary agenda-link-button" href={alertAction.href}>{alertAction.label}</a>
           </div>
           <div className="dashboard-ops-alert__list">
             {operationalAlerts.map((alert) => (
