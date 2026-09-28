@@ -77,8 +77,8 @@ export type AdminDashboardResponse = {
   by_employee: DashboardEmployee[]
   pending_items: DashboardPendingItem[]
   occupancy: DashboardOccupancy
-  operational_alerts: DashboardOperationalAlert[]
-  operational_alerts_status: 'AVAILABLE' | 'UNAVAILABLE'
+  operational_alerts?: DashboardOperationalAlert[]
+  operational_alerts_status?: 'AVAILABLE' | 'UNAVAILABLE'
 }
 
 export class AdminDashboardApiError extends Error {
