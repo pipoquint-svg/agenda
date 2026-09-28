@@ -3,6 +3,7 @@ import {
   AdminDashboardApiError,
   getAdminDashboard,
   type AdminDashboardResponse,
+  type DashboardOperationalAlert,
   type DashboardPendingItem,
   type DashboardScope,
 } from './adminDashboardApi'
@@ -21,6 +22,8 @@ const emptyDashboard: AdminDashboardResponse = {
   },
   by_employee: [],
   pending_items: [],
+  operational_alerts: [],
+  operational_alerts_status: 'AVAILABLE',
   occupancy: {
     available: false,
     reason: 'OCCUPANCY_RESOURCE_NOT_CONFIGURED',
@@ -118,6 +121,27 @@ function occupancyMessage(reason: string | null): string {
 
 function pendingMoment(item: DashboardPendingItem): string | null {
   return item.start_at ?? item.detected_at ?? item.expires_at ?? null
+}
+
+function operationalAlertLabel(category: DashboardOperationalAlert['category']): string {
+  const labels: Record<DashboardOperationalAlert['category'], string> = {
+    PAYMENT_STUCK: 'Pagamento travado',
+    EDGE_FAILURE: 'Falha crítica de função',
+    INTEGRATION_FAILURES: 'Falhas de integração',
+    SCHEDULE_DIVERGENCE: 'Conflito de agenda',
+    EMAIL_FAILURE: 'Falha de e-mail',
+  }
+  return labels[category]
+}
+
+function operationalAlertSeverity(category: DashboardOperationalAlert['category']): 'critical' | 'warning' {
+  return category === 'PAYMENT_STUCK' || category === 'SCHEDULE_DIVERGENCE' ? 'critical' : 'warning'
+}
+
+function operationalHealthHref(): string {
+  const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
+  const path = window.location.pathname
+  return `${base}${path.includes('/gestao') ? '/gestao/saude' : '/admin/saude'}`
 }
 
 export function AdminDashboard() {
@@ -222,6 +246,45 @@ export function AdminDashboard() {
           <button className="secondary" type="button" onClick={() => supabase.auth.signOut()}>Sair</button>
         </div>
       </header>
+
+      {dashboard.operational_alerts_status === 'UNAVAILABLE' ? (
+        <section className="dashboard-ops-alert dashboard-ops-alert--warning" role="alert">
+          <div className="dashboard-ops-alert__header">
+            <div>
+              <span className="dashboard-ops-alert__eyebrow">Monitoramento operacional</span>
+              <h2>Não foi possível verificar os alertas agora</h2>
+              <p>A agenda continua disponível, mas a leitura de saúde operacional falhou. Abra a tela de saúde para diagnóstico.</p>
+            </div>
+            <a className="secondary agenda-link-button" href={operationalHealthHref()}>Ver saúde do sistema</a>
+          </div>
+        </section>
+      ) : dashboard.operational_alerts.length > 0 ? (
+        <section className="dashboard-ops-alert dashboard-ops-alert--active" role="alert" aria-live="polite">
+          <div className="dashboard-ops-alert__header">
+            <div>
+              <span className="dashboard-ops-alert__eyebrow">Atenção operacional</span>
+              <h2>{dashboard.operational_alerts.length === 1 ? '1 alerta ativo exige atenção' : `${dashboard.operational_alerts.length} alertas ativos exigem atenção`}</h2>
+              <p>Incidentes atuais detectados diretamente no estado operacional da agenda.</p>
+            </div>
+            <a className="secondary agenda-link-button" href={operationalHealthHref()}>Ver saúde do sistema</a>
+          </div>
+          <div className="dashboard-ops-alert__list">
+            {dashboard.operational_alerts.map((alert) => (
+              <article key={alert.fingerprint} data-severity={operationalAlertSeverity(alert.category)}>
+                <div>
+                  <strong>{operationalAlertLabel(alert.category)}</strong>
+                  <span>{alert.source} · {alert.code}</span>
+                </div>
+                <div>
+                  <strong>{alert.count} ocorrência{alert.count === 1 ? '' : 's'}</strong>
+                  <span>Desde {dateTime(alert.first_detected_at)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+          <small className="dashboard-ops-alert__privacy">Sem dados pessoais, tokens, valores de cartão ou credenciais.</small>
+        </section>
+      ) : null}
 
       <section className="dashboard-filters" aria-label="Filtros do dashboard">
         <label><span>De</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
