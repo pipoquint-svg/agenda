@@ -22,6 +22,15 @@ export type DashboardEmployee = {
   booked_minutes: number | string
 }
 
+export type DashboardOperationalAlert = {
+  fingerprint: string
+  category: 'PAYMENT_STUCK' | 'EDGE_FAILURE' | 'INTEGRATION_FAILURES' | 'SCHEDULE_DIVERGENCE' | 'EMAIL_FAILURE'
+  source: string
+  code: string
+  count: number
+  first_detected_at: string
+}
+
 export type DashboardPendingItem = {
   kind: string
   entity_type: string
@@ -68,6 +77,8 @@ export type AdminDashboardResponse = {
   by_employee: DashboardEmployee[]
   pending_items: DashboardPendingItem[]
   occupancy: DashboardOccupancy
+  operational_alerts: DashboardOperationalAlert[]
+  operational_alerts_status: 'AVAILABLE' | 'UNAVAILABLE'
 }
 
 export class AdminDashboardApiError extends Error {
