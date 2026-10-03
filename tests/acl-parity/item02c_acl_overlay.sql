@@ -339,6 +339,55 @@ begin
       raise exception 'ITEM02C_INVOICE_CRON_OWNER_DRIFT:%', v_identity;
     end if;
   end loop;
+
+  foreach v_identity in array array[
+    'public.service_issue_balance_collection_payment_token(uuid)',
+    'public.service_verify_balance_collection_payment_token(text)'
+  ] loop
+    v_oid := to_regprocedure(v_identity);
+    if v_oid is null then raise exception 'ITEM02C_BALANCE_MAGIC_RPC_MISSING:%', v_identity; end if;
+    if not has_function_privilege('service_role', v_oid, 'EXECUTE') then
+      raise exception 'ITEM02C_BALANCE_MAGIC_RPC_SERVICE_BOUNDARY:%', v_identity;
+    end if;
+    if has_function_privilege('anon', v_oid, 'EXECUTE')
+       or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       or exists (
+         select 1
+         from pg_proc p
+         cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+         where p.oid = v_oid
+           and a.grantee = 0
+           and a.privilege_type = 'EXECUTE'
+       ) then
+      raise exception 'ITEM02C_BALANCE_MAGIC_RPC_PUBLIC_EXPOSURE:%', v_identity;
+    end if;
+    if not exists (
+      select 1 from pg_proc p
+      where p.oid = v_oid
+        and p.prosecdef
+        and pg_get_userbyid(p.proowner) = 'postgres'
+    ) then
+      raise exception 'ITEM02C_BALANCE_MAGIC_RPC_IDENTITY_DRIFT:%', v_identity;
+    end if;
+  end loop;
+
+  v_identity := 'public.revoke_superseded_balance_collection_tokens()';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then raise exception 'ITEM02C_BALANCE_MAGIC_TRIGGER_MISSING:%', v_identity; end if;
+  if has_function_privilege('service_role', v_oid, 'EXECUTE')
+     or has_function_privilege('anon', v_oid, 'EXECUTE')
+     or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     or exists (
+       select 1
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       where p.oid = v_oid
+         and a.grantee = 0
+         and a.privilege_type = 'EXECUTE'
+     ) then
+    raise exception 'ITEM02C_BALANCE_MAGIC_TRIGGER_EXPOSURE:%', v_identity;
+  end if;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -346,11 +395,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 464 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=464 actual=%', v_public_function_count;
+  if v_public_function_count <> 469 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=469 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 399 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=399 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 403 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=403 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

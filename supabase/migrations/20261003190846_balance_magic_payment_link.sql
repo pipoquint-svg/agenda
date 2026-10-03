@@ -172,7 +172,7 @@ for each row execute function public.revoke_superseded_balance_collection_tokens
 
 revoke all on function public.service_issue_balance_collection_payment_token(uuid) from public, anon, authenticated;
 revoke all on function public.service_verify_balance_collection_payment_token(text) from public, anon, authenticated;
-revoke all on function public.revoke_superseded_balance_collection_tokens() from public, anon, authenticated;
+revoke all on function public.revoke_superseded_balance_collection_tokens() from public, anon, authenticated, service_role;
 grant execute on function public.service_issue_balance_collection_payment_token(uuid) to service_role;
 grant execute on function public.service_verify_balance_collection_payment_token(text) to service_role;
 
