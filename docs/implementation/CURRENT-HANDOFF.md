@@ -1,5 +1,18 @@
 # CURRENT HANDOFF — Agenda
 
+## Balance magic payment link hotfix — separately authorized on 2026-10-03
+
+The user explicitly requested replacement of the manual email confirmation step with a scoped magic payment link and authorized implementation plus publication. This is an isolated payment-access security and UX correction; it does not change financial rules.
+
+- Agenda branch: `fix/magic-payment-link-20261003`; PR: `pipoquint-svg/agenda#466`; implementation HEAD before this handoff update: `ef4d978b0a0664d3668e2191cbb28e271e96c5c8`.
+- BlackSheep branch: `fix/magic-payment-link-20261003`; PR: `pipoquint-svg/black-sheep#116`; HEAD: `a77938a46219f944bc0ce2e61632be2fa842ba39`.
+- Forward-only migration: `20261003190846_balance_magic_payment_link.sql`.
+- New email links use a 256-bit random secret in `#token=`, persist only its SHA-256 hash, carry PAY-only scope, inherit collection expiry, and are revoked on payment or superseding collection issuance. The browser removes the fragment immediately and never writes it to Web Storage or request URLs.
+- `/reserva/saldo` and `/pagar-saldo` validate the magic token directly through the backend and open the authoritative FULL-balance PIX/card checkout without asking for email. Existing `?collection=<UUID>` links retain the previous collection-plus-email fallback during the transition.
+- Focused verification completed: Deno helper tests 2/2; database pgTAP 17/17; Agenda web check/build; Edge type checks; BlackSheep payment tests 7/7, lint, typecheck, client build and SSR build; local clean database rebuild and security advisor error gate.
+- The duplicated manual-booking migration that prevented any main-based canonical rebuild was removed independently in Agenda PR #467, merged as `4517ae5b05ee6ca5862f86f4e6c2f20fda92ebd7`. No runtime schema content was removed because the retained migration is byte-equivalent.
+- Release order: merge Agenda PR #466 after final CI, deploy its migration plus `balance-collection-access` and `balance-collection-notify-email`, verify production without charging, then merge/publish BlackSheep PR #116 and verify both public routes. Do not claim live behavior before these checks finish.
+
 ## Invoice checkout hotfix — separately authorized on 2026-09-21
 
 The user explicitly requested independent prebooking plus invoicing and normal checkout for authorized invoice customers. This is an isolated production-bug correction, not a change to PR-05's scope or authorization.
