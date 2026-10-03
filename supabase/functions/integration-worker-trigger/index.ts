@@ -78,6 +78,17 @@ Deno.serve(async (req) => {
     const source = await authorizeTrigger(req)
     const base = requiredEnv('SUPABASE_URL').replace(/\/$/, '')
     const internalSecret = requiredEnv('INTEGRATION_INTERNAL_SECRET')
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>
+    const target = typeof body.target === 'string' ? body.target.trim().toUpperCase() : ''
+
+    if (target) {
+      if (target !== 'BALANCE') throw new Error('TRIGGER_TARGET_INVALID')
+      const balance = await Promise.allSettled([
+        invokeWorker(base, internalSecret, 'balance-collection-worker'),
+      ])
+      const balanceWorker = settledResult(balance[0])
+      return json({ ok: balanceWorker.ok, source, target, balance_worker: balanceWorker }, balanceWorker.ok ? 200 : 502)
+    }
 
     const [integration, infinitePayWebhook, balance, mercadoPagoReconcile] = await Promise.allSettled([
       invokeWorker(base, internalSecret, 'integration-worker'),

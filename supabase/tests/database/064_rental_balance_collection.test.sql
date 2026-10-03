@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(19);
+select plan(22);
 select set_config('agenda.test_now','2026-08-24 15:00:00-03',true);
 
 insert into auth.users(id,email,created_at,updated_at)
@@ -75,6 +75,23 @@ insert into public.appointments(
 );
 select is(public.enqueue_due_rental_balance_collections(),0,'INVOICE reservation does not create automatic balance collection');
 select is((select count(*)::integer from public.appointment_overdue_balances where appointment_id='96500000-0000-0000-0000-000000000010'),0,'INVOICE reservation is excluded from overdue filter');
+
+insert into public.appointments(
+ id,public_code,service_id,service_employee_id,service_name_snapshot,primary_customer_id,status,financial_status,
+ start_at,end_at,core_start_at,core_end_at,duration_minutes,contracted_minutes,pre_service_minutes,post_service_minutes,people_count,
+ commercial_value,billing_mode_snapshot,confirmation_percentage_snapshot
+) values
+(
+ '96500000-0000-0000-0000-000000000012','BAL-RECENT-FULL','96500000-0000-0000-0000-000000000005','96500000-0000-0000-0000-000000000006','Locação BlackSheep','96500000-0000-0000-0000-000000000007','CONFIRMED','UNPAID_AUTHORIZED',
+ '2026-08-26 15:30:00-03','2026-08-26 18:00:00-03','2026-08-26 15:30:00-03','2026-08-26 17:30:00-03',150,120,0,30,1,1000,'CHECKOUT',50
+),
+(
+ '96500000-0000-0000-0000-000000000013','BAL-OLD-FULL','96500000-0000-0000-0000-000000000005','96500000-0000-0000-0000-000000000006','Locação BlackSheep','96500000-0000-0000-0000-000000000007','CONFIRMED','UNPAID_AUTHORIZED',
+ '2026-08-20 10:00:00-03','2026-08-20 12:30:00-03','2026-08-20 10:00:00-03','2026-08-20 12:00:00-03',150,120,0,30,1,1000,'CHECKOUT',50
+);
+select is(public.enqueue_due_rental_balance_collections(),1,'automatic worker creates collection for a recently-started fully unpaid checkout balance');
+select is((select amount_snapshot from public.appointment_balance_collections where appointment_id='96500000-0000-0000-0000-000000000012'),1000.00::numeric,'automatic collection covers a fully unpaid checkout balance');
+select is((select count(*)::integer from public.appointment_balance_collections where appointment_id='96500000-0000-0000-0000-000000000013'),0,'older unresolved balances are not retroactively charged without operator review');
 
 insert into public.payment_transactions(id,appointment_id,transaction_type,method,provider,provider_payment_id,status,contract_amount_settled,cash_amount,payment_purpose,balance_collection_id)
 values('96500000-0000-0000-0000-000000000011','96500000-0000-0000-0000-000000000008','CHARGE','PIX','MERCADO_PAGO','late-order','PENDING',500,500,'CONTRACT',(select id from public.appointment_balance_collections where appointment_id='96500000-0000-0000-0000-000000000008' and sequence=2));
