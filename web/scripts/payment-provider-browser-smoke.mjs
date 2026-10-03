@@ -3,6 +3,7 @@ import { chromium } from '@playwright/test'
 
 const baseUrl = process.env.PAYMENT_SMOKE_BASE_URL ?? 'http://127.0.0.1:4173'
 const supabaseOrigin = 'https://example.supabase.co'
+const balanceMagicToken = 'a'.repeat(64)
 
 function json(route, status, body) {
   return route.fulfill({
@@ -81,13 +82,12 @@ function infinitePayContext(hostedCheckoutAvailable) {
 }
 
 async function openBalancePayment(page) {
-  const response = await page.goto(`${baseUrl}/pagar-saldo?collection=gate5-controlled`, {
+  const response = await page.goto(`${baseUrl}/pagar-saldo#token=${balanceMagicToken}`, {
     waitUntil: 'domcontentloaded',
     timeout: 15_000,
   })
   assert.ok(response && response.status() < 400, `preview HTTP ${response?.status() ?? 'NO_RESPONSE'}`)
-  await page.locator('input[type="email"]').fill('gate5@example.com')
-  await page.getByRole('button', { name: 'Continuar para o pagamento' }).click()
+  await page.waitForFunction(() => window.location.hash === '')
 }
 
 async function runMercadoPagoScenario(browser) {

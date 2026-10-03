@@ -153,8 +153,10 @@ jobs:
 
           anon_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="anon" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
           auth_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="authenticated" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
+          # Historical Item 2A parks the monthly endpoint; only seven booking
+          # RPCs remain for anon, plus one authenticated admin search RPC.
           test "$anon_exec" -eq 7
-          test "$auth_exec" -eq 9
+          test "$auth_exec" -eq 8
 
       - name: Prove ACL baseline composition is idempotent
         run: |
@@ -178,6 +180,12 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f supabase/migrations/20260909093000_reconcile_recovered_production_function_acls.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260915212000_admin_manual_confirm_acl_hardening.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20261003190846_balance_magic_payment_link.sql
           bash tests/acl-parity/assert-private-waitlist-item02a-overlay.sh \
             postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             /tmp/acl-idempotent.log

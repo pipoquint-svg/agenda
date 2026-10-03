@@ -2,6 +2,7 @@ import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts
 import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { isRecipientAllowed, maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
+import { buildBalancePaymentUrl } from '../_shared/balance-payment-link.ts'
 import {
   beginNotificationDelivery,
   markNotificationFailed,
@@ -67,10 +68,6 @@ Deno.serve(async (req) => {
     const { data: description, error: descriptionError } = await client.rpc('appointment_commercial_description', { p_appointment_id: appointment.id })
     if (descriptionError) throw new Error('COMMERCIAL_DESCRIPTION_FAILED')
     const commercialDescription = String(description ?? appointment.service_name_snapshot ?? 'Locação de estúdio')
-    const baseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
-    if (!/^https:\/\//i.test(baseUrl)) throw new Error('PUBLIC_BOOKING_BASE_URL_INVALID')
-    const payUrl = `${baseUrl}/reserva/saldo?collection=${encodeURIComponent(collection.id)}`
-
     const eventKey = 'RENTAL_BALANCE_DUE'
     const { data: rows, error: resolverError } = await client.rpc('resolve_notification_template_v2', {
       p_event_key: eventKey,
@@ -84,15 +81,6 @@ Deno.serve(async (req) => {
 
     const sender = notificationSenderForScope('BLACKSHEEP')
     if (!sender) throw new Error('EMAIL_SCOPE_SENDER_NOT_CONFIGURED')
-    const values: Record<string, string> = {
-      'customer.name': String(customer.name ?? 'Cliente').trim() || 'Cliente',
-      'service.description': commercialDescription,
-      'appointment.start_at': dateTime(appointment.start_at),
-      'balance.amount': money(collection.amount_snapshot),
-      'balance.expires_at': dateTime(collection.expires_at),
-      'balance.payment_url': payUrl,
-    }
-    const message = renderNotificationMessage(template, values, sender.brandName)
     const providerIdempotencyKey = `notification:${template.id}:${collection.id}:EMAIL:CUSTOMER`
     const delivery = await beginNotificationDelivery(client, {
       templateId: template.id,
@@ -111,6 +99,23 @@ Deno.serve(async (req) => {
       return jsonResponse({ skipped: true, reason: 'NOTIFICATION_ALREADY_SENT', collection_id: collection.id, provider_message_id: delivery.providerMessageId })
     }
 
+    const { data: tokenEnvelope, error: tokenError } = await client.rpc('service_issue_balance_collection_payment_token', {
+      p_collection_id: collection.id,
+    })
+    const accessToken = typeof tokenEnvelope?.access_token === 'string' ? tokenEnvelope.access_token : ''
+    if (tokenError || !/^[0-9a-f]{64}$/i.test(accessToken)) throw new Error('BALANCE_PAYMENT_TOKEN_ISSUE_FAILED')
+
+    const baseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
+    const payUrl = buildBalancePaymentUrl(baseUrl, accessToken)
+    const values: Record<string, string> = {
+      'customer.name': String(customer.name ?? 'Cliente').trim() || 'Cliente',
+      'service.description': commercialDescription,
+      'appointment.start_at': dateTime(appointment.start_at),
+      'balance.amount': money(tokenEnvelope.amount),
+      'balance.expires_at': dateTime(tokenEnvelope.expires_at),
+      'balance.payment_url': payUrl,
+    }
+    const message = renderNotificationMessage(template, values, sender.brandName)
     const payload: EmailProviderPayload = { from: sender.from, to: [recipient], subject: message.subject, text: message.text, html: message.html }
     if (sender.replyTo) payload.reply_to = sender.replyTo
 

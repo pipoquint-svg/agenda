@@ -1,10 +1,15 @@
-import { FormEvent, useState } from 'react'
-import { BalanceCollectionApiError, verifyBalanceCollection } from './balanceCollectionApi'
+import { FormEvent, useEffect, useState } from 'react'
+import { BalanceCollectionApiError, verifyBalanceCollection, verifyBalancePaymentToken } from './balanceCollectionApi'
 import { PaymentPanel } from './PaymentPanel'
 import './checkout.css'
 
 function collectionId(): string {
   return new URLSearchParams(window.location.search).get('collection')?.trim() ?? ''
+}
+
+function fragmentToken(): string {
+  const token = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token')?.trim() ?? ''
+  return /^[0-9a-f]{64}$/i.test(token) ? token : ''
 }
 
 function message(error: unknown): string {
@@ -18,10 +23,21 @@ function message(error: unknown): string {
 
 export function BalanceCollectionPage() {
   const id = collectionId()
+  const [magicToken] = useState(fragmentToken)
   const [email, setEmail] = useState('')
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!magicToken) return
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    setBusy(true)
+    verifyBalancePaymentToken(magicToken)
+      .then((result) => setAccessToken(result.access_token))
+      .catch((cause) => setError(message(cause)))
+      .finally(() => setBusy(false))
+  }, [magicToken])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -37,12 +53,16 @@ export function BalanceCollectionPage() {
     }
   }
 
-  if (!id) {
+  if (!id && !magicToken) {
     return <main className="checkout-shell"><section className="checkout-card"><h1>Link inválido</h1><p>Este link de pagamento não está completo.</p></section></main>
   }
 
   if (accessToken) {
     return <main className="checkout-shell"><section className="checkout-card"><PaymentPanel accessToken={accessToken} mode="BALANCE" /></section></main>
+  }
+
+  if (magicToken) {
+    return <main className="checkout-shell"><section className="checkout-card"><h1>Pagamento do saldo da locação</h1>{busy ? <p>Validando link seguro…</p> : <p className="form-alert error" role="alert">{error}</p>}</section></main>
   }
 
   return (

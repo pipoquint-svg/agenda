@@ -42,6 +42,22 @@ export async function verifyBalanceCollection(input: { collectionId: string; ema
   return body.data
 }
 
+export async function verifyBalancePaymentToken(accessToken: string): Promise<{
+  access_token: string
+  expires_at: string
+  amount: number | string
+}> {
+  const response = await fetch(`${functionsBaseUrl}/balance-collection-access`, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'content-type': 'application/json', apikey: publicApiKey },
+    body: JSON.stringify({ access_token: accessToken }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new BalanceCollectionApiError(body?.error?.code ?? 'BALANCE_COLLECTION_ACCESS_FAILED')
+  return body.data
+}
+
 export async function listAdminBalances(input: {
   accessToken: string
   mode: 'open' | 'overdue'
