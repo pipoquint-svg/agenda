@@ -23,6 +23,12 @@ function uuid(value: unknown): string {
   return text
 }
 
+function paymentToken(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!/^[0-9a-f]{64}$/i.test(text)) throw new Error('BALANCE_COLLECTION_INVALID_OR_EXPIRED')
+  return text
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -36,6 +42,16 @@ Deno.serve(async (req) => {
     })
 
     const body = await req.json().catch(() => ({}))
+    if (body?.access_token != null) {
+      const accessToken = paymentToken(body.access_token)
+      const { data, error } = await client.rpc('service_verify_balance_collection_payment_token', {
+        p_access_token: accessToken,
+      })
+      if (error) throw new Error(error.message)
+      return json({ data })
+    }
+
+    // Transitional compatibility for collection links delivered before magic payment links.
     const collectionId = uuid(body?.collection_id)
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase().slice(0, 320) : ''
     if (!email) throw new Error('BALANCE_COLLECTION_VERIFICATION_FAILED')
