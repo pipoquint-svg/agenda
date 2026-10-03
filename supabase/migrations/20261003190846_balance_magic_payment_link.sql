@@ -176,6 +176,14 @@ revoke all on function public.revoke_superseded_balance_collection_tokens() from
 grant execute on function public.service_issue_balance_collection_payment_token(uuid) to service_role;
 grant execute on function public.service_verify_balance_collection_payment_token(text) to service_role;
 
+-- The September 30 appointment-change trigger was created with PostgreSQL's
+-- default PUBLIC execute grant. Restore the intended trigger-only boundary
+-- while retaining the production-baseline service_role ACL.
+revoke all on function public.enqueue_confirmation_email_on_confirmed_appointment_change()
+  from public, anon, authenticated;
+grant execute on function public.enqueue_confirmation_email_on_confirmed_appointment_change()
+  to service_role;
+
 comment on function public.service_issue_balance_collection_payment_token(uuid)
 is 'Issues a 256-bit PAY-only balance token and persists only its SHA-256 hash.';
 comment on function public.service_verify_balance_collection_payment_token(text)
