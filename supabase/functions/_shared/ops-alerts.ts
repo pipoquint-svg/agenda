@@ -270,6 +270,45 @@ async function queryOpsSnapshot(client: OpsClient, now: Date): Promise<OpsSnapsh
   }
 }
 
+export async function listCurrentOpsIncidents(
+  client: OpsClient,
+  now = new Date(),
+): Promise<OpsIncident[]> {
+  return buildOpsIncidents(await queryOpsSnapshot(client, now), now)
+}
+
+export async function listDashboardOpsIncidents(
+  client: OpsClient,
+  now = new Date(),
+): Promise<OpsIncident[]> {
+  const standard = await listCurrentOpsIncidents(client, now)
+  const divergences = await listActionableScheduleDivergences(client, now.toISOString(), now)
+
+  const divergenceGroups = new Map<string, typeof divergences>()
+  for (const row of divergences) {
+    if (row.status !== 'OPEN' || validDate(row.detected_at) > now.getTime()) continue
+    const source = safeSegment(row.source, 'SCHEDULE')
+    const code = sanitizeOpsCode(row.reason)
+    const key = `${source}:${code}`
+    divergenceGroups.set(key, [...(divergenceGroups.get(key) ?? []), row])
+  }
+
+  const immediateDivergences = [...divergenceGroups.entries()].map(([key, rows]) => {
+    const [source, code] = key.split(':')
+    return incident(
+      'SCHEDULE_DIVERGENCE',
+      source,
+      code,
+      rows.length,
+      minimumIso(rows.map((row) => row.detected_at), now),
+    )
+  })
+
+  const byFingerprint = new Map(standard.map((item) => [item.fingerprint, item]))
+  for (const item of immediateDivergences) byFingerprint.set(item.fingerprint, item)
+  return [...byFingerprint.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint))
+}
+
 export async function runOpsAlertCycle(
   client: OpsClient,
   options: {
@@ -278,8 +317,7 @@ export async function runOpsAlertCycle(
   },
 ): Promise<{ incident_count: number; notified_count: number; categories: OpsIncidentCategory[] }> {
   const now = options.now ?? new Date()
-  const snapshot = await queryOpsSnapshot(client, now)
-  const incidents = buildOpsIncidents(snapshot, now)
+  const incidents = await listCurrentOpsIncidents(client, now)
   const { data: existingData, error: stateError } = await client.from('ops_alert_states').select('fingerprint,category,source,code,occurrence_count,first_detected_at,last_notified_at,notification_count,resolved_at')
   if (stateError) throw new Error('OPS_ALERT_STATE_QUERY_FAILED')
   const states = (existingData ?? []) as OpsAlertState[]
