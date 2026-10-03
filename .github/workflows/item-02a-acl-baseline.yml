@@ -153,9 +153,10 @@ jobs:
 
           anon_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="anon" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
           auth_exec="$(awk -F '\t' '$1=="ACL" && $2=="function" && $5=="authenticated" && $7=="EXECUTE" {c++} END {print c+0}' /tmp/acl-after.tsv)"
-          # Seven booking RPCs plus the public monthly availability endpoint.
-          test "$anon_exec" -eq 8
-          test "$auth_exec" -eq 9
+          # Historical Item 2A parks the monthly endpoint; only seven booking
+          # RPCs remain for anon, plus one authenticated admin search RPC.
+          test "$anon_exec" -eq 7
+          test "$auth_exec" -eq 8
 
       - name: Prove ACL baseline composition is idempotent
         run: |
