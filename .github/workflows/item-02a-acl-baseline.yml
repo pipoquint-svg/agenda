@@ -180,6 +180,12 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             -v ON_ERROR_STOP=1 \
             -f supabase/migrations/20260909093000_reconcile_recovered_production_function_acls.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260915212000_admin_manual_confirm_acl_hardening.sql
+          psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20261003190846_balance_magic_payment_link.sql
           bash tests/acl-parity/assert-private-waitlist-item02a-overlay.sh \
             postgresql://postgres:postgres@127.0.0.1:54322/postgres \
             /tmp/acl-idempotent.log
