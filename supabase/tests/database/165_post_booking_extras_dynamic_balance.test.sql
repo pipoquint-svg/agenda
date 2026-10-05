@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(33);
+select plan(36);
 select set_config('agenda.test_now','2026-10-05 16:00:00-03',true);
 
 insert into auth.users(id,email,created_at,updated_at)
@@ -99,6 +99,18 @@ select ok((select provider_refresh_pending from public.appointment_balance_colle
 select throws_ok($$select public.service_create_payment_intent_by_token(current_setting('agenda.extra_token'),'FULL','PIX','changedamountkey123')$$,
   'P0001','BALANCE_PROVIDER_REFRESH_PENDING','old provider order blocks checkout');
 select is((current_setting('agenda.extra_result_2')::jsonb->>'balance_after')::numeric,375::numeric,'same link now represents increased balance');
+-- The provider adapter cancels the old order, then expires its local intent.
+update public.payment_transactions set status='EXPIRED' where id='16500000-0000-4000-8000-000000000013';
+update public.appointment_balance_collections set provider_refresh_pending=false
+  where id=current_setting('agenda.extra_collection')::uuid;
+select set_config('agenda.new_intent',public.service_create_payment_intent_by_token(
+  current_setting('agenda.extra_token'),'FULL','PIX','freshamountkey123')::text,true);
+select is((current_setting('agenda.new_intent')::jsonb->>'contract_amount_settled')::numeric,375::numeric,
+  'same PAY link creates a new FULL intent for the current balance after provider cancellation');
+select is((current_setting('agenda.new_intent')::jsonb->>'balance_collection_id')::uuid,
+  current_setting('agenda.extra_collection')::uuid,'new provider order stays on the original collection');
+select is((select status from public.payment_transactions where id='16500000-0000-4000-8000-000000000013'),
+  'EXPIRED','old PIX intent remains expired');
 
 select set_config('agenda.zero_result',public.service_admin_add_post_booking_extra(
   '16500000-0000-4000-8000-000000000009','EXTRA_TIME',null,1,
