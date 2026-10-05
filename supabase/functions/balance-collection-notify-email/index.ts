@@ -33,6 +33,10 @@ function dateTime(value: string): string {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date(value))
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char)
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse(new Error('METHOD_NOT_ALLOWED'), 405)
   let deliveryLogId: string | null = null
@@ -46,7 +50,7 @@ Deno.serve(async (req) => {
     const client = adminClient()
     const { data: collection, error: collectionError } = await client
       .from('appointment_balance_collections')
-      .select('id,appointment_id,sequence,status,amount_snapshot,expires_at')
+      .select('id,appointment_id,sequence,source,status,amount_snapshot,expires_at')
       .eq('id', collectionId).maybeSingle()
     if (collectionError || !collection) throw new Error('BALANCE_COLLECTION_NOT_FOUND')
     if (collection.status !== 'PENDING') return jsonResponse({ skipped: true, reason: 'BALANCE_COLLECTION_NOT_PENDING' })
@@ -116,7 +120,20 @@ Deno.serve(async (req) => {
       'balance.payment_url': payUrl,
     }
     const message = renderNotificationMessage(template, values, sender.brandName)
-    const payload: EmailProviderPayload = { from: sender.from, to: [recipient], subject: message.subject, text: message.text, html: message.html }
+    const { data: extras, error: extrasError } = await client.from('appointment_post_booking_extras')
+      .select('name_snapshot,quantity,total').eq('appointment_id', appointment.id).order('created_at')
+    if (extrasError) throw new Error('BALANCE_EXTRA_COMPOSITION_FAILED')
+    const composition = (extras ?? []).map((extra) => `${extra.name_snapshot} × ${extra.quantity}: ${money(extra.total)}`)
+    const detailsText = composition.length ? `\n\nAdicionais da reserva:\n${composition.join('\n')}\nO link mostra sempre o saldo atual.` : ''
+    const detailsHtml = composition.length
+      ? `<p>Adicionais da reserva:</p><ul>${composition.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul><p>O link mostra sempre o saldo atual.</p>`
+      : ''
+    const html = detailsHtml ? message.html.replace(/<\/body>/i, `${detailsHtml}</body>`) : message.html
+    const payload: EmailProviderPayload = {
+      from: sender.from, to: [recipient],
+      subject: collection.source === 'POST_BOOKING_EXTRA' ? `Pagamento do adicional da reserva` : message.subject,
+      text: message.text + detailsText, html: detailsHtml && html === message.html ? html + detailsHtml : html,
+    }
     if (sender.replyTo) payload.reply_to = sender.replyTo
 
     let providerMessageId: string | null

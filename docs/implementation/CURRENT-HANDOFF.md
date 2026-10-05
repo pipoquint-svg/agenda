@@ -1,5 +1,17 @@
 # CURRENT HANDOFF — Agenda
 
+## Post-booking extras and dynamic balance — authorized 2026-10-05
+
+Current work is on `feat/post-booking-extras-20261005` in Agenda and BlackSheep. The user authorized implementation and conditional production publication only after green tests and CI, a logical backup or rollback path, and a preview E2E that creates no unintended real charge.
+
+- Agenda migration: `20261005150444_post_booking_extras_dynamic_balance.sql`; separate audited ledger, original undiscounted 30-minute rate, current catalog price snapshots, dynamic balance, idempotent administrative RPC, collection reuse/backfill, provider refresh gate, and current-saldo checkout context. Four affected Edge Functions handle admin action, Mercado Pago cancellation, itemized payment email, and checkout context.
+- BlackSheep adds the `Adicionar extra` management panel, balance breakdown and provider-refresh status. The previously merged magic PAY link remains the access mechanism, including legacy collection/email verification.
+- Local clean rebuild and database suite passed: 168 files, 2,057 tests. BlackSheep suite passed: 77 files, 527 tests. Edge type checks, frontend typecheck and changed-file lint passed (one existing fast-refresh warning). Final client/SSR build and remote CI remain to be verified.
+- Local `supabase db lint --level error` reports an existing unrelated `service_admin_create_reschedule_hold_unchecked` reference to missing `penalty_due_now`; the new migration and its tests pass. Keep this visible for the release gate.
+- Do not publish or charge a real reservation until remote CI, backup/rollback evidence and safe preview verification are complete. Production status: unchanged.
+
+Exact next objective: finish local build and integration review, commit and push both branches, open draft PRs, monitor required checks to terminal state, correct regressions, then evaluate the conditional release gate.
+
 ## Balance magic payment link hotfix — separately authorized on 2026-10-03
 
 The user explicitly requested replacement of the manual email confirmation step with a scoped magic payment link and authorized implementation plus publication. This is an isolated payment-access security and UX correction; it does not change financial rules.
