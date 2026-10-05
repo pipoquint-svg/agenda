@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(31);
+select plan(33);
 select set_config('agenda.test_now','2026-10-05 16:00:00-03',true);
 
 insert into auth.users(id,email,created_at,updated_at)
@@ -115,10 +115,12 @@ select set_config('agenda.catalog_assistance',public.service_admin_add_post_book
   '16500000-0000-4000-8000-000000000009','ASSISTANCE','16500000-0000-4000-8000-000000000011',1,
   '16500000-0000-4000-8000-000000000002','16500000-0000-4000-8000-000000000104')::text,true);
 select is((current_setting('agenda.catalog_assistance')::jsonb->>'unit_price')::numeric,75::numeric,'assistance snapshots current catalog price');
+select is((select unit from public.appointment_post_booking_extras where id=(current_setting('agenda.catalog_assistance')::jsonb->>'id')::uuid),'HOUR','assistance catalog price is per hour');
 select set_config('agenda.catalog_social',public.service_admin_add_post_booking_extra(
   '16500000-0000-4000-8000-000000000009','SOCIAL_COVERAGE','16500000-0000-4000-8000-000000000012',1,
   '16500000-0000-4000-8000-000000000002','16500000-0000-4000-8000-000000000105')::text,true);
 select is((current_setting('agenda.catalog_social')::jsonb->>'unit_price')::numeric,100::numeric,'social coverage snapshots current catalog price');
+select is((select unit from public.appointment_post_booking_extras where id=(current_setting('agenda.catalog_social')::jsonb->>'id')::uuid),'HOUR','social coverage catalog price is per hour');
 select is(current_setting('agenda.catalog_social')::jsonb->>'collection_id',
   current_setting('agenda.zero_result')::jsonb->>'collection_id','later catalog extras keep the same collection');
 select is((select count(*)::integer from public.integration_jobs where entity_id=(current_setting('agenda.zero_result')::jsonb->>'collection_id')::uuid and job_type='RENTAL_BALANCE_DUE_EMAIL'),1,'later extras do not queue another email');

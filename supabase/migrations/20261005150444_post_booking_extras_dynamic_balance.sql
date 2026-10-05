@@ -7,7 +7,7 @@ create table public.appointment_post_booking_extras (
   extra_id uuid references public.extras(id) on delete set null,
   name_snapshot text not null,
   quantity integer not null check (quantity > 0),
-  unit text not null check (unit in ('30_MIN_BLOCK','ITEM')),
+  unit text not null check (unit in ('30_MIN_BLOCK','HOUR','ITEM')),
   unit_price_snapshot numeric(14,6) not null check (unit_price_snapshot >= 0),
   total numeric(12,2) not null check (total >= 0),
   original_price_snapshot numeric(12,2),
@@ -18,6 +18,7 @@ create table public.appointment_post_booking_extras (
   created_at timestamptz not null default now(),
   unique (appointment_id,idempotency_key),
   check ((kind='EXTRA_TIME') = (unit='30_MIN_BLOCK')),
+  check (kind not in ('ASSISTANCE','SOCIAL_COVERAGE') or unit='HOUR'),
   check (kind<>'EXTRA_TIME' or (original_price_snapshot is not null and original_blocks_snapshot>0))
 );
 create index appointment_post_booking_extras_appointment_idx
@@ -185,7 +186,8 @@ begin
     for share of e;
     if not found then raise exception 'APPOINTMENT_EXTRA_NOT_AVAILABLE'; end if;
     v_unit:=v_e.price; v_total:=round(v_unit*p_quantity,2);
-    v_name:=v_e.name; v_unit_name:='ITEM';
+    v_name:=v_e.name;
+    v_unit_name:=case when p_kind in ('ASSISTANCE','SOCIAL_COVERAGE') then 'HOUR' else 'ITEM' end;
   end if;
   if v_total<=0 then raise exception 'APPOINTMENT_EXTRA_PRICE_INVALID'; end if;
   v_before:=coalesce((public.get_appointment_financial_summary(p_appointment_id)->>'contract_balance')::numeric,0);
