@@ -388,6 +388,43 @@ begin
     raise exception 'ITEM02C_BALANCE_MAGIC_TRIGGER_EXPOSURE:%', v_identity;
   end if;
 
+  foreach v_identity in array array[
+    'public.appointment_post_booking_total(uuid)',
+    'public.appointment_original_time_quote(uuid)',
+    'public.service_admin_post_booking_extra_options(uuid,uuid)',
+    'public.service_admin_add_post_booking_extra(uuid,text,uuid,integer,uuid,uuid)'
+  ] loop
+    v_oid := to_regprocedure(v_identity);
+    if v_oid is null then raise exception 'ITEM02C_POST_BOOKING_RPC_MISSING:%', v_identity; end if;
+    if not has_function_privilege('service_role', v_oid, 'EXECUTE')
+       or has_function_privilege('anon', v_oid, 'EXECUTE')
+       or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       or exists (
+         select 1 from pg_proc p
+         cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+         where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE'
+       ) then
+      raise exception 'ITEM02C_POST_BOOKING_RPC_ACL_DRIFT:%', v_identity;
+    end if;
+    if not exists (
+      select 1 from pg_proc p where p.oid=v_oid
+        and p.prosecdef=(v_identity in (
+          'public.service_admin_post_booking_extra_options(uuid,uuid)',
+          'public.service_admin_add_post_booking_extra(uuid,text,uuid,integer,uuid,uuid)'))
+        and pg_get_userbyid(p.proowner)='postgres'
+    ) then
+      raise exception 'ITEM02C_POST_BOOKING_RPC_IDENTITY_DRIFT:%', v_identity;
+    end if;
+  end loop;
+
+  if not exists (select 1 from pg_class where oid='public.appointment_post_booking_extras'::regclass
+    and relrowsecurity and not relforcerowsecurity)
+     or has_table_privilege('anon','public.appointment_post_booking_extras','SELECT')
+     or has_table_privilege('authenticated','public.appointment_post_booking_extras','SELECT')
+     or not has_table_privilege('service_role','public.appointment_post_booking_extras','SELECT,INSERT') then
+    raise exception 'ITEM02C_POST_BOOKING_LEDGER_ACL_DRIFT';
+  end if;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -395,11 +432,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 469 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=469 actual=%', v_public_function_count;
+  if v_public_function_count <> 473 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=473 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 403 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=403 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 407 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=407 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

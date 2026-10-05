@@ -1,5 +1,21 @@
 # CURRENT HANDOFF — Agenda
 
+## Post-booking extras and dynamic balance — authorized 2026-10-05
+
+Current work is on `feat/post-booking-extras-20261005` in Agenda ([PR #469](https://github.com/pipoquint-svg/agenda/pull/469), verified implementation HEAD `091afa7`) and BlackSheep ([PR #117](https://github.com/pipoquint-svg/black-sheep/pull/117), HEAD `6b2d9a4`). The user authorized implementation and conditional production publication only after green tests and CI, a logical backup or rollback path, and a preview E2E that creates no unintended real charge.
+
+- Agenda migration: `20261005150444_post_booking_extras_dynamic_balance.sql`; separate audited ledger, original undiscounted 30-minute rate, current catalog price snapshots, dynamic balance, idempotent administrative RPC, collection reuse/backfill, provider refresh gate, and current-saldo checkout context. Four affected Edge Functions handle admin action, Mercado Pago cancellation, itemized payment email, and checkout context.
+- BlackSheep adds the `Adicionar extra` management panel, balance breakdown and provider-refresh status. The previously merged magic PAY link remains the access mechanism, including legacy collection/email verification.
+- Local clean rebuild, explicit ACL and RLS overlays, and final database suite passed: 168 files, 2,062 tests, including 36 focused post-booking assertions. BlackSheep suite passed: 77 files, 527 tests; focused rerun 9/9. Edge type checks, frontend typecheck, full lint and client/SSR builds passed (existing warnings only).
+- Local `supabase db lint --level error` reports an existing unrelated `service_admin_create_reschedule_hold_unchecked` reference to missing `penalty_due_now`; the new migration and its tests pass. Keep this visible for the release gate.
+- The first CI run exposed strict ACL/RLS expected inventories. Their reviewed overlays now include the new table and functions, with explicit deny-to-public/service-role checks, and pass locally. BlackSheep's pre-existing `previewAuthStorage.ts` lint error was fixed and pushed. Recheck CI on the next Agenda HEAD.
+- The historical Item 2A ACL job initially failed because its September snapshot rebuild still applied the October extra migration. Its park/restore lists now include this migration, preserving the historical baseline while checking the current schema in Item 2C. All GitHub Actions jobs on Agenda PR #469 commit `091afa7` completed successfully, including Item 2A, full Database Core, ACL/RLS and audit.
+- Supabase Preview could not provision a branch because the project has reached its concurrent branch cap. Its two development branches correspond to still-open PRs #464 and #465; do not delete those branches as cleanup. The provider check was skipped on the latest HEAD, and preview E2E is outstanding.
+- BlackSheep's current PR passed security and all four integrated Gestão suites; the general QA job fails on nine pre-existing editorial palette assertions that also fail on `main`. The final Gestão smoke job is skipped because it depends on general QA.
+- Do not publish or charge a real reservation until remote CI, backup/rollback evidence and safe preview verification are complete. Production status: unchanged.
+
+Exact next objective: retain both PRs as drafts, resolve the unrelated BlackSheep editorial QA failure and preview-capacity blocker through the owning workstreams, obtain logical backup evidence, and then evaluate the conditional release gate. No production deployment or real payment was made.
+
 ## Balance magic payment link hotfix — separately authorized on 2026-10-03
 
 The user explicitly requested replacement of the manual email confirmation step with a scoped magic payment link and authorized implementation plus publication. This is an isolated payment-access security and UX correction; it does not change financial rules.

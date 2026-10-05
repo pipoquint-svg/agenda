@@ -34,6 +34,9 @@ type PaymentContext = {
   contracted_minutes: number
   hold_expires_at: string | null
   commercial_value: number | string
+  post_booking_extras_total?: number | string
+  post_booking_extras?: Array<{ name: string; quantity: number; total: number | string }>
+  provider_refresh_pending?: boolean
   contract_settled: number | string
   contract_balance: number | string
   confirmation_percentage: number | string
@@ -415,6 +418,9 @@ Deno.serve(async (req) => {
         },
         financial: {
           commercial_value: context.commercial_value,
+          post_booking_extras_total: context.post_booking_extras_total,
+          post_booking_extras: context.post_booking_extras,
+          provider_refresh_pending: context.provider_refresh_pending,
           contract_settled: context.contract_settled,
           contract_balance: context.contract_balance,
           confirmation_percentage: context.confirmation_percentage,

@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     const userAgent = typeof body.user_agent === 'string' ? body.user_agent.slice(0, 1000) : null
     const requestId = typeof body.request_id === 'string' ? body.request_id.slice(0, 200) : null
     if (!/^[0-9a-f-]{36}$/i.test(collectionId)) throw new Error('BALANCE_COLLECTION_ID_INVALID')
-    if (!['SETTLED','PARTIAL','EXPIRED'].includes(reason)) throw new Error('BALANCE_COLLECTION_CANCEL_REASON_INVALID')
+    if (!['SETTLED','PARTIAL','EXPIRED','BALANCE_CHANGED'].includes(reason)) throw new Error('BALANCE_COLLECTION_CANCEL_REASON_INVALID')
 
     const client = adminClient()
     const { data: collection, error: collectionError } = await client
@@ -81,6 +81,12 @@ Deno.serve(async (req) => {
       .eq('provider', 'MERCADO_PAGO')
       .eq('transaction_type', 'CHARGE')
     if (txError) throw new Error('BALANCE_COLLECTION_PAYMENT_LOOKUP_FAILED')
+
+    // Order creation can still be in flight after the payment intent is stored.
+    // Keep checkout blocked until its provider ID appears and can be cancelled.
+    if (reason === 'BALANCE_CHANGED' && (transactions ?? []).some((tx) => tx.status === 'PENDING' && !tx.provider_payment_id)) {
+      return jsonResponse({ cancelled: false, provider_cleanup_pending: true, reason: 'PROVIDER_ORDER_IN_FLIGHT' }, 409)
+    }
 
     const live = (transactions ?? []).filter((tx) => tx.provider_payment_id && tx.status === 'PENDING')
     const failures: Array<Record<string, unknown>> = []
@@ -109,6 +115,19 @@ Deno.serve(async (req) => {
         })
       }
       return jsonResponse({ cancelled: false, provider_cleanup_pending: true, failures: failures.length }, 409)
+    }
+
+    if (reason === 'BALANCE_CHANGED') {
+      const { error: staleError } = await client.from('payment_transactions')
+        .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
+        .eq('balance_collection_id', collectionId).eq('provider', 'MERCADO_PAGO')
+        .eq('transaction_type', 'CHARGE').eq('status', 'PENDING')
+      if (staleError) throw new Error('BALANCE_PROVIDER_CANCEL_STATE_UPDATE_FAILED')
+      const { error: refreshedError } = await client.from('appointment_balance_collections')
+        .update({ provider_refresh_pending: false, updated_at: new Date().toISOString() })
+        .eq('id', collectionId).eq('status', 'PENDING')
+      if (refreshedError) throw new Error('BALANCE_PROVIDER_REFRESH_STATE_UPDATE_FAILED')
+      return jsonResponse({ cancelled: true, provider_orders_cancelled: cancelledTransactionIds.length, state: 'BALANCE_UPDATED' })
     }
 
     if (cancelledTransactionIds.length) {
