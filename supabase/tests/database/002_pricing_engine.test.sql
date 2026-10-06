@@ -189,8 +189,8 @@ select is(
     '2026-08-22 18:30:00-03'::timestamptz,
     'TEST10'
   )->>'commercial_value')::numeric,
-  252.00::numeric,
-  'coupon is applied after extras'
+  264.00::numeric,
+  'coupon discounts rental and day/time tariff, preserving people charges and extras'
 );
 
 select is(

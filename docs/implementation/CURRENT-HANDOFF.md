@@ -1,5 +1,17 @@
 # CURRENT HANDOFF — Agenda
 
+## Coupon rental-only pricing — 2026-10-06
+
+The user requested that coupons discount only the rental hours and never extras. This is an isolated correction to the active Agenda pricing rules, separate from the tenant-foundation work below.
+
+- [PR #471](https://github.com/pipoquint-svg/agenda/pull/471), branch: `fix/coupons-rental-only-20261006`; base: `a85c4e17aaf49f9a77e141f1fbc7ee1482c979b2`. Pricing implementation commit: `4efdf5cc25660cc43cd05697488383ec1693287e`.
+- Migration: `20261006134927_coupons_rental_only.sql`. Fixed and percentage coupons share bounded arithmetic over rental plus day/time tariff, excluding catalog extras and positive additional-person charges. All three quote engines and direct coupon promotion use the rule.
+- Persisted checkout coupons remain applied once. An old active snapshot with a discount that includes extras requires explicit coupon reapplication; it is never silently increased at payment submission. New appointment audits retain the agreed coupon scope.
+- Both reschedule pricing paths retain rental-only scope for new contracts and preserve the original total-based scope of finalized legacy contracts. Original coupon validity/usage is not consulted or consumed again during rescheduling. Post-booking extras continue at their full separate price.
+- [Database Core run 37475788999](https://github.com/pipoquint-svg/agenda/actions/runs/37475788999) passed on `04f33d8cbe678c1dc71850ea90e8128784850792`: 170 files and 2,136 assertions, including 42 focused pricing/promotion assertions, 32 reschedule assertions and the existing exactly-once/post-booking coverage. The canonical migration rebuild, current ACL overlay and remaining core gates also passed. Synthetic FIXED/confirmed/expired-hold fixtures respect the existing duration, policy and timestamp constraints. Two new helpers are SECURITY INVOKER and executable only by service_role; the current ACL overlay includes their exact identities/counts.
+- The historical Item 2A workflow must park this migration before rebuilding its old baseline, then restore it before verifying current state. Its symmetric migration lists and path trigger now include the new file; historical golden inventories and assertions are unchanged. Final PR-HEAD CI is pending this workflow-fixture correction. No production change has been performed.
+- Next objective: finish canonical isolated CI on the actual PR HEAD, publish only the pricing migration, verify actual database definitions and non-mutating quotes, and record the resulting PR/commit/deployment evidence here. Do not create customer reservations, send messages or create charges for verification.
+
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
 Agenda [PR #469](https://github.com/pipoquint-svg/agenda/pull/469) merged as `d3bb4008bf4c20716d418cb982b34fbabb8627de`. BlackSheep [PR #117](https://github.com/pipoquint-svg/black-sheep/pull/117) merged as `282b574d9f4ec0788b16edc82bdd5304acf7eb1b`. Both are published. The feature consists of migration `20261005150444_post_booking_extras_dynamic_balance.sql`, four affected Edge Functions, and the Gestão/payment UI. The prior magic PAY and legacy collection/email paths remain in place.
