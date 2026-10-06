@@ -22,7 +22,7 @@ insert into public.services (
 ) values
   ('96600000-0000-0000-0000-000000000010', '96600000-0000-0000-0000-000000000003',
    'Coupon Catalog Rental', 'coupon-catalog-rental', 60, 340,
-   1, 1, 10, 25, 5000, false, 'FIXED', 30, 2, 16, 170,
+   1, 1, 10, 25, 5000, false, 'FIXED', null, null, null, null,
    (select id from public.service_type where key = 'LOCACAO'), 'BLACKSHEEP'),
   ('96600000-0000-0000-0000-000000000011', '96600000-0000-0000-0000-000000000003',
    'Coupon Block Rental', 'coupon-block-rental', 60, 340,
@@ -416,12 +416,12 @@ select is(
 insert into public.appointments (
   id, public_code, service_id, service_employee_id, primary_customer_id,
   status, financial_status, start_at, end_at, duration_minutes, people_count,
-  base_price_snapshot, variable_price_adjustment, extras_total, coupon_discount, commercial_value
+  base_price_snapshot, variable_price_adjustment, extras_total, coupon_discount, commercial_value, confirmed_at
 ) values (
   '96600000-0000-0000-0000-000000000090', 'COUPON-OLD-PAID',
   '96600000-0000-0000-0000-000000000010', '96600000-0000-0000-0000-000000000020',
   '96600000-0000-0000-0000-000000000050', 'CONFIRMED', 'PAID',
-  '2035-01-25 09:00:00-03', '2035-01-25 10:00:00-03', 60, 1, 340, 68, 75, 483, 0
+  '2035-01-25 09:00:00-03', '2035-01-25 10:00:00-03', 60, 1, 340, 68, 75, 483, 0, now()
 );
 insert into public.checkout_holds (
   id, public_token_hash, service_id, service_employee_id, selection_hash,

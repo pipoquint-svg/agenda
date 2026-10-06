@@ -107,13 +107,13 @@ values
 -- The original promoted checkout is a compatible scope source as well.
 insert into public.checkout_holds(
   id,public_token_hash,service_id,service_employee_id,selection_hash,status,
-  people_count,requested_start_at,requested_end_at,core_start_at,core_end_at,expires_at,
+  people_count,requested_start_at,requested_end_at,core_start_at,core_end_at,expires_at,created_at,
   extra_selections,commercial_value,pricing_version,duration_minutes,contracted_minutes,
   resource_ids,primary_customer_id,quote_snapshot,promoted_appointment_id
 )
 select '16700000-0000-4000-8000-000000000031','reschedule-fixed-original-hold',
   service_id,service_employee_id,'reschedule-fixed-original','PROMOTED',people_count,
-  start_at,end_at,core_start_at,core_end_at,now()-interval '1 minute',
+  start_at,end_at,core_start_at,core_end_at,now()-interval '1 minute',now()-interval '2 minutes',
   '[{"extra_id":"16700000-0000-4000-8000-000000000007","quantity":1}]'::jsonb,
   commercial_value,'reschedule-fixed-snapshot',duration_minutes,contracted_minutes,
   array['16700000-0000-4000-8000-000000000004'::uuid],primary_customer_id,

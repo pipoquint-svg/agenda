@@ -4,11 +4,11 @@
 
 The user requested that coupons discount only the rental hours and never extras. This is an isolated correction to the active Agenda pricing rules, separate from the tenant-foundation work below.
 
-- Branch: `fix/coupons-rental-only-20261006`; base: `a85c4e17aaf49f9a77e141f1fbc7ee1482c979b2`.
+- [PR #471](https://github.com/pipoquint-svg/agenda/pull/471), branch: `fix/coupons-rental-only-20261006`; base: `a85c4e17aaf49f9a77e141f1fbc7ee1482c979b2`. Pricing implementation commit: `4efdf5cc25660cc43cd05697488383ec1693287e`.
 - Migration: `20261006134927_coupons_rental_only.sql`. Fixed and percentage coupons share bounded arithmetic over rental plus day/time tariff, excluding catalog extras and positive additional-person charges. All three quote engines and direct coupon promotion use the rule.
 - Persisted checkout coupons remain applied once. An old active snapshot with a discount that includes extras requires explicit coupon reapplication; it is never silently increased at payment submission. New appointment audits retain the agreed coupon scope.
 - Both reschedule pricing paths retain rental-only scope for new contracts and preserve the original total-based scope of finalized legacy contracts. Original coupon validity/usage is not consulted or consumed again during rescheduling. Post-booking extras continue at their full separate price.
-- Verification in progress: focused pricing, promotion and reschedule pgTAP suites plus the existing exactly-once/post-booking coverage. Two new helpers are SECURITY INVOKER and executable only by service_role; the current ACL overlay includes their exact identities/counts.
+- Verification in progress: 42 focused pricing/promotion assertions and 32 reschedule assertions, plus the existing exactly-once/post-booking coverage. Synthetic FIXED/confirmed/expired-hold fixtures respect the existing duration, policy and timestamp constraints. Two new helpers are SECURITY INVOKER and executable only by service_role; the current ACL overlay includes their exact identities/counts.
 - Next objective: finish canonical isolated CI on the actual PR HEAD, publish only the pricing migration, verify actual database definitions and non-mutating quotes, and record the resulting PR/commit/deployment evidence here. Do not create customer reservations, send messages or create charges for verification.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
