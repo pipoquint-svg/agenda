@@ -22,6 +22,7 @@ on:
       - 'supabase/migrations/20260916133000_mercado_pago_webhook_audit_and_db_cron.sql'
       - 'supabase/migrations/20260921210000_invoice_prebook_checkout.sql'
       - 'supabase/migrations/20261005150444_post_booking_extras_dynamic_balance.sql'
+      - 'supabase/migrations/20261006134927_coupons_rental_only.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -123,7 +124,8 @@ jobs:
             supabase/migrations/20260915194000_immediate_integration_dispatch.sql \
             supabase/migrations/20260916133000_mercado_pago_webhook_audit_and_db_cron.sql \
             supabase/migrations/20260921210000_invoice_prebook_checkout.sql \
-            supabase/migrations/20261005150444_post_booking_extras_dynamic_balance.sql
+            supabase/migrations/20261005150444_post_booking_extras_dynamic_balance.sql \
+            supabase/migrations/20261006134927_coupons_rental_only.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -204,7 +206,8 @@ jobs:
             supabase/migrations/20260915194000_immediate_integration_dispatch.sql \
             supabase/migrations/20260916133000_mercado_pago_webhook_audit_and_db_cron.sql \
             supabase/migrations/20260921210000_invoice_prebook_checkout.sql \
-            supabase/migrations/20261005150444_post_booking_extras_dynamic_balance.sql
+            supabase/migrations/20261005150444_post_booking_extras_dynamic_balance.sql \
+            supabase/migrations/20261006134927_coupons_rental_only.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
