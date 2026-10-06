@@ -425,6 +425,34 @@ begin
     raise exception 'ITEM02C_POST_BOOKING_LEDGER_ACL_DRIFT';
   end if;
 
+  -- Rental-only coupons add two service-only SECURITY INVOKER helpers.
+  foreach v_identity in array array[
+    'public.calculate_rental_coupon_discount(text,numeric,numeric)',
+    'public.appointment_original_coupon_scope(uuid)'
+  ] loop
+    v_oid := to_regprocedure(v_identity);
+    if v_oid is null then raise exception 'ITEM02C_RENTAL_COUPON_HELPER_MISSING:%', v_identity; end if;
+    if not has_function_privilege('service_role', v_oid, 'EXECUTE')
+       or has_function_privilege('anon', v_oid, 'EXECUTE')
+       or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       or exists (
+         select 1 from pg_proc p
+         cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+         where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE'
+       ) then
+      raise exception 'ITEM02C_RENTAL_COUPON_HELPER_ACL_DRIFT:%', v_identity;
+    end if;
+    if not exists (
+      select 1 from pg_proc p where p.oid=v_oid
+        and not p.prosecdef
+        and p.provolatile=case when v_identity like '%calculate_rental_coupon_discount%'
+          then 'i'::"char" else 's'::"char" end
+        and pg_get_userbyid(p.proowner)='postgres'
+    ) then
+      raise exception 'ITEM02C_RENTAL_COUPON_HELPER_IDENTITY_DRIFT:%', v_identity;
+    end if;
+  end loop;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -432,11 +460,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 473 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=473 actual=%', v_public_function_count;
+  if v_public_function_count <> 475 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=475 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 407 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=407 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 409 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=409 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
