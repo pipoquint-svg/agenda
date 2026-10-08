@@ -2,7 +2,7 @@ name: Item 2A-bis RLS Baseline
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, workforce-v1]
   push:
     branches:
       - main

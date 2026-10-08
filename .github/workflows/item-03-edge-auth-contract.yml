@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - workforce-v1
   push:
     branches:
       - main

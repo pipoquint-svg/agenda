@@ -2,7 +2,7 @@ name: Preprod Consolidated Audit
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, workforce-v1]
     paths:
       - 'scripts/preprod-consolidated-audit.sh'
       - '.github/workflows/preprod-consolidated-audit.yml'

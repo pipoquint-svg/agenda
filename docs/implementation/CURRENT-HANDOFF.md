@@ -1,5 +1,13 @@
 # CURRENT HANDOFF — Agenda
 
+## Workforce — Jornada por Exceção V1 (integration branch `workforce-v1`)
+
+The user authorized building the module slice by slice, S0 through S8. Each slice is merged with green CI into `workforce-v1`, in both agenda and black-sheep. `main` and production stay untouched until S0–S8 are complete and a final merge plus deploy is explicitly authorized. No schedule activation and no real e-mail before that.
+
+- Specification: `docs/architecture/WORKFORCE-EXCEPTION-JOURNEY-V1.md`. Decision: `docs/architecture/ADR-017-workforce-exception-journey.md`.
+- S0 (baseline): documentation plus `workforce-v1` added to the core CI triggers. No schema changes.
+- Next objective: S1 `agenda-workforce-s1-foundation`, covering employer, employee, versioned schedule, payroll settings and holidays.
+
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
 Agenda [PR #469](https://github.com/pipoquint-svg/agenda/pull/469) merged as `d3bb4008bf4c20716d418cb982b34fbabb8627de`. BlackSheep [PR #117](https://github.com/pipoquint-svg/black-sheep/pull/117) merged as `282b574d9f4ec0788b16edc82bdd5304acf7eb1b`. Both are published. The feature consists of migration `20261005150444_post_booking_extras_dynamic_balance.sql`, four affected Edge Functions, and the Gestão/payment UI. The prior magic PAY and legacy collection/email paths remain in place.
