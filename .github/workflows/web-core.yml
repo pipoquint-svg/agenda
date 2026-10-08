@@ -2,7 +2,7 @@ name: Web Core
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, workforce-v1]
     paths:
       - 'web/**'
       - '.github/workflows/web-core.yml'

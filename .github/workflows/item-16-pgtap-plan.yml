@@ -2,7 +2,7 @@ name: Item 16 pgTAP Plan
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, workforce-v1]
   push:
     branches:
       - 'test/item16-pgtap-plan'
