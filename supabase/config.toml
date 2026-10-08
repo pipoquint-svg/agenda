@@ -287,3 +287,11 @@ verify_jwt = false
 # the normal admin/permission checks internally.
 [functions.admin-special-calendar]
 verify_jwt = true
+
+# Jornada por Exceção (ADR-017). Both functions verify the caller JWT themselves
+# (requireAdmin) and the SQL commands re-check owner/employee authorization.
+[functions.admin-workforce]
+verify_jwt = false
+
+[functions.workforce-employee]
+verify_jwt = false

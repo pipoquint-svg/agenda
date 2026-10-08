@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-12",
-    "active_total": 77,
-    "verify_jwt_false": 60,
+    "active_total": 79,
+    "verify_jwt_false": 62,
     "verify_jwt_true": 17,
-    "versioned_active": 72,
+    "versioned_active": 74,
     "production_orphans": 5,
     "versioned_inactive": 12
   },
@@ -38,7 +38,9 @@
       "admin-team-members",
       "admin-waitlist",
       "admin-waitlist-private",
-      "demand-capture-admin"
+      "admin-workforce",
+      "demand-capture-admin",
+      "workforce-employee"
     ],
     "dual_admin_internal": [
       "google-sync",
