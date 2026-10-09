@@ -10,7 +10,9 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - Before the final merge into `main`: re-timestamp the workforce migrations after `main`'s latest migration. Production `db push` does not use `--include-all`.
 - S1 merged as `4b201bc9` (PR #474).
 - S2 (exceptions): migration `20261008160000_workforce_exceptions.sql`, pgTAP `171`. Covers live start/finish on the server clock, a single OPEN period (partial unique index plus extra-period exclusion), retroactive employee records, manager events, server-side local-time parsing, immutable raw periods and a status transition table.
-- Next objective: finish S2 CI and merge, then S3 `agenda-workforce-s3-calculation`.
+- S2 merged as `8862700a` (PR #476).
+- S3 (calculation): migration `20261008170000_workforce_calculation.sql`, pgTAP `172`. Segments come from intersecting each period with the schedule (cut at local midnight; HOLIDAY > SUNDAY > SATURDAY > WEEKDAY). Tolerance applies only in `day_summary`; month summaries and idempotent recalculation are included.
+- Next objective: finish S3 CI and merge, then S4 `agenda-workforce-s4-review`.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 

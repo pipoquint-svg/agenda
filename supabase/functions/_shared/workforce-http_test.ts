@@ -5,6 +5,7 @@ import {
   workforceErrorStatus,
   workforceMonthParam,
   workforceUuidParam,
+  workforceViewArgs,
 } from './workforce-http.ts'
 
 const COMMANDS = ['SAVE_EMPLOYER', 'SAVE_EMPLOYEE'] as const
@@ -62,4 +63,16 @@ Deno.test('validates read view parameters', () => {
   assertThrows(() => workforceMonthParam(new URL('https://x/')), Error, 'WORKFORCE_FIELD_INVALID:month')
   assertEquals(workforceUuidParam(new URL(`https://x/?employee_id=${KEY.toUpperCase()}`), 'employee_id'), KEY)
   assertThrows(() => workforceUuidParam(new URL('https://x/?employee_id=1;drop'), 'employee_id'), Error, 'WORKFORCE_FIELD_INVALID:employee_id')
+})
+
+Deno.test('resolves read views and rejects unknown ones', () => {
+  const views = {
+    setup: { rpc: 'rpc_setup', args: () => ({}) },
+    summary: { rpc: 'rpc_summary', args: (url: URL) => ({ p_month: workforceMonthParam(url) }) },
+  }
+  assertEquals(workforceViewArgs(new URL('https://x/'), views, 'setup'), { rpc: 'rpc_setup', args: {} })
+  assertEquals(workforceViewArgs(new URL('https://x/?view=summary&month=2026-09'), views, 'setup'),
+    { rpc: 'rpc_summary', args: { p_month: '2026-09' } })
+  assertThrows(() => workforceViewArgs(new URL('https://x/?view=__proto__'), views, 'setup'), Error, 'WORKFORCE_VIEW_UNKNOWN')
+  assertThrows(() => workforceViewArgs(new URL('https://x/?view=summary'), views, 'setup'), Error, 'WORKFORCE_FIELD_INVALID:month')
 })

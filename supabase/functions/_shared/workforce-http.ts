@@ -97,6 +97,20 @@ export function workforceUuidParam(url: URL, name: string): string {
   return value.toLowerCase()
 }
 
+// A read view maps a `view` query value to one RPC plus its validated arguments.
+export type WorkforceView = { rpc: string; args: (url: URL) => Record<string, unknown> }
+
+export function workforceViewArgs(
+  url: URL,
+  views: Record<string, WorkforceView>,
+  defaultView: string,
+): { rpc: string; args: Record<string, unknown> } {
+  const name = url.searchParams.get('view') ?? defaultView
+  if (!Object.hasOwn(views, name)) throw new Error('WORKFORCE_VIEW_UNKNOWN')
+  const view = views[name]
+  return { rpc: view.rpc, args: view.args(url) }
+}
+
 export function workforceErrorResponse(error: unknown): Response {
   const code = workforceErrorCode(error)
   return workforceJson({ error: { code } }, workforceErrorStatus(code))
