@@ -14,7 +14,9 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - S3 (calculation): migration `20261008170000_workforce_calculation.sql`, pgTAP `172`. Segments come from intersecting each period with the schedule (cut at local midnight; HOLIDAY > SUNDAY > SATURDAY > WEEKDAY). Tolerance applies only in `day_summary`; month summaries and idempotent recalculation are included.
 - S3 merged as `6ac150bc` (PR #477).
 - S4 (review): migration `20261008180000_workforce_review.sql`, pgTAP `173`. Covers acknowledgement, employee contest, manager contest (reason required), correction request → approve/reject/withdraw (the raw record stays untouched and the effective interpretation drives the calculation), employee withdrawal, append-only classification and closure blockers.
-- Next objective: finish S4 CI and merge, then S5 `agenda-workforce-s5-compliance`.
+- S4 merged as `c29ba638` (PR #478).
+- S5 (compliance): migration `20261008190000_workforce_compliance.sql`, pgTAP `174`. Five parametrized REVIEW alert types over worked time (habitual + extra − absences), idempotent by `(employee, type, date)`; owner acknowledgement; OPEN alerts block the closure.
+- Next objective: finish S5 CI and merge, then S6 `agenda-workforce-s6-closure`.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
