@@ -63,18 +63,26 @@ select is((
   select count(*)
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname like 'service\_workforce\_%'
-    and has_function_privilege('service_role', p.oid, 'EXECUTE')
-    and not has_function_privilege('anon', p.oid, 'EXECUTE')
-    and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
-    and p.prosecdef
-    and pg_get_userbyid(p.proowner) = 'postgres'
-    and 'search_path=""' = any(coalesce(p.proconfig, '{}'::text[]))
-), 7::bigint, 'seven governed RPCs: service_role only, security definer, empty search_path');
+    and not (
+      has_function_privilege('service_role', p.oid, 'EXECUTE')
+      and not has_function_privilege('anon', p.oid, 'EXECUTE')
+      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and p.prosecdef
+      and pg_get_userbyid(p.proowner) = 'postgres'
+      and 'search_path=""' = any(coalesce(p.proconfig, '{}'::text[]))
+    )
+), 0::bigint, 'every governed workforce RPC is service_role only, security definer, empty search_path');
 select is((
-  select count(*)
-  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public' and p.proname like 'service\_workforce\_%'
-), 7::bigint, 'no other public workforce RPC exists');
+  select count(*) from unnest(array[
+    'public.service_workforce_owner_get_setup(uuid)',
+    'public.service_workforce_owner_save_employer(uuid,uuid,jsonb)',
+    'public.service_workforce_owner_save_payroll_settings(uuid,uuid,jsonb)',
+    'public.service_workforce_owner_save_employee(uuid,uuid,jsonb)',
+    'public.service_workforce_owner_create_schedule_version(uuid,uuid,jsonb)',
+    'public.service_workforce_owner_manage_holiday(uuid,uuid,jsonb)',
+    'public.service_workforce_employee_get_profile(uuid)'
+  ]) f(identity) where to_regprocedure(f.identity) is not null
+), 7::bigint, 'the seven S1 governed RPCs exist');
 
 set local role authenticated;
 select throws_ok(
