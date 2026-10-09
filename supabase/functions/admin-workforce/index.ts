@@ -4,6 +4,8 @@ import {
   workforceCorsHeaders,
   workforceErrorResponse,
   workforceJson,
+  workforceMonthParam,
+  workforceUuidParam,
 } from '../_shared/workforce-http.ts'
 
 // Owner surface of the Jornada por Exceção (ADR-017). requireAdmin only proves
@@ -15,13 +17,11 @@ const OWNER_COMMANDS = {
   SAVE_EMPLOYEE: 'service_workforce_owner_save_employee',
   CREATE_SCHEDULE_VERSION: 'service_workforce_owner_create_schedule_version',
   MANAGE_HOLIDAY: 'service_workforce_owner_manage_holiday',
+  RECORD_EXCEPTION: 'service_workforce_owner_record_exception',
 } as const
 
 type OwnerCommand = keyof typeof OWNER_COMMANDS
 
-const OWNER_VIEWS = {
-  setup: 'service_workforce_owner_get_setup',
-} as const
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: workforceCorsHeaders })
@@ -32,11 +32,17 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const view = new URL(req.url).searchParams.get('view') ?? 'setup'
-      if (!Object.hasOwn(OWNER_VIEWS, view)) throw new Error('WORKFORCE_VIEW_UNKNOWN')
-      const { data, error } = await client.rpc(OWNER_VIEWS[view as keyof typeof OWNER_VIEWS], {
-        p_actor_admin_id: admin.adminId,
-      })
+      const url = new URL(req.url)
+      const view = url.searchParams.get('view') ?? 'setup'
+      const { data, error } = view === 'setup'
+        ? await client.rpc('service_workforce_owner_get_setup', { p_actor_admin_id: admin.adminId })
+        : view === 'exceptions'
+          ? await client.rpc('service_workforce_owner_list_exceptions', {
+            p_actor_admin_id: admin.adminId,
+            p_employee_id: workforceUuidParam(url, 'employee_id'),
+            p_month: workforceMonthParam(url),
+          })
+          : (() => { throw new Error('WORKFORCE_VIEW_UNKNOWN') })()
       if (error) throw new Error(error.message)
       return workforceJson(data)
     }

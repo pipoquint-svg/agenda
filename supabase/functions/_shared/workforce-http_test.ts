@@ -1,5 +1,11 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1'
-import { parseWorkforceCommand, workforceErrorCode, workforceErrorStatus } from './workforce-http.ts'
+import {
+  parseWorkforceCommand,
+  workforceErrorCode,
+  workforceErrorStatus,
+  workforceMonthParam,
+  workforceUuidParam,
+} from './workforce-http.ts'
 
 const COMMANDS = ['SAVE_EMPLOYER', 'SAVE_EMPLOYEE'] as const
 const KEY = '5b0f6f5e-6c1f-4d3e-9d3a-1f2e3d4c5b6a'
@@ -48,4 +54,12 @@ Deno.test('maps error codes to HTTP status', () => {
   assertEquals(workforceErrorStatus('WORKFORCE_IDEMPOTENCY_KEY_REUSED'), 409)
   assertEquals(workforceErrorStatus('WORKFORCE_CNPJ_INVALID'), 400)
   assertEquals(workforceErrorStatus('WORKFORCE_REQUEST_FAILED'), 500)
+})
+
+Deno.test('validates read view parameters', () => {
+  assertEquals(workforceMonthParam(new URL('https://x/?month=2026-10')), '2026-10')
+  assertThrows(() => workforceMonthParam(new URL('https://x/?month=2026-13')), Error, 'WORKFORCE_FIELD_INVALID:month')
+  assertThrows(() => workforceMonthParam(new URL('https://x/')), Error, 'WORKFORCE_FIELD_INVALID:month')
+  assertEquals(workforceUuidParam(new URL(`https://x/?employee_id=${KEY.toUpperCase()}`), 'employee_id'), KEY)
+  assertThrows(() => workforceUuidParam(new URL('https://x/?employee_id=1;drop'), 'employee_id'), Error, 'WORKFORCE_FIELD_INVALID:employee_id')
 })

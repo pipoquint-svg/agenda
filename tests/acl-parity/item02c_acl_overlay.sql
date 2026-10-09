@@ -1,4 +1,4 @@
--- Workforce S1 adds seven service-only public.service_workforce_* RPCs (ADR-017).
+-- Workforce S1 adds seven and S2 six service-only public.service_workforce_* RPCs (ADR-017).
 -- Invoice checkout adds eight functions (seven private helpers/legacy bodies and one service-only RPC).
 \set ON_ERROR_STOP on
 
@@ -480,11 +480,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 480 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=480 actual=%', v_public_function_count;
+  if v_public_function_count <> 486 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=486 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 414 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=414 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 420 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=420 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
