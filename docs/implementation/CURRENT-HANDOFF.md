@@ -5,8 +5,10 @@
 The user authorized building the module slice by slice, S0 through S8. Each slice is merged with green CI into `workforce-v1`, in both agenda and black-sheep. `main` and production stay untouched until S0–S8 are complete and a final merge plus deploy is explicitly authorized. No schedule activation and no real e-mail before that.
 
 - Specification: `docs/architecture/WORKFORCE-EXCEPTION-JOURNEY-V1.md`. Decision: `docs/architecture/ADR-017-workforce-exception-journey.md`.
-- S0 (baseline): documentation plus `workforce-v1` added to the core CI triggers. No schema changes.
-- Next objective: S1 `agenda-workforce-s1-foundation`, covering employer, employee, versioned schedule, payroll settings and holidays.
+- S0 (baseline): merged as `26f63257` (PR #472). Documentation plus `workforce-v1` in the core CI triggers. Test 165 date time bomb fixed; the same fix for `main` is PR #473, awaiting the user's merge.
+- S1 (foundation): migration `20261008150000_workforce_foundation.sql`, Edge Functions `admin-workforce` and `workforce-employee`, pgTAP `170`. Covers employer (tenant ≠ employer), payroll settings, employee bound to an existing login, versioned schedule, territorial holidays, append-only audit and idempotent receipts.
+- Before the final merge into `main`: re-timestamp the workforce migrations after `main`'s latest migration. Production `db push` does not use `--include-all`.
+- Next objective: finish S1 CI and merge, then S2 `agenda-workforce-s2-exceptions`.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
