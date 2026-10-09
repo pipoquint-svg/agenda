@@ -8,7 +8,9 @@ import {
   workforceMonthParam,
   workforceUuidParam,
   workforceViewArgs,
+  workforcePdfResponse,
 } from '../_shared/workforce-http.ts'
+import { buildWorkforceReportPdf, type WorkforceReportPayload } from '../_shared/workforce-pdf.ts'
 
 // Owner surface of the Jornada por Exceção (ADR-017). requireAdmin only proves
 // an authenticated Gestão login; owner authorization (role OWNER + ACTIVE OWNER
@@ -51,7 +53,17 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const { rpc, args } = workforceViewArgs(new URL(req.url), OWNER_VIEWS, 'setup')
+      const url = new URL(req.url)
+      if (url.searchParams.get('view') === 'report_pdf') {
+        // Built only from the latest closed snapshot's accountant report.
+        const args = employeeMonth(url)
+        const { data, error } = await client.rpc('service_workforce_owner_get_period', { p_actor_admin_id: admin.adminId, ...args })
+        if (error) throw new Error(error.message)
+        const report = (data as { latest_report?: WorkforceReportPayload | null } | null)?.latest_report
+        if (!report) throw new Error('WORKFORCE_REPORT_NOT_FOUND')
+        return workforcePdfResponse(buildWorkforceReportPdf(report), `jornada-${args.p_month}-v${report.version ?? 1}.pdf`)
+      }
+      const { rpc, args } = workforceViewArgs(url, OWNER_VIEWS, 'setup')
       const { data, error } = await client.rpc(rpc, { p_actor_admin_id: admin.adminId, ...args })
       if (error) throw new Error(error.message)
       return workforceJson(data)
