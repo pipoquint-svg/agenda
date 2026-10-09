@@ -1,10 +1,12 @@
 import { adminClient, requireAdmin } from '../_shared/supabase.ts'
 import {
   parseWorkforceCommand,
+  type WorkforceView,
   workforceCorsHeaders,
   workforceErrorResponse,
   workforceJson,
   workforceMonthParam,
+  workforceViewArgs,
 } from '../_shared/workforce-http.ts'
 
 // Employee surface ("Minha Jornada", ADR-017). The employee is never chosen by
@@ -18,6 +20,14 @@ const EMPLOYEE_COMMANDS = {
 
 type EmployeeCommand = keyof typeof EMPLOYEE_COMMANDS
 
+const month = (url: URL) => ({ p_month: workforceMonthParam(url) })
+
+const EMPLOYEE_VIEWS: Record<string, WorkforceView> = {
+  profile: { rpc: 'service_workforce_employee_get_profile', args: () => ({}) },
+  exceptions: { rpc: 'service_workforce_employee_list_exceptions', args: month },
+  summary: { rpc: 'service_workforce_employee_get_month_summary', args: month },
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: workforceCorsHeaders })
   if (!['GET', 'POST'].includes(req.method)) return workforceJson({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -27,16 +37,8 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const url = new URL(req.url)
-      const view = url.searchParams.get('view') ?? 'profile'
-      const { data, error } = view === 'profile'
-        ? await client.rpc('service_workforce_employee_get_profile', { p_actor_admin_id: admin.adminId })
-        : view === 'exceptions'
-          ? await client.rpc('service_workforce_employee_list_exceptions', {
-            p_actor_admin_id: admin.adminId,
-            p_month: workforceMonthParam(url),
-          })
-          : (() => { throw new Error('WORKFORCE_VIEW_UNKNOWN') })()
+      const { rpc, args } = workforceViewArgs(new URL(req.url), EMPLOYEE_VIEWS, 'profile')
+      const { data, error } = await client.rpc(rpc, { p_actor_admin_id: admin.adminId, ...args })
       if (error) throw new Error(error.message)
       return workforceJson(data)
     }
