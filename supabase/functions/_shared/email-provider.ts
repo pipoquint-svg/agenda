@@ -6,6 +6,12 @@ export type EmailSender = {
   replyTo: string | null
 }
 
+export type EmailProviderAttachment = {
+  filename: string
+  /** Base64-encoded file content. */
+  content: string
+}
+
 export type EmailProviderPayload = {
   from: string
   to: string[]
@@ -13,6 +19,7 @@ export type EmailProviderPayload = {
   text?: string
   html?: string
   reply_to?: string
+  attachments?: EmailProviderAttachment[]
 }
 
 const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails'

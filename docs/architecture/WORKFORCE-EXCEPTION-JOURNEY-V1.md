@@ -252,3 +252,75 @@ Esses cálculos continuam com a contadora.
 - Delegar ações owner a ADMIN por permissão explícita (`WORKFORCE_MANAGE`). No V1, só OWNER.
 - Tolerância padrão (art. 58 §1 da CLT, 5 min por marcação e até 10 min no dia): o parâmetro existe, mas o padrão é 0 até o owner confirmar com a contadora.
 - Feriados estaduais de SC e municipais de Palhoça: a estrutura existe, mas as datas são cadastradas e confirmadas pelo owner. Só os feriados nacionais de lei federal entram como seed.
+
+## 18. Implementação (S1–S8)
+
+### Migrations (`supabase/migrations`)
+
+| Slice | Migration | Conteúdo |
+| --- | --- | --- |
+| S1 | `20261008150000_workforce_foundation.sql` | schema `workforce`, empregadora, payroll settings, funcionário, jornada versionada, feriados, auditoria, idempotência |
+| S2 | `20261008160000_workforce_exceptions.sql` | `work_exceptions`, OPEN único, timestamps do servidor, retroativo, ocorrência do owner |
+| S3 | `20261008170000_workforce_calculation.sql` | `work_exception_segments`, interseção com a jornada, tolerância, resumos |
+| S4 | `20261008180000_workforce_review.sql` | ciência, contestação, correção, classificação versionada, bloqueios |
+| S5 | `20261008190000_workforce_compliance.sql` | `compliance_alerts` parametrizados e idempotentes |
+| S6 | `20261008200000_workforce_closure.sql` | competências, snapshots imutáveis, versões, diff, espelhos |
+| S8 | `20261008220000_workforce_delivery.sql` | 2º dia útil, ciclo do worker, envios, comprovantes, retries |
+
+### Superfícies
+
+**Edge `workforce-employee`** (funcionária):
+- views: `profile`, `exceptions`, `summary`, `mirror`, `mirror_pdf`;
+- comandos: `START_EXTRA`, `FINISH_EXTRA`, `RECORD_EXCEPTION`, `REVIEW_EXCEPTION`, `ACKNOWLEDGE_MIRROR`.
+
+**Edge `admin-workforce`** (owner):
+- views: `setup`, `exceptions`, `summary`, `review_queue`, `alerts`, `period`, `deliveries`, `report_pdf`;
+- comandos: `SAVE_EMPLOYER`, `SAVE_PAYROLL_SETTINGS`, `SAVE_EMPLOYEE`, `CREATE_SCHEDULE_VERSION`, `MANAGE_HOLIDAY`, `RECORD_EXCEPTION`, `RECALCULATE_MONTH`, `REVIEW_EXCEPTION`, `MANAGE_COMPLIANCE`, `MANAGE_PERIOD`, `MANAGE_DELIVERY`.
+
+**Edge `workforce-delivery-trigger`** (`github_oidc`):
+- só aceita `.github/workflows/workforce-delivery-schedule.yml` em `refs/heads/main`, com audience `blacksheep-agenda-workforce-delivery`;
+- executa `service_workforce_system_run_cycle` e envia pelo Resend central (`_shared/email-provider.ts`).
+
+**Interface BlackSheep:**
+- `/gestao/jornada` (owner): Resumo, Registros, Divergências e correções, Alertas, Fechamento, Configuração;
+- `/gestao/minha-jornada` (funcionária, mobile first);
+- a rota `/gestao/membros` existente continua sendo a disponibilidade de agendamento dos profissionais, um conceito distinto da jornada de trabalho.
+
+**PDF:**
+- gerado no servidor por `_shared/workforce-pdf.ts`, sempre a partir do relatório do snapshot fechado;
+- os campos entram por whitelist, então nenhuma observação ou motivo pode ser renderizado.
+
+### Decisões tomadas na implementação
+
+- Ações do owner exigem role OWNER **e** membership OWNER ativa no tenant. ADMIN, OPERATION e FINANCE não herdam.
+- Um login OWNER não pode ser vinculado como funcionário (conflito de revisão).
+- Um login com membership apenas em outro tenant não pode ser vinculado. `admin_users` ainda não tem tenant (PR-06/07).
+- A tolerância só existe em `day_summary`, com padrão 0. Ela nunca se aplica a extra em dia sem jornada ou feriado.
+- Os alertas de intrajornada e de jornada fracionada avaliam apenas dias com exceção, conforme a premissa por exceção.
+- Competência reaberta é refechada pelo owner. O worker **nunca** refecha automaticamente uma competência reaberta.
+- Envio automático (`auto_send_enabled`) e comprovantes (`employee_receipts_enabled`) vêm desligados. Ligar o envio automático exige contadora e CNPJ configurados.
+- Falha de envio deixa `delivery = FAILED` e mantém `closure = CLOSED`. Há até 3 tentativas automáticas, com backoff de 15 min × tentativa, e depois uma nova tentativa manual pelo owner, com a mesma chave de idempotência do Resend.
+- Os comprovantes só saem para eventos concluídos: fim de período, registro retroativo, ocorrência do owner, correção revisada e contestação do owner. O espelho da competência fechada segue como entrega `EMPLOYEE_MIRROR`.
+
+### Ativação (somente após autorização explícita)
+
+1. Rebasear `workforce-v1` sobre `main` e renomear as migrations `20261008*_workforce_*` para timestamps posteriores à última migration de `main`. O deploy de produção não usa `--include-all`.
+2. Mergear `workforce-v1` → `main` nos dois repositórios, com CI verde.
+3. Fazer backup e rodar `production-deploy.yml` com o SHA exato:
+   - migrations;
+   - Edge Functions `admin-workforce`, `workforce-employee` e `workforce-delivery-trigger`.
+4. Conferir que o owner tem linha OWNER em `tenant_members` no tenant `blacksheep`.
+5. Configurar em Gestão → Jornada → Configuração:
+   - CNPJ real da Pierri Quint Produções;
+   - contadora;
+   - vínculo da Jheneffe com o login dela;
+   - versão da jornada (seg–sex 13:15–19:15) a partir da data de início;
+   - feriados estaduais de SC e municipais de Palhoça confirmados.
+6. Publicar o frontend BlackSheep pelo Lovable.
+7. Em PR separado, adicionar `schedule: - cron: '*/15 * * * *'` em `workforce-delivery-schedule.yml` e ligar o envio automático na configuração da empregadora.
+
+### Dívida técnica
+
+- Jornada habitual com bloco atravessando a meia-noite não é suportada no V1.
+- O Supabase Preview fica cancelado enquanto o limite de preview branches do projeto estiver ocupado. O replay canônico é o `db-core`.
+- O S9 (detecção de atividade fora do horário via Kommo/Dracma Messaging) segue fora de escopo.

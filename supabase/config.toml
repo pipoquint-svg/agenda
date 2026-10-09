@@ -295,3 +295,9 @@ verify_jwt = false
 
 [functions.workforce-employee]
 verify_jwt = false
+
+# Public HTTP boundary of the Jornada por Exceção scheduler. Supabase JWT verification
+# is disabled because the function verifies a GitHub Actions OIDC token itself and pins
+# the exact repository, main ref and workforce-delivery-schedule.yml workflow.
+[functions.workforce-delivery-trigger]
+verify_jwt = false

@@ -20,7 +20,10 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - S6 (closure): migration `20261008200000_workforce_closure.sql`, pgTAP `175`. Civil-month competências, blockers (including missing CNPJ or schedule), immutable SHA-256 snapshots with an accountant-safe report payload, versions with diff, reopen with reason, closed-period guard, employee mirror and acknowledgement. No e-mail.
 - S6 merged as `3c9c9df7` (PR #480).
 - S7 (agenda part): `_shared/workforce-pdf.ts` builds the monthly PDF only from the closed report payload (whitelisted fields); `report_pdf` (owner) and `mirror_pdf` (employee) views. The UI ships in black-sheep after this merges. Separately, black-sheep `workforce-v1` received the QA fix (#122); the same fix for black-sheep `main` is PR #121, awaiting the user's merge.
-- Next objective: finish S7 (agenda, then black-sheep UI) and merge, then S8 `agenda-workforce-s8-delivery`.
+- S7 agenda merged as `1f50df3d` (PR #481); black-sheep UI is PR pipoquint-svg/black-sheep#123.
+- S8 (delivery): migration `20261008220000_workforce_delivery.sql`, pgTAP `177`, Edge `workforce-delivery-trigger` (GitHub OIDC, main-only), dispatch-only `workforce-delivery-schedule.yml`. Covers 2nd business day at 16:00, SYSTEM auto-close of due competências, idempotent deliveries (closure + version + recipient), up to 3 retries, FAILED never reopening the closure, and employee receipts. `auto_send_enabled` and `employee_receipts_enabled` default to off.
+- **Nothing is active.** Go-live runbook: section 18 of the spec. It must be explicitly authorized; re-timestamp the workforce migrations after `main` before merging.
+- Next objective: finish S8 CI and merge; close out the integration branch status. Do not merge `workforce-v1` into `main` or deploy without authorization.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 

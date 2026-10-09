@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-12",
-    "active_total": 79,
-    "verify_jwt_false": 62,
+    "active_total": 80,
+    "verify_jwt_false": 63,
     "verify_jwt_true": 17,
-    "versioned_active": 74,
+    "versioned_active": 75,
     "production_orphans": 5,
     "versioned_inactive": 12
   },
@@ -67,7 +67,8 @@
     ],
     "github_oidc": [
       "integration-worker-trigger",
-      "ops-alert-monitor"
+      "ops-alert-monitor",
+      "workforce-delivery-trigger"
     ],
     "google_channel_token": [
       "google-webhook"
