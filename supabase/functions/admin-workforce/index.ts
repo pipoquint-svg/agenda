@@ -26,6 +26,7 @@ const OWNER_COMMANDS = {
   REVIEW_EXCEPTION: 'service_workforce_owner_review_exception',
   MANAGE_COMPLIANCE: 'service_workforce_owner_manage_compliance',
   MANAGE_PERIOD: 'service_workforce_owner_manage_period',
+  MANAGE_DELIVERY: 'service_workforce_owner_manage_delivery',
 } as const
 
 type OwnerCommand = keyof typeof OWNER_COMMANDS
@@ -42,6 +43,7 @@ const OWNER_VIEWS: Record<string, WorkforceView> = {
   review_queue: { rpc: 'service_workforce_owner_list_review_queue', args: employeeMonth },
   alerts: { rpc: 'service_workforce_owner_list_compliance_alerts', args: employeeMonth },
   period: { rpc: 'service_workforce_owner_get_period', args: employeeMonth },
+  deliveries: { rpc: 'service_workforce_owner_list_deliveries', args: employeeMonth },
 }
 
 Deno.serve(async (req) => {

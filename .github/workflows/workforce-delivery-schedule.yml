@@ -1,0 +1,72 @@
+name: Workforce Delivery Schedule
+
+# Jornada por Exceção — accountant/employee delivery worker (ADR-017, spec §13).
+#
+# ACTIVATION IS SEPARATE FROM THE MIGRATION. This workflow ships dispatch-only.
+# The Edge trigger accepts only this file on refs/heads/main (GitHub OIDC, audience
+# blacksheep-agenda-workforce-delivery), so nothing runs from workforce-v1.
+# To activate after the production release is explicitly authorized:
+#   1. deploy migration + workforce-delivery-trigger;
+#   2. configure accountant, CNPJ and enable auto-send for the employer in Gestão;
+#   3. add the schedule below (every 15 minutes covers 16:00 of the 2nd business day):
+#        schedule:
+#          - cron: '*/15 * * * *'
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: workforce-delivery-schedule
+  cancel-in-progress: false
+
+jobs:
+  run-workforce-delivery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request GitHub OIDC token and invoke the workforce delivery cycle
+        shell: bash
+        env:
+          OIDC_AUDIENCE: blacksheep-agenda-workforce-delivery
+          WORKFORCE_URL: https://sbexdggbwqvyhbkatucs.supabase.co/functions/v1/workforce-delivery-trigger
+        run: |
+          set -euo pipefail
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+
+          separator='&'
+          if [[ "$ACTIONS_ID_TOKEN_REQUEST_URL" != *'?'* ]]; then
+            separator='?'
+          fi
+
+          token_response="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}${separator}audience=${OIDC_AUDIENCE}")"
+          token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<<"$token_response")"
+          test -n "$token"
+
+          for attempt in 1 2 3; do
+            body="$(mktemp)"
+            status="$(curl --silent --show-error \
+              --output "$body" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${token}" \
+              --header 'Content-Type: application/json' \
+              --data '{}' \
+              "$WORKFORCE_URL")"
+
+            cat "$body"
+            echo
+            if [[ "$status" == '200' ]] && grep -q '"ok":true' "$body"; then
+              exit 0
+            fi
+            if [[ "$status" != 5* ]] || [[ "$attempt" == '3' ]]; then
+              echo "workforce-delivery-trigger failed with HTTP $status on attempt $attempt" >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
