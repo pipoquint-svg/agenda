@@ -17,6 +17,7 @@ const EMPLOYEE_COMMANDS = {
   FINISH_EXTRA: 'service_workforce_employee_finish_extra',
   RECORD_EXCEPTION: 'service_workforce_employee_record_exception',
   REVIEW_EXCEPTION: 'service_workforce_employee_review_exception',
+  ACKNOWLEDGE_MIRROR: 'service_workforce_employee_acknowledge_mirror',
 } as const
 
 type EmployeeCommand = keyof typeof EMPLOYEE_COMMANDS
@@ -27,6 +28,7 @@ const EMPLOYEE_VIEWS: Record<string, WorkforceView> = {
   profile: { rpc: 'service_workforce_employee_get_profile', args: () => ({}) },
   exceptions: { rpc: 'service_workforce_employee_list_exceptions', args: month },
   summary: { rpc: 'service_workforce_employee_get_month_summary', args: month },
+  mirror: { rpc: 'service_workforce_employee_get_mirror', args: month },
 }
 
 Deno.serve(async (req) => {

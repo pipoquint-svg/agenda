@@ -16,7 +16,9 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - S4 (review): migration `20261008180000_workforce_review.sql`, pgTAP `173`. Covers acknowledgement, employee contest, manager contest (reason required), correction request → approve/reject/withdraw (the raw record stays untouched and the effective interpretation drives the calculation), employee withdrawal, append-only classification and closure blockers.
 - S4 merged as `c29ba638` (PR #478).
 - S5 (compliance): migration `20261008190000_workforce_compliance.sql`, pgTAP `174`. Five parametrized REVIEW alert types over worked time (habitual + extra − absences), idempotent by `(employee, type, date)`; owner acknowledgement; OPEN alerts block the closure.
-- Next objective: finish S5 CI and merge, then S6 `agenda-workforce-s6-closure`.
+- S5 merged as `224c9aa2` (PR #479).
+- S6 (closure): migration `20261008200000_workforce_closure.sql`, pgTAP `175`. Civil-month competências, blockers (including missing CNPJ or schedule), immutable SHA-256 snapshots with an accountant-safe report payload, versions with diff, reopen with reason, closed-period guard, employee mirror and acknowledgement. No e-mail.
+- Next objective: finish S6 CI and merge, then S7 (PDF in agenda + UI in black-sheep).
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
