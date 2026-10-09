@@ -18,7 +18,9 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - S5 (compliance): migration `20261008190000_workforce_compliance.sql`, pgTAP `174`. Five parametrized REVIEW alert types over worked time (habitual + extra − absences), idempotent by `(employee, type, date)`; owner acknowledgement; OPEN alerts block the closure.
 - S5 merged as `224c9aa2` (PR #479).
 - S6 (closure): migration `20261008200000_workforce_closure.sql`, pgTAP `175`. Civil-month competências, blockers (including missing CNPJ or schedule), immutable SHA-256 snapshots with an accountant-safe report payload, versions with diff, reopen with reason, closed-period guard, employee mirror and acknowledgement. No e-mail.
-- Next objective: finish S6 CI and merge, then S7 (PDF in agenda + UI in black-sheep).
+- S6 merged as `3c9c9df7` (PR #480).
+- S7 (agenda part): `_shared/workforce-pdf.ts` builds the monthly PDF only from the closed report payload (whitelisted fields); `report_pdf` (owner) and `mirror_pdf` (employee) views. The UI ships in black-sheep after this merges. Separately, black-sheep `workforce-v1` received the QA fix (#122); the same fix for black-sheep `main` is PR #121, awaiting the user's merge.
+- Next objective: finish S7 (agenda, then black-sheep UI) and merge, then S8 `agenda-workforce-s8-delivery`.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 

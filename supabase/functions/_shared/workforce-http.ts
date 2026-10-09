@@ -111,6 +111,21 @@ export function workforceViewArgs(
   return { rpc: view.rpc, args: view.args(url) }
 }
 
+// PDF bytes built server-side from a closed snapshot; never cached by browsers or proxies.
+export function workforcePdfResponse(bytes: Uint8Array, filename: string): Response {
+  const safeName = filename.replace(/[^A-Za-z0-9._-]/g, '_')
+  const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...workforceCorsHeaders,
+      'content-type': 'application/pdf',
+      'content-disposition': `attachment; filename="${safeName}"`,
+      'cache-control': 'no-store',
+    },
+  })
+}
+
 export function workforceErrorResponse(error: unknown): Response {
   const code = workforceErrorCode(error)
   return workforceJson({ error: { code } }, workforceErrorStatus(code))

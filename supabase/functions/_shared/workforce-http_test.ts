@@ -5,6 +5,7 @@ import {
   workforceErrorStatus,
   workforceMonthParam,
   workforceUuidParam,
+  workforcePdfResponse,
   workforceViewArgs,
 } from './workforce-http.ts'
 
@@ -75,4 +76,11 @@ Deno.test('resolves read views and rejects unknown ones', () => {
     { rpc: 'rpc_summary', args: { p_month: '2026-09' } })
   assertThrows(() => workforceViewArgs(new URL('https://x/?view=__proto__'), views, 'setup'), Error, 'WORKFORCE_VIEW_UNKNOWN')
   assertThrows(() => workforceViewArgs(new URL('https://x/?view=summary'), views, 'setup'), Error, 'WORKFORCE_FIELD_INVALID:month')
+})
+
+Deno.test('PDF responses are attachments, never cached, with a sanitized filename', () => {
+  const response = workforcePdfResponse(new Uint8Array([37, 80, 68, 70]), 'jornada 2026-09"\r\n.pdf')
+  assertEquals(response.headers.get('content-type'), 'application/pdf')
+  assertEquals(response.headers.get('cache-control'), 'no-store')
+  assertEquals(response.headers.get('content-disposition'), 'attachment; filename="jornada_2026-09___.pdf"')
 })

@@ -7,7 +7,9 @@ import {
   workforceJson,
   workforceMonthParam,
   workforceViewArgs,
+  workforcePdfResponse,
 } from '../_shared/workforce-http.ts'
+import { buildWorkforceReportPdf, type WorkforceReportPayload } from '../_shared/workforce-pdf.ts'
 
 // Employee surface ("Minha Jornada", ADR-017). The employee is never chosen by
 // the browser: every RPC resolves it from the authenticated login binding, and
@@ -40,7 +42,17 @@ Deno.serve(async (req) => {
     const client = adminClient()
 
     if (req.method === 'GET') {
-      const { rpc, args } = workforceViewArgs(new URL(req.url), EMPLOYEE_VIEWS, 'profile')
+      const url = new URL(req.url)
+      if (url.searchParams.get('view') === 'mirror_pdf') {
+        // Only her own closed mirror, resolved from the login binding.
+        const args = month(url)
+        const { data, error } = await client.rpc('service_workforce_employee_get_mirror', { p_actor_admin_id: admin.adminId, ...args })
+        if (error) throw new Error(error.message)
+        const mirror = (data as { mirror?: WorkforceReportPayload | null } | null)?.mirror
+        if (!mirror) throw new Error('WORKFORCE_REPORT_NOT_FOUND')
+        return workforcePdfResponse(buildWorkforceReportPdf(mirror), `minha-jornada-${args.p_month}.pdf`)
+      }
+      const { rpc, args } = workforceViewArgs(url, EMPLOYEE_VIEWS, 'profile')
       const { data, error } = await client.rpc(rpc, { p_actor_admin_id: admin.adminId, ...args })
       if (error) throw new Error(error.message)
       return workforceJson(data)
