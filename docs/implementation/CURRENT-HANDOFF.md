@@ -12,7 +12,9 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - S2 (exceptions): migration `20261008160000_workforce_exceptions.sql`, pgTAP `171`. Covers live start/finish on the server clock, a single OPEN period (partial unique index plus extra-period exclusion), retroactive employee records, manager events, server-side local-time parsing, immutable raw periods and a status transition table.
 - S2 merged as `8862700a` (PR #476).
 - S3 (calculation): migration `20261008170000_workforce_calculation.sql`, pgTAP `172`. Segments come from intersecting each period with the schedule (cut at local midnight; HOLIDAY > SUNDAY > SATURDAY > WEEKDAY). Tolerance applies only in `day_summary`; month summaries and idempotent recalculation are included.
-- Next objective: finish S3 CI and merge, then S4 `agenda-workforce-s4-review`.
+- S3 merged as `6ac150bc` (PR #477).
+- S4 (review): migration `20261008180000_workforce_review.sql`, pgTAP `173`. Covers acknowledgement, employee contest, manager contest (reason required), correction request → approve/reject/withdraw (the raw record stays untouched and the effective interpretation drives the calculation), employee withdrawal, append-only classification and closure blockers.
+- Next objective: finish S4 CI and merge, then S5 `agenda-workforce-s5-compliance`.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 

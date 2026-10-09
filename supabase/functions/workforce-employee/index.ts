@@ -16,6 +16,7 @@ const EMPLOYEE_COMMANDS = {
   START_EXTRA: 'service_workforce_employee_start_extra',
   FINISH_EXTRA: 'service_workforce_employee_finish_extra',
   RECORD_EXCEPTION: 'service_workforce_employee_record_exception',
+  REVIEW_EXCEPTION: 'service_workforce_employee_review_exception',
 } as const
 
 type EmployeeCommand = keyof typeof EMPLOYEE_COMMANDS
