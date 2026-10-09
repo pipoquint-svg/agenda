@@ -187,11 +187,13 @@ begin
   where e.id = p_employee_id;
   select workforce.employer_timezone(e.employer_id) into v_timezone from workforce.employees e where e.id = p_employee_id;
 
-  create temporary table if not exists pg_temp.wf_days (
-    work_date date primary key,
-    worked tstzmultirange not null,
-    has_extra boolean not null
-  ) on commit drop;
+  if to_regclass('pg_temp.wf_days') is null then
+    create temporary table wf_days (
+      work_date date primary key,
+      worked tstzmultirange not null,
+      has_extra boolean not null
+    ) on commit drop;
+  end if;
   truncate pg_temp.wf_days;
   insert into pg_temp.wf_days(work_date, worked, has_extra)
   select d::date, workforce.worked_time(p_employee_id, d::date),
@@ -325,9 +327,11 @@ begin
     return 0;
   end if;
 
-  create temporary table if not exists pg_temp.wf_candidates (
-    alert_type text, reference_date date, measured_minutes integer, threshold_minutes integer, details jsonb
-  ) on commit drop;
+  if to_regclass('pg_temp.wf_candidates') is null then
+    create temporary table wf_candidates (
+      alert_type text, reference_date date, measured_minutes integer, threshold_minutes integer, details jsonb
+    ) on commit drop;
+  end if;
   truncate pg_temp.wf_candidates;
   insert into pg_temp.wf_candidates select * from workforce.compliance_candidates(p_employee_id, p_from, p_to);
 
