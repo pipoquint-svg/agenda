@@ -8,7 +8,9 @@ The user authorized building the module slice by slice, S0 through S8. Each slic
 - S0 (baseline): merged as `26f63257` (PR #472). Documentation plus `workforce-v1` in the core CI triggers. Test 165 date time bomb fixed; the same fix for `main` is PR #473, awaiting the user's merge.
 - S1 (foundation): migration `20261008150000_workforce_foundation.sql`, Edge Functions `admin-workforce` and `workforce-employee`, pgTAP `170`. Covers employer (tenant ≠ employer), payroll settings, employee bound to an existing login, versioned schedule, territorial holidays, append-only audit and idempotent receipts.
 - Before the final merge into `main`: re-timestamp the workforce migrations after `main`'s latest migration. Production `db push` does not use `--include-all`.
-- Next objective: finish S1 CI and merge, then S2 `agenda-workforce-s2-exceptions`.
+- S1 merged as `4b201bc9` (PR #474).
+- S2 (exceptions): migration `20261008160000_workforce_exceptions.sql`, pgTAP `171`. Covers live start/finish on the server clock, a single OPEN period (partial unique index plus extra-period exclusion), retroactive employee records, manager events, server-side local-time parsing, immutable raw periods and a status transition table.
+- Next objective: finish S2 CI and merge, then S3 `agenda-workforce-s3-calculation`.
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 

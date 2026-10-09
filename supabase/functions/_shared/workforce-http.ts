@@ -81,6 +81,22 @@ export function workforceErrorStatus(code: string): number {
   return 400
 }
 
+const MONTH_PATTERN = /^[0-9]{4}-(0[1-9]|1[0-2])$/
+
+// Query parameters of read views. They only narrow what the server-derived
+// actor may already see; the SQL read model re-checks ownership.
+export function workforceMonthParam(url: URL): string {
+  const month = url.searchParams.get('month') ?? ''
+  if (!MONTH_PATTERN.test(month)) throw new Error('WORKFORCE_FIELD_INVALID:month')
+  return month
+}
+
+export function workforceUuidParam(url: URL, name: string): string {
+  const value = url.searchParams.get(name) ?? ''
+  if (!UUID_PATTERN.test(value)) throw new Error(`WORKFORCE_FIELD_INVALID:${name}`)
+  return value.toLowerCase()
+}
+
 export function workforceErrorResponse(error: unknown): Response {
   const code = workforceErrorCode(error)
   return workforceJson({ error: { code } }, workforceErrorStatus(code))
