@@ -1,4 +1,10 @@
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
+import {
+  buildHomeFeed,
+  HOME_APPOINTMENT_SELECT,
+  type HomeAppointmentRow,
+  type HomeAuditRow,
+} from '../_shared/admin-home-feed.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -59,7 +65,6 @@ Deno.serve(async (req) => {
   try {
     const admin = await requireAdmin(req)
     if (!(await hasAdminPermission(admin.adminId, 'DASHBOARD_VIEW'))) throw new Error('ADMIN_PERMISSION_DENIED')
-    const canSeeFinance = await hasAdminPermission(admin.adminId, 'FINANCE_VIEW')
 
     const url = new URL(req.url)
     const scopeRaw = url.searchParams.get('operation_scope')?.trim().toUpperCase() ?? ''
@@ -69,6 +74,49 @@ Deno.serve(async (req) => {
     }
 
     const client = adminClient()
+
+    // Página inicial: só as listas exibidas, cliente/serviço embutidos (menos idas ao banco).
+    if (url.searchParams.get('view') === 'home') {
+      const [recentResult, movementsResult] = await Promise.all([
+        client
+          .from('appointments')
+          .select(HOME_APPOINTMENT_SELECT)
+          .is('deleted_at', null)
+          .eq('status', 'CONFIRMED')
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(20),
+        client
+          .from('audit_logs')
+          .select('id,entity_id,action,before_json,after_json,created_at')
+          .eq('entity_type', 'APPOINTMENT')
+          .in('action', homeMovementActions)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(30),
+      ])
+      if (recentResult.error) throw new Error('ADMIN_RECENT_APPOINTMENTS_QUERY_FAILED')
+      if (movementsResult.error) throw new Error('ADMIN_RECENT_MOVEMENTS_QUERY_FAILED')
+      const movementRows = (movementsResult.data ?? []) as HomeAuditRow[]
+      const ids = [...new Set(movementRows.map((row) => row.entity_id).filter(Boolean))] as string[]
+      let movementAppointments: HomeAppointmentRow[] = []
+      if (ids.length > 0) {
+        const { data, error: movementAppointmentsError } = await client
+          .from('appointments')
+          .select(HOME_APPOINTMENT_SELECT)
+          .in('id', ids)
+        if (movementAppointmentsError) throw new Error('ADMIN_RECENT_MOVEMENT_APPOINTMENTS_QUERY_FAILED')
+        movementAppointments = (data ?? []) as unknown as HomeAppointmentRow[]
+      }
+      return json(buildHomeFeed(
+        (recentResult.data ?? []) as unknown as HomeAppointmentRow[],
+        movementRows,
+        movementAppointments,
+        operationScope,
+      ))
+    }
+
+    const canSeeFinance = await hasAdminPermission(admin.adminId, 'FINANCE_VIEW')
     const { data, error } = await client.rpc('service_admin_get_dashboard', {
       p_start_at: requiredIso(url, 'start_at'),
       p_end_at: requiredIso(url, 'end_at'),
