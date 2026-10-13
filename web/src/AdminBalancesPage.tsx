@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { AdminBalancesPanel } from './AdminBalancesPanel'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 export function AdminBalancesPage(){
   const [ready,setReady]=useState(false)
@@ -11,8 +12,8 @@ export function AdminBalancesPage(){
   const [scope,setScope]=useState<''|'BLACKSHEEP'|'SABRINA'>('BLACKSHEEP')
 
   useEffect(()=>{
-    supabase.auth.getSession().then(({data})=>{setAccessToken(data.session?.access_token??null);setReady(true)})
-    const {data:listener}=supabase.auth.onAuthStateChange((_event,session)=>{setAccessToken(session?.access_token??null);setReady(true)})
+    getAdminSession().then(({data})=>{setAccessToken(data.session?.access_token??null);setReady(true)})
+    const {data:listener}=onAdminSessionChange((_event,session)=>{setAccessToken(session?.access_token??null);setReady(true)})
     return()=>listener.subscription.unsubscribe()
   },[])
 

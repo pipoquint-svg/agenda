@@ -1,29 +1,24 @@
 # CURRENT HANDOFF — Agenda
 
+## Late checkout hold + shared admin session — explicitly requested 2026-10-12
+
+**Published 2026-10-13.** Agenda PR #483 merged as `70fa65a74ebf49cc574861314e6a24642b808457` (main CI green on that SHA). Backup run 38402498564 produced protected artifact 11815977559 (5,667,866 bytes) before the database step. Production deploy run 38403906439 applied migration `20261012120000` and then failed only while bundling the Edge Function (ECR `toomanyrequests`); run 38404795520 deployed `booking-checkout` from the same SHA. Production readback without creating holds: `RELEASE` with an unknown token returns `NOT_FOUND`; direct anon call to `service_public_release_checkout_hold` returns 42501. BlackSheep PR #124 merged as `bde4265bd9100a8210628d7259e3497e67c7a030`, synchronized by Lovable and published (deployment `eb5924f8-38e2-4968-bc7f-71eabe524715`); the official domain serves the late-hold booking code and the Gestão chunk without "Verificando permissões…". The user confirmed both behaviors in production. Pending: Sabrina embed upload to `sabrinapierri.com.br/agenda-native/` (outside this repository's pipelines).
+
+The user requested implementation, merge and publication. Branch `feat/late-checkout-hold-admin-auth-20261012` in Agenda and in BlackSheep. Details, contract and measurements: `docs/LATE_CHECKOUT_HOLD_AND_ADMIN_SESSION_2026-10-12.md`.
+
+- Forward-only migration `20261012120000_public_checkout_hold_release.sql` (one service-role RPC) plus `booking-checkout` action `RELEASE`. Release order: Agenda migration + `booking-checkout` deploy before the BlackSheep frontend (the frontend tolerates a missing `RELEASE`: the hold simply expires).
+- The Sabrina embed bundle (`web/dist/embed`) is served from `sabrinapierri.com.br/agenda-native/`, outside this repository's pipelines; publishing it needs the site owner's upload step.
+- Known unrelated: `165_post_booking_extras_dynamic_balance` fails after 2026-10-05 (past-date fixture, open PR #473).
+
 ## Workforce — Jornada por Exceção V1 (integration branch `workforce-v1`)
 
-The user authorized building the module slice by slice, S0 through S8. Each slice is merged with green CI into `workforce-v1`, in both agenda and black-sheep. `main` and production stay untouched until S0–S8 are complete and a final merge plus deploy is explicitly authorized. No schedule activation and no real e-mail before that.
+All slices S0–S8 are merged into `workforce-v1` with green CI: agenda #472, #474, #476–#482 and black-sheep #122, #123. Nothing is active: `main` is untouched, there is no deploy, no cron and no e-mail.
 
-- Specification: `docs/architecture/WORKFORCE-EXCEPTION-JOURNEY-V1.md`. Decision: `docs/architecture/ADR-017-workforce-exception-journey.md`.
-- S0 (baseline): merged as `26f63257` (PR #472). Documentation plus `workforce-v1` in the core CI triggers. Test 165 date time bomb fixed; the same fix for `main` is PR #473, awaiting the user's merge.
-- S1 (foundation): migration `20261008150000_workforce_foundation.sql`, Edge Functions `admin-workforce` and `workforce-employee`, pgTAP `170`. Covers employer (tenant ≠ employer), payroll settings, employee bound to an existing login, versioned schedule, territorial holidays, append-only audit and idempotent receipts.
-- Before the final merge into `main`: re-timestamp the workforce migrations after `main`'s latest migration. Production `db push` does not use `--include-all`.
-- S1 merged as `4b201bc9` (PR #474).
-- S2 (exceptions): migration `20261008160000_workforce_exceptions.sql`, pgTAP `171`. Covers live start/finish on the server clock, a single OPEN period (partial unique index plus extra-period exclusion), retroactive employee records, manager events, server-side local-time parsing, immutable raw periods and a status transition table.
-- S2 merged as `8862700a` (PR #476).
-- S3 (calculation): migration `20261008170000_workforce_calculation.sql`, pgTAP `172`. Segments come from intersecting each period with the schedule (cut at local midnight; HOLIDAY > SUNDAY > SATURDAY > WEEKDAY). Tolerance applies only in `day_summary`; month summaries and idempotent recalculation are included.
-- S3 merged as `6ac150bc` (PR #477).
-- S4 (review): migration `20261008180000_workforce_review.sql`, pgTAP `173`. Covers acknowledgement, employee contest, manager contest (reason required), correction request → approve/reject/withdraw (the raw record stays untouched and the effective interpretation drives the calculation), employee withdrawal, append-only classification and closure blockers.
-- S4 merged as `c29ba638` (PR #478).
-- S5 (compliance): migration `20261008190000_workforce_compliance.sql`, pgTAP `174`. Five parametrized REVIEW alert types over worked time (habitual + extra − absences), idempotent by `(employee, type, date)`; owner acknowledgement; OPEN alerts block the closure.
-- S5 merged as `224c9aa2` (PR #479).
-- S6 (closure): migration `20261008200000_workforce_closure.sql`, pgTAP `175`. Civil-month competências, blockers (including missing CNPJ or schedule), immutable SHA-256 snapshots with an accountant-safe report payload, versions with diff, reopen with reason, closed-period guard, employee mirror and acknowledgement. No e-mail.
-- S6 merged as `3c9c9df7` (PR #480).
-- S7 (agenda part): `_shared/workforce-pdf.ts` builds the monthly PDF only from the closed report payload (whitelisted fields); `report_pdf` (owner) and `mirror_pdf` (employee) views. The UI ships in black-sheep after this merges. Separately, black-sheep `workforce-v1` received the QA fix (#122); the same fix for black-sheep `main` is PR #121, awaiting the user's merge.
-- S7 agenda merged as `1f50df3d` (PR #481); black-sheep UI is PR pipoquint-svg/black-sheep#123.
-- S8 (delivery): migration `20261008220000_workforce_delivery.sql`, pgTAP `177`, Edge `workforce-delivery-trigger` (GitHub OIDC, main-only), dispatch-only `workforce-delivery-schedule.yml`. Covers 2nd business day at 16:00, SYSTEM auto-close of due competências, idempotent deliveries (closure + version + recipient), up to 3 retries, FAILED never reopening the closure, and employee receipts. `auto_send_enabled` and `employee_receipts_enabled` default to off.
-- **Nothing is active.** Go-live runbook: section 18 of the spec. It must be explicitly authorized; re-timestamp the workforce migrations after `main` before merging.
-- Next objective: finish S8 CI and merge; close out the integration branch status. Do not merge `workforce-v1` into `main` or deploy without authorization.
+- Specification and go-live runbook: `docs/architecture/WORKFORCE-EXCEPTION-JOURNEY-V1.md` (§18). Decision record: `docs/architecture/ADR-017-workforce-exception-journey.md`.
+- Release prep (branch `agenda-workforce-release-prep`): `main` (#483/#484) merged into `workforce-v1`. The 7 workforce migrations are re-timestamped to `20261013*`, after production's `20261012120000`, because production `db push` rejects older pending versions. ACL counts are 503 / 437 (474/408 on `main` + 29 workforce RPCs).
+- Activation still needs explicit authorization: merge `workforce-v1` → `main`, then backup and `production-deploy.yml` with the exact SHA (migrations + `admin-workforce`, `workforce-employee`, `workforce-delivery-trigger`). After that comes owner configuration in Gestão, then a separate PR adding the cron to `workforce-delivery-schedule.yml`.
+- `auto_send_enabled` and `employee_receipts_enabled` default to off.
+
 
 ## Post-booking extras and dynamic balance — published 2026-10-05
 

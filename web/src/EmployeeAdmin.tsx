@@ -17,6 +17,7 @@ import {
   type EmployeeWorkRule,
 } from './employeeAdminApi'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 const weekdays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 type Draft = { id:string; name:string; email:string; phone:string; notes:string; is_active:boolean; service_ids:string[] }
@@ -64,8 +65,8 @@ export function EmployeeAdmin() {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setToken(data.session?.access_token ?? null); setReady(true) })
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setToken(session?.access_token ?? null); setReady(true) })
+    getAdminSession().then(({ data }) => { setToken(data.session?.access_token ?? null); setReady(true) })
+    const { data } = onAdminSessionChange((_event, session) => { setToken(session?.access_token ?? null); setReady(true) })
     return () => data.subscription.unsubscribe()
   }, [])
 
