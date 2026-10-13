@@ -1,4 +1,9 @@
-import { assertGitHubBirthdayClaims, assertGitHubOpsAlertClaims, assertGitHubWorkerClaims } from './github-oidc.ts'
+import {
+  assertGitHubBirthdayClaims,
+  assertGitHubOpsAlertClaims,
+  assertGitHubWorkerClaims,
+  assertGitHubWorkforceClaims,
+} from './github-oidc.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -72,4 +77,34 @@ Deno.test('GitHub OIDC claims reject another workflow, ref, or event', () => {
     }
     assert(rejected, 'unexpected OIDC claim combination must be rejected')
   }
+})
+
+Deno.test('GitHub OIDC workforce claims accept only the pinned workforce workflow on main', () => {
+  const payload = {
+    ...validBirthdayPayload(),
+    workflow_ref: 'pipoquint-svg/agenda/.github/workflows/workforce-delivery-schedule.yml@refs/heads/main',
+  }
+  assertGitHubWorkforceClaims(payload)
+  assertGitHubWorkforceClaims({ ...payload, event_name: 'workflow_dispatch' })
+  for (const [field, value] of [
+    ['workflow_ref', 'pipoquint-svg/agenda/.github/workflows/workforce-delivery-schedule.yml@refs/heads/workforce-v1'],
+    ['ref', 'refs/heads/workforce-v1'],
+    ['repository', 'someone/agenda'],
+    ['event_name', 'pull_request'],
+  ] as const) {
+    let rejected = false
+    try {
+      assertGitHubWorkforceClaims({ ...payload, [field]: value })
+    } catch {
+      rejected = true
+    }
+    if (!rejected) throw new Error(`workforce claims accepted ${field}=${value}`)
+  }
+  let crossRejected = false
+  try {
+    assertGitHubWorkforceClaims(validBirthdayPayload())
+  } catch {
+    crossRejected = true
+  }
+  if (!crossRejected) throw new Error('workforce claims accepted the birthday workflow')
 })

@@ -1,3 +1,4 @@
+-- Workforce S1 adds seven, S2 six, S3 three, S4 three, S5 two, S6 four and S8 four service-only public.service_workforce_* RPCs (ADR-017).
 -- Invoice checkout adds eight functions (seven private helpers/legacy bodies and one service-only RPC).
 \set ON_ERROR_STOP on
 
@@ -427,6 +428,53 @@ begin
     raise exception 'ITEM02C_POST_BOOKING_LEDGER_ACL_DRIFT';
   end if;
 
+  -- Workforce (ADR-017): the workforce schema is closed to every application role and
+  -- every public.service_workforce_* RPC is a service-role-only SECURITY DEFINER boundary
+  -- owned by postgres with an empty search_path.
+  if has_schema_privilege('anon', 'workforce', 'USAGE')
+     or has_schema_privilege('authenticated', 'workforce', 'USAGE')
+     or has_schema_privilege('service_role', 'workforce', 'USAGE') then
+    raise exception 'ITEM02C_WORKFORCE_SCHEMA_EXPOSED';
+  end if;
+  if exists (
+    select 1
+    from pg_default_acl d
+    join pg_namespace n on n.oid = d.defaclnamespace
+    cross join lateral aclexplode(d.defaclacl) a
+    where n.nspname = 'workforce'
+      and a.privilege_type in ('EXECUTE', 'SELECT', 'INSERT', 'UPDATE', 'DELETE')
+  ) then
+    raise exception 'ITEM02C_WORKFORCE_DEFAULT_ACL_DRIFT';
+  end if;
+  for v_identity in
+    select p.oid::regprocedure::text
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname like 'service\_workforce\_%'
+  loop
+    v_oid := to_regprocedure(v_identity);
+    if not has_function_privilege('service_role', v_oid, 'EXECUTE')
+       or has_function_privilege('anon', v_oid, 'EXECUTE')
+       or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+       or exists (
+         select 1
+         from pg_proc p
+         cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+         where p.oid = v_oid and a.grantee = 0 and a.privilege_type = 'EXECUTE'
+       ) then
+      raise exception 'ITEM02C_WORKFORCE_RPC_ACL_DRIFT:%', v_identity;
+    end if;
+    if not exists (
+      select 1 from pg_proc p
+      where p.oid = v_oid
+        and p.prosecdef
+        and pg_get_userbyid(p.proowner) = 'postgres'
+        and 'search_path=""' = any(coalesce(p.proconfig, '{}'::text[]))
+    ) then
+      raise exception 'ITEM02C_WORKFORCE_RPC_IDENTITY_DRIFT:%', v_identity;
+    end if;
+  end loop;
+
   v_identity := 'public.service_public_release_checkout_hold(text)';
   v_oid := to_regprocedure(v_identity);
   if v_oid is null then raise exception 'ITEM02C_CHECKOUT_RELEASE_RPC_MISSING:%', v_identity; end if;
@@ -453,11 +501,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 474 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=474 actual=%', v_public_function_count;
+  if v_public_function_count <> 503 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=503 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 408 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=408 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 437 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=437 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

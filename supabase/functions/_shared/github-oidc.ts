@@ -2,6 +2,7 @@ export const GITHUB_OIDC_ISSUER = 'https://token.actions.githubusercontent.com'
 export const GITHUB_WORKER_AUDIENCE = 'blacksheep-agenda-integration-worker'
 export const GITHUB_BIRTHDAY_AUDIENCE = 'blacksheep-agenda-birthday-scheduler'
 export const GITHUB_OPS_ALERT_AUDIENCE = 'blacksheep-agenda-ops-alert-monitor'
+export const GITHUB_WORKFORCE_AUDIENCE = 'blacksheep-agenda-workforce-delivery'
 
 const EXPECTED_REPOSITORY = 'pipoquint-svg/agenda'
 const EXPECTED_REPOSITORY_ID = '1341970175'
@@ -13,6 +14,8 @@ const EXPECTED_BIRTHDAY_WORKFLOW_REF =
   'pipoquint-svg/agenda/.github/workflows/birthday-automation-schedule.yml@refs/heads/main'
 const EXPECTED_OPS_ALERT_WORKFLOW_REF =
   'pipoquint-svg/agenda/.github/workflows/ops-alert-schedule.yml@refs/heads/main'
+const EXPECTED_WORKFORCE_WORKFLOW_REF =
+  'pipoquint-svg/agenda/.github/workflows/workforce-delivery-schedule.yml@refs/heads/main'
 const ALLOWED_EVENTS = new Set(['schedule', 'workflow_dispatch'])
 
 function claim(payload: Record<string, unknown>, name: string): string {
@@ -55,6 +58,13 @@ export function assertGitHubBirthdayClaims(payload: Record<string, unknown>): vo
 export function assertGitHubOpsAlertClaims(payload: Record<string, unknown>): void {
   assertBaseClaims(payload)
   if (claim(payload, 'workflow_ref') !== EXPECTED_OPS_ALERT_WORKFLOW_REF) {
+    throw new Error('GITHUB_OIDC_WORKFLOW_DENIED')
+  }
+}
+
+export function assertGitHubWorkforceClaims(payload: Record<string, unknown>): void {
+  assertBaseClaims(payload)
+  if (claim(payload, 'workflow_ref') !== EXPECTED_WORKFORCE_WORKFLOW_REF) {
     throw new Error('GITHUB_OIDC_WORKFLOW_DENIED')
   }
 }

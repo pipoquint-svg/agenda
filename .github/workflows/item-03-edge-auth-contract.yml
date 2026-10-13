@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - workforce-v1
   push:
     branches:
       - main
@@ -30,4 +31,4 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t functions < <(python3 scripts/edge-auth-contract.py list-deployable)
-          test "${#functions[@]}" -eq 72
+          test "${#functions[@]}" -eq 75

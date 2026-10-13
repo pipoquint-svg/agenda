@@ -1,7 +1,7 @@
 name: Invoice Checkout Regression
 on:
   pull_request:
-    branches: [main]
+    branches: [main, workforce-v1]
   push:
     branches: [main]
 permissions:

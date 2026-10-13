@@ -10,6 +10,16 @@ The user requested implementation, merge and publication. Branch `feat/late-chec
 - The Sabrina embed bundle (`web/dist/embed`) is served from `sabrinapierri.com.br/agenda-native/`, outside this repository's pipelines; publishing it needs the site owner's upload step.
 - Known unrelated: `165_post_booking_extras_dynamic_balance` fails after 2026-10-05 (past-date fixture, open PR #473).
 
+## Workforce — Jornada por Exceção V1 (integration branch `workforce-v1`)
+
+All slices S0–S8 are merged into `workforce-v1` with green CI: agenda #472, #474, #476–#482 and black-sheep #122, #123. Nothing is active: `main` is untouched, there is no deploy, no cron and no e-mail.
+
+- Specification and go-live runbook: `docs/architecture/WORKFORCE-EXCEPTION-JOURNEY-V1.md` (§18). Decision record: `docs/architecture/ADR-017-workforce-exception-journey.md`.
+- Release prep (branch `agenda-workforce-release-prep`): `main` (#483/#484) merged into `workforce-v1`. The 7 workforce migrations are re-timestamped to `20261013*`, after production's `20261012120000`, because production `db push` rejects older pending versions. ACL counts are 503 / 437 (474/408 on `main` + 29 workforce RPCs).
+- Activation still needs explicit authorization: merge `workforce-v1` → `main`, then backup and `production-deploy.yml` with the exact SHA (migrations + `admin-workforce`, `workforce-employee`, `workforce-delivery-trigger`). After that comes owner configuration in Gestão, then a separate PR adding the cron to `workforce-delivery-schedule.yml`.
+- `auto_send_enabled` and `employee_receipts_enabled` default to off.
+
+
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
 Agenda [PR #469](https://github.com/pipoquint-svg/agenda/pull/469) merged as `d3bb4008bf4c20716d418cb982b34fbabb8627de`. BlackSheep [PR #117](https://github.com/pipoquint-svg/black-sheep/pull/117) merged as `282b574d9f4ec0788b16edc82bdd5304acf7eb1b`. Both are published. The feature consists of migration `20261005150444_post_booking_extras_dynamic_balance.sql`, four affected Edge Functions, and the Gestão/payment UI. The prior magic PAY and legacy collection/email paths remain in place.

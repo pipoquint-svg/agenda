@@ -3,9 +3,9 @@ name: Database Core
 on:
   workflow_call:
   pull_request:
-    branches: [main]
+    branches: [main, workforce-v1]
   push:
-    branches: [main]
+    branches: [main, workforce-v1]
 
 jobs:
   core-db:
@@ -38,6 +38,9 @@ jobs:
           deno test supabase/functions/_shared/ops-alerts_test.ts
           deno test --allow-env supabase/functions/_shared/email-provider_test.ts
           deno test supabase/functions/_shared/timing-safe-equal_test.ts
+          deno test supabase/functions/_shared/workforce-http_test.ts
+          deno test supabase/functions/_shared/workforce-pdf_test.ts
+          deno test supabase/functions/_shared/workforce-delivery_test.ts
 
       - name: Type-check every Edge Function
         run: |
