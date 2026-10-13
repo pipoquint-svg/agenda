@@ -230,3 +230,5 @@
   .sby-actions.end { flex-direction: column; }
   .sby-primary, .sby-secondary { width: 100%; }
 }
+
+.sby-hold-strip.ending { background: #7a2e22; }

@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { functionsBaseUrl, publicApiKey, supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 type OperationScope = 'SABRINA' | 'BLACKSHEEP'
 type BirthdaySettings = {
@@ -68,11 +69,11 @@ export function BirthdaySettingsAdmin() {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    getAdminSession().then(({ data }) => {
       setToken(data.session?.access_token ?? null)
       setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       setToken(session?.access_token ?? null)
       setAuthReady(true)
     })

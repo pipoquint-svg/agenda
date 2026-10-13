@@ -13,6 +13,8 @@
 -- service_role; anon/authenticated cannot execute it directly.
 -- Immediate integration dispatch adds one server-only SECURITY DEFINER claim RPC,
 -- executable only by service_role.
+-- Late checkout hold adds one server-only SECURITY DEFINER release RPC,
+-- executable only by service_role.
 do $$
 declare
   v_identity text;
@@ -425,6 +427,25 @@ begin
     raise exception 'ITEM02C_POST_BOOKING_LEDGER_ACL_DRIFT';
   end if;
 
+  v_identity := 'public.service_public_release_checkout_hold(text)';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then raise exception 'ITEM02C_CHECKOUT_RELEASE_RPC_MISSING:%', v_identity; end if;
+  if not has_function_privilege('service_role', v_oid, 'EXECUTE')
+     or has_function_privilege('anon', v_oid, 'EXECUTE')
+     or has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     or exists (
+       select 1 from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+       where p.oid=v_oid and a.grantee=0 and a.privilege_type='EXECUTE'
+     ) then
+    raise exception 'ITEM02C_CHECKOUT_RELEASE_RPC_ACL_DRIFT:%', v_identity;
+  end if;
+  if not exists (
+    select 1 from pg_proc p where p.oid=v_oid and p.prosecdef and pg_get_userbyid(p.proowner)='postgres'
+  ) then
+    raise exception 'ITEM02C_CHECKOUT_RELEASE_RPC_IDENTITY_DRIFT:%', v_identity;
+  end if;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -432,11 +453,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 473 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=473 actual=%', v_public_function_count;
+  if v_public_function_count <> 474 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=474 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 407 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=407 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 408 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=408 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

@@ -156,3 +156,5 @@
   .service-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .slots-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
+.slot-option.selected { border-color: var(--booking-accent); box-shadow: inset 0 0 0 2px var(--booking-accent); }

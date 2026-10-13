@@ -1,6 +1,6 @@
 import { InvoiceVerification } from './InvoiceVerification'
 import { InvoiceBookingState } from './InvoiceBookingState'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   bindCheckoutCustomer,
   clearCheckoutPackage,
@@ -36,6 +36,16 @@ import {
   type CheckoutPrebookOption,
 } from './prebookChoiceApi'
 import { updateCheckoutSelection } from './checkoutSelectionApi'
+import {
+  clearHoldSession,
+  holdLocallyExpired,
+  HOLD_EXPIRED_DATA_MESSAGE,
+  isHoldGoneError,
+  isSlotTakenError,
+  readHoldSession,
+  SLOT_TAKEN_MESSAGE,
+  writeHoldSession,
+} from './checkoutHoldSession'
 import { PaymentPanel } from './PaymentPanel'
 import { SabrinaAvailabilityCalendar } from './SabrinaAvailabilityCalendar'
 import './sabrinaBookingJourney.css'
@@ -209,14 +219,34 @@ function FieldInput({ field, value, onChange }: {
   )
 }
 
+const SABRINA_HOLD_KEY = 'bs_sabrina_checkout_hold_v1'
+/** Aviso discreto quando restam 2 minutos do hold. */
+const HOLD_WARNING_SECONDS = 120
+
+type PersistedSabrinaHold = {
+  v: 1
+  slug: string
+  serviceId: string
+  employeeRelationId: string
+  extraQuantities: Record<string, number>
+  peopleCount: number
+  date: string
+  slot: BookingSlot
+  hold: CheckoutHold
+}
+
+/**
+ * Hold tardio: serviço, data/horário, extras e pessoas são apenas navegação. O
+ * hold de 10 minutos (expires_at do servidor) só nasce ao entrar em "Seus dados",
+ * já com a seleção completa; refresh recupera o mesmo hold sem renovar o prazo.
+ */
 export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
   const natalFlow = slug === 'natal-2026'
   const flowSteps: StepKey[] = natalFlow
     ? ['SERVICE', 'DATE', 'EXTRAS', 'PEOPLE', 'CUSTOMER', 'REVIEW', 'PAYMENT', 'CONFIRMATION']
     : STEPS
-  const holdSteps: StepKey[] = natalFlow
-    ? ['EXTRAS', 'PEOPLE', 'CUSTOMER', 'REVIEW']
-    : ['PEOPLE', 'CUSTOMER', 'REVIEW']
+  // O contador só existe depois do hold, criado na entrada de "Seus dados".
+  const holdSteps: StepKey[] = ['CUSTOMER', 'REVIEW']
   const [page, setPage] = useState<BookingPageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -236,6 +266,10 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
   const [loadingSlots, setLoadingSlots] = useState(false)
 
   const [hold, setHold] = useState<CheckoutHold | null>(null)
+  /** Single-flight: duplo clique/retry não criam dois holds. */
+  const protectingRef = useRef(false)
+  const [confirmingAvailability, setConfirmingAvailability] = useState(false)
+  const restoreAttemptedRef = useRef(false)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [context, setContext] = useState<CheckoutContext | null>(null)
   const [coupon, setCoupon] = useState<CheckoutCouponState | null>(null)
@@ -288,6 +322,48 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     return () => { active = false }
   }, [slug])
 
+  /**
+   * Refresh / restauração da aba: recupera o MESMO hold (prazo original), sem
+   * criar outro. Hold inválido no backend: restaura só a seleção e pede nova
+   * confirmação. Antes do hold nada é persistido, logo nada fica bloqueado.
+   */
+  useEffect(() => {
+    if (!page || restoreAttemptedRef.current) return
+    restoreAttemptedRef.current = true
+    const stored = readHoldSession<PersistedSabrinaHold>(SABRINA_HOLD_KEY, 1)
+    if (!stored || stored.slug !== slug || !stored.hold?.checkout_hold_token || !stored.slot?.slot_start_at) return
+    const storedService = page.services.find((item) => item.id === stored.serviceId)
+    if (!storedService || !storedService.employees.some((item) => item.service_employee_id === stored.employeeRelationId)) {
+      clearHoldSession(SABRINA_HOLD_KEY)
+      return
+    }
+    setServiceId(stored.serviceId)
+    setEmployeeRelationId(stored.employeeRelationId)
+    setExtraQuantities(stored.extraQuantities ?? {})
+    setPeopleCount(stored.peopleCount)
+    setDate(stored.date)
+    setSelectedSlot(stored.slot)
+    const fallBackToPeople = () => {
+      clearHoldSession(SABRINA_HOLD_KEY)
+      sessionStorage.removeItem('bs_checkout_hold')
+      setError(HOLD_EXPIRED_DATA_MESSAGE)
+      setStep('PEOPLE')
+    }
+    if (holdLocallyExpired(stored.hold.expires_at)) {
+      fallBackToPeople()
+      return
+    }
+    Promise.all([loadCheckoutContext(stored.hold.checkout_hold_token), loadCheckoutCoupon(stored.hold.checkout_hold_token)])
+      .then(([nextContext, nextCoupon]) => {
+        setHold(stored.hold)
+        setContext(nextContext)
+        setCoupon(nextCoupon)
+        setCouponCode(nextCoupon.coupon_code ?? '')
+        setStep('CUSTOMER')
+      })
+      .catch(fallBackToPeople)
+  }, [page, slug])
+
   useEffect(() => {
     if (!service || !employeeRelationId) {
       setQuote(null)
@@ -315,12 +391,17 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
       const seconds = Math.max(0, Math.ceil((new Date(hold.expires_at).getTime() - Date.now()) / 1000))
       setRemainingSeconds(seconds)
       if (seconds === 0) {
+        // Dados e seleção preservados; o cliente reconfirma a disponibilidade.
         sessionStorage.removeItem('bs_checkout_hold')
+        clearHoldSession(SABRINA_HOLD_KEY)
         setHold(null)
-        setContext(null)
-        setSelectedSlot(null)
-        setError('O tempo para concluir a reserva terminou. Escolha o horário novamente.')
-        setStep('DATE')
+        setCoupon(null)
+        setPackages([])
+        setPackageId('')
+        setCustomerSessionToken('')
+        setPrebookOption(null)
+        setError(HOLD_EXPIRED_DATA_MESSAGE)
+        setStep('PEOPLE')
       }
     }
     tick()
@@ -342,6 +423,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     setAcceptedTerms({})
     setResult(null)
     sessionStorage.removeItem('bs_checkout_hold')
+    clearHoldSession(SABRINA_HOLD_KEY)
   }
 
   function chooseService(nextId: string) {
@@ -365,7 +447,9 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
 
   function changeExtra(extraId: string, quantity: number) {
     setExtraQuantities((current) => ({ ...current, [extraId]: quantity }))
-    if (natalFlow && hold) {
+    // Natal escolhe extras depois do horário: a seleção é mantida e revalidada
+    // ao continuar (sem hold até "Seus dados").
+    if (natalFlow && (hold || selectedSlot)) {
       setError('')
       return
     }
@@ -429,96 +513,130 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
     }
   }
 
-  async function protectSlotAndContinue(slot: BookingSlot) {
+  /** Escolher o horário é só navegação: nenhum hold, nenhum contador. */
+  function chooseSlotAndContinue(slot: BookingSlot) {
     if (!service || !employeeRelationId || !date || hold) return
-    setBusy(true)
     setSelectedSlot(slot)
     setError('')
+    setStep(natalFlow ? 'EXTRAS' : 'PEOPLE')
+  }
+
+  /** Horário perdido: volta para a data preservando serviço, extras e pessoas. */
+  async function returnToSlotsAfterConflict(message: string) {
+    sessionStorage.removeItem('bs_checkout_hold')
+    clearHoldSession(SABRINA_HOLD_KEY)
+    setHold(null)
+    setContext(null)
+    setSelectedSlot(null)
+    setStep('DATE')
+    if (date) await chooseDate(date)
+    setError(message)
+  }
+
+  /**
+   * Natal: extras podem alterar o período ocupado. Revalida a disponibilidade do
+   * horário escolhido com os extras (leitura, sem hold) antes de seguir.
+   */
+  async function confirmNatalExtrasAndContinue() {
+    if (!service || !employeeRelationId || !date || !selectedSlot) return
+    setBusy(true)
+    setError('')
     try {
-      const nextHold = await createBookingHold({
+      const refreshed = await listBookingSlots({
         pageSlug: slug,
         serviceId: service.id,
         serviceEmployeeId: employeeRelationId,
         extras,
         peopleCount: service.minimum_people,
-        requestedStartAt: slot.slot_start_at,
+        localDate: date,
       })
-      setHold(nextHold)
-      sessionStorage.setItem('bs_checkout_hold', JSON.stringify({
-        token: nextHold.checkout_hold_token,
-        id: nextHold.checkout_hold_id,
-        pageSlug: slug,
-        serviceId: service.id,
-        serviceName: service.name,
-        expiresAt: nextHold.expires_at,
-      }))
-      setStep(natalFlow ? 'EXTRAS' : 'PEOPLE')
-    } catch (cause) {
-      setSelectedSlot(null)
-      setError(readableError(cause))
-      if (cause instanceof Error && cause.message.includes('SLOT_NO_LONGER_AVAILABLE')) {
-        await chooseDate(date)
+      if (!refreshed.some((slot) => slot.slot_start_at === selectedSlot.slot_start_at)) {
+        setSlots(refreshed)
+        setSelectedSlot(null)
+        setStep('DATE')
+        setError('Com os extras escolhidos, este horário não comporta mais o ensaio. Escolha outro horário.')
+        return
       }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function confirmNatalExtrasAndContinue() {
-    if (!hold) return
-    setBusy(true)
-    setError('')
-    try {
-      await updateCheckoutSelection({
-        token: hold.checkout_hold_token,
-        extras,
-        peopleCount,
-      })
       setStep('PEOPLE')
     } catch (cause) {
       setError(readableError(cause))
-      const message = cause instanceof Error ? cause.message : ''
-      if (message.includes('CHECKOUT_HOLD_NOT_ACTIVE') || message.includes('HOLD_EXPIRED') || message.includes('HOLD_SELECTION_REQUIRES_NEW_SLOT') || message.includes('HOLD_SELECTION_LOCKED')) {
-        sessionStorage.removeItem('bs_checkout_hold')
-        setHold(null)
-        setContext(null)
-        setSelectedSlot(null)
-        setStep('DATE')
-      }
     } finally {
       setBusy(false)
     }
   }
 
+  /**
+   * Ponto ÚNICO de criação do hold: entrada em "Seus dados". Revalida a
+   * disponibilidade no backend e cria o hold atomicamente com a seleção completa.
+   * Hold existente e válido (ex.: refresh recuperado) é reaproveitado com
+   * UPDATE_SELECTION, sem estender o prazo.
+   */
   async function confirmPeopleAndContinue() {
-    if (!hold) return
+    if (!service || !employeeRelationId || !date || !selectedSlot || protectingRef.current) return
+    protectingRef.current = true
     setBusy(true)
+    setConfirmingAvailability(true)
     setError('')
     try {
-      await updateCheckoutSelection({
-        token: hold.checkout_hold_token,
-        extras,
+      let activeHold = hold && !holdLocallyExpired(hold.expires_at) ? hold : null
+      if (activeHold) {
+        try {
+          await updateCheckoutSelection({ token: activeHold.checkout_hold_token, extras, peopleCount })
+        } catch (cause) {
+          if (!isHoldGoneError(cause)) throw cause
+          activeHold = null
+        }
+      }
+      if (!activeHold) {
+        activeHold = await createBookingHold({
+          pageSlug: slug,
+          serviceId: service.id,
+          serviceEmployeeId: employeeRelationId,
+          extras,
+          peopleCount,
+          requestedStartAt: selectedSlot.slot_start_at,
+        })
+        sessionStorage.setItem('bs_checkout_hold', JSON.stringify({
+          token: activeHold.checkout_hold_token,
+          id: activeHold.checkout_hold_id,
+          pageSlug: slug,
+          serviceId: service.id,
+          serviceName: service.name,
+          expiresAt: activeHold.expires_at,
+        }))
+      }
+      const protectedHold = activeHold
+      writeHoldSession(SABRINA_HOLD_KEY, {
+        v: 1,
+        slug,
+        serviceId: service.id,
+        employeeRelationId,
+        extraQuantities,
         peopleCount,
-      })
+        date,
+        slot: selectedSlot,
+        hold: protectedHold,
+      } satisfies PersistedSabrinaHold)
+      setHold(protectedHold)
       const [nextContext, nextCoupon] = await Promise.all([
-        loadCheckoutContext(hold.checkout_hold_token),
-        loadCheckoutCoupon(hold.checkout_hold_token),
+        loadCheckoutContext(protectedHold.checkout_hold_token),
+        loadCheckoutCoupon(protectedHold.checkout_hold_token),
       ])
       setContext(nextContext)
       setCoupon(nextCoupon)
       setCouponCode(nextCoupon.coupon_code ?? '')
       setStep('CUSTOMER')
     } catch (cause) {
-      setError(readableError(cause))
-      const message = cause instanceof Error ? cause.message : ''
-      if (message.includes('CHECKOUT_HOLD_NOT_ACTIVE') || message.includes('HOLD_EXPIRED') || message.includes('HOLD_SELECTION_REQUIRES_NEW_SLOT')) {
-        sessionStorage.removeItem('bs_checkout_hold')
-        setHold(null)
-        setContext(null)
-        setSelectedSlot(null)
-        setStep('DATE')
+      if (isSlotTakenError(cause)) {
+        await returnToSlotsAfterConflict(SLOT_TAKEN_MESSAGE)
+      } else if (isHoldGoneError(cause)) {
+        await returnToSlotsAfterConflict(readableError(cause))
+      } else {
+        setError(readableError(cause))
       }
     } finally {
+      protectingRef.current = false
+      setConfirmingAvailability(false)
       setBusy(false)
     }
   }
@@ -625,6 +743,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
         : await submitBookingCheckout({ token: hold.checkout_hold_token, customerSessionToken, termVersionIds, answers: payloadAnswers })) as FinalResult
       setResult(appointment)
       sessionStorage.removeItem('bs_checkout_hold')
+      clearHoldSession(SABRINA_HOLD_KEY)
 
       if (appointment.pre_reservation || appointment.status === 'CONFIRMED') {
         sessionStorage.removeItem('bs_appointment_manage')
@@ -683,8 +802,8 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
 
         {error ? <div className="sby-alert" role="alert">{error}</div> : null}
         {hold && holdSteps.includes(step) && remainingSeconds > 0 ? (
-          <div className="sby-hold-strip">
-            <span>Horário protegido</span>
+          <div className={`sby-hold-strip${remainingSeconds <= HOLD_WARNING_SECONDS ? ' ending' : ''}`} role="timer" aria-live="off" data-testid="hold-countdown">
+            <span>{remainingSeconds <= HOLD_WARNING_SECONDS ? 'Faltam menos de 2 minutos para concluir' : 'Horário reservado por 10 minutos'}</span>
             <strong>{String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:{String(remainingSeconds % 60).padStart(2, '0')}</strong>
           </div>
         ) : null}
@@ -715,7 +834,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
 
           {step === 'EXTRAS' && service ? (
             <>
-              <div className="sby-stage-title"><small>{natalFlow ? 'Etapa 3' : 'Etapa 2'}</small><h2>Quer incluir algum extra?</h2><p>{natalFlow ? 'Seu horário já está protegido. Escolha os extras e vamos validar tudo antes de continuar.' : 'Os extras entram no cálculo do tempo antes de mostrarmos as datas disponíveis.'}</p></div>
+              <div className="sby-stage-title"><small>{natalFlow ? 'Etapa 3' : 'Etapa 2'}</small><h2>Quer incluir algum extra?</h2><p>{natalFlow ? 'Escolha os extras. Antes de continuar, confirmamos que o horário escolhido comporta a sua seleção.' : 'Os extras entram no cálculo do tempo antes de mostrarmos as datas disponíveis.'}</p></div>
               {service.extras.length > 0 ? <div className="sby-extras">
                 {service.extras.map((extra) => {
                   const quantity = extraQuantities[extra.id] ?? 0
@@ -752,7 +871,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
               </div> : <div className="sby-empty">Este pacote não possui extras disponíveis.</div>}
               {quote ? <div className="sby-mini-summary"><span>Valor atual</span><strong>{money.format(numeric(quote.commercial_value))}</strong></div> : null}
               {natalFlow ? (
-                <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmNatalExtrasAndContinue()}>{busy ? 'Validando…' : 'Continuar'}</button></div>
+                <div className="sby-actions"><button className="sby-secondary" type="button" disabled={busy} onClick={goBack}>Voltar</button><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmNatalExtrasAndContinue()}>{busy ? 'Validando…' : 'Continuar'}</button></div>
               ) : (
                 <div className="sby-actions"><button className="sby-secondary" type="button" onClick={goBack}>Voltar</button><button className="sby-primary" type="button" onClick={() => setStep('DATE')}>Ver datas</button></div>
               )}
@@ -767,9 +886,9 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                 <div className="sby-time-head"><strong>{formatDate(date)}</strong><small>{loadingSlots ? 'Buscando horários…' : `${slots.length} horário${slots.length === 1 ? '' : 's'} ${slots.length === 1 ? 'disponível' : 'disponíveis'}`}</small></div>
                 <div className="sby-time-grid">
                   {slots.map((slot) => (
-                    <button type="button" key={slot.slot_start_at} disabled={busy} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => void protectSlotAndContinue(slot)}>
+                    <button type="button" key={slot.slot_start_at} disabled={busy} className={selectedSlot?.slot_start_at === slot.slot_start_at ? 'selected' : ''} onClick={() => chooseSlotAndContinue(slot)}>
                       <strong>{clock.format(new Date(slot.slot_start_at))}</strong>
-                      <small>{busy && selectedSlot?.slot_start_at === slot.slot_start_at ? 'protegendo…' : `até ${clock.format(new Date(slot.slot_end_at))}`}</small>
+                      <small>{`até ${clock.format(new Date(slot.slot_end_at))}`}</small>
                     </button>
                   ))}
                 </div>
@@ -778,9 +897,9 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
             </>
           ) : null}
 
-          {step === 'PEOPLE' && service && selectedSlot && hold ? (
+          {step === 'PEOPLE' && service && selectedSlot ? (
             <>
-              <div className="sby-stage-title"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>Seu horário já está protegido. A quantidade de pessoas não altera a duração do ensaio.</p></div>
+              <div className="sby-stage-title"><small>Etapa 4</small><h2>Quantas pessoas participarão?</h2><p>A quantidade de pessoas não altera a duração do ensaio. Ao continuar, confirmamos a disponibilidade e reservamos o horário por 10 minutos para você preencher seus dados.</p></div>
               <div className="sby-selected-time"><span>{formatDate(date)}</span><strong>{timeRange(selectedSlot)}</strong></div>
               {peopleOptions.length > 0 ? (
                 <div className="sby-people-grid">
@@ -800,7 +919,7 @@ export function SabrinaBookingJourney({ slug = 'sabrina' }: { slug?: string }) {
                   ))}
                 </div>
               )}
-              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmPeopleAndContinue()}>{busy ? 'Salvando…' : 'Continuar'}</button></div>
+              <div className="sby-actions end"><button className="sby-primary" type="button" disabled={busy} onClick={() => void confirmPeopleAndContinue()}>{confirmingAvailability ? 'Confirmando disponibilidade…' : busy ? 'Salvando…' : 'Continuar'}</button></div>
             </>
           ) : null}
 

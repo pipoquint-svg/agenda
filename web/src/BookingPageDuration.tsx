@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BookingQuote, BookingSlot, CheckoutHold, ExtraSelection } from './bookingApi'
 import {
   contractedMinutes,
@@ -14,6 +14,8 @@ import {
   type DurationBookingService,
 } from './bookingDurationApi'
 import { WaitlistSignupForm } from './WaitlistSignupForm'
+import { releaseCheckoutHold } from './checkoutSelectionApi'
+import { isSlotTakenError, SLOT_TAKEN_MESSAGE } from './checkoutHoldSession'
 import './booking.css'
 import './durationRecommendations.css'
 
@@ -99,6 +101,10 @@ export function BookingPageDuration({ slug }: { slug: string }) {
   const [searchingSlots, setSearchingSlots] = useState(false)
   const [slotsSearchCompleted, setSlotsSearchCompleted] = useState(false)
   const [creatingHold, setCreatingHold] = useState<string | null>(null)
+  /** Horário escolhido na navegação - ainda NÃO protegido por hold. */
+  const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null)
+  /** Single-flight: duplo clique/retry não criam dois holds. */
+  const protectingRef = useRef(false)
   const [hold, setHold] = useState<(CheckoutHold & { contracted_minutes?: number }) | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [holdExpired, setHoldExpired] = useState(false)
@@ -166,10 +172,28 @@ export function BookingPageDuration({ slug }: { slug: string }) {
     return () => window.clearInterval(timer)
   }, [hold])
 
+  /** Hold anterior substituído pelo próprio cliente: libera no backend (idempotente). */
+  function releaseStoredHold(exceptToken?: string) {
+    let token: string | null = null
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('bs_checkout_hold') ?? 'null') as { token?: string; pageSlug?: string } | null
+      token = stored?.pageSlug === slug ? stored.token ?? null : null
+    } catch {
+      token = null
+    }
+    if (!token || token === exceptToken) return
+    sessionStorage.removeItem('bs_checkout_hold')
+    window.dispatchEvent(new CustomEvent('bs:checkout-hold-released', { detail: { token } }))
+    void releaseCheckoutHold(token).catch(() => undefined)
+  }
+
   function resetAvailability() {
     setLocalDate('')
     setSlots([])
     setSlotsSearchCompleted(false)
+    setSelectedSlot(null)
+    // Alterar a seleção protegida libera o hold anterior: sem bloqueios órfãos.
+    if (hold) releaseStoredHold()
     setHold(null)
     setHoldExpired(false)
   }
@@ -226,8 +250,22 @@ export function BookingPageDuration({ slug }: { slug: string }) {
     }
   }
 
-  async function protectSlot(slot: BookingSlot) {
-    if (!service || !employeeRelationId || selectedContractedMinutes <= 0) return
+  /** Escolher o horário é só navegação: nenhum hold, nenhum contador. */
+  function chooseSlot(slot: BookingSlot) {
+    if (hold || creatingHold) return
+    setSelectedSlot(slot)
+    setError(null)
+    setHoldExpired(false)
+  }
+
+  /**
+   * Ponto ÚNICO de criação do hold: avançar para o preenchimento dos dados.
+   * O backend revalida a disponibilidade e devolve o `expires_at` autoritativo.
+   */
+  async function protectSelectedSlot() {
+    const slot = selectedSlot
+    if (!service || !employeeRelationId || selectedContractedMinutes <= 0 || !slot || hold || protectingRef.current) return
+    protectingRef.current = true
     setCreatingHold(slot.slot_start_at)
     setError(null)
     try {
@@ -240,6 +278,8 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         peopleCount,
         requestedStartAt: slot.slot_start_at,
       })
+      // Substituição válida: só agora o hold anterior (ex.: de antes do refresh) é liberado.
+      releaseStoredHold(nextHold.checkout_hold_token)
       setHold(nextHold)
       setHoldExpired(false)
       sessionStorage.setItem('bs_checkout_hold', JSON.stringify({
@@ -252,9 +292,11 @@ export function BookingPageDuration({ slug }: { slug: string }) {
         expiresAt: nextHold.expires_at,
       }))
     } catch (cause) {
-      setError(readableError(cause))
+      setSelectedSlot(null)
+      setError(isSlotTakenError(cause) ? SLOT_TAKEN_MESSAGE : readableError(cause))
       await searchSlots()
     } finally {
+      protectingRef.current = false
       setCreatingHold(null)
     }
   }
@@ -416,11 +458,10 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                       {slots.map((slot) => {
                         const hasEarlierArrival = slot.slot_start_at !== slot.core_start_at
                         return (
-                          <button type="button" className="slot-option" key={slot.slot_start_at} disabled={creatingHold !== null || hold !== null} onClick={() => protectSlot(slot)}>
+                          <button type="button" className={`slot-option${selectedSlot?.slot_start_at === slot.slot_start_at ? ' selected' : ''}`} aria-pressed={selectedSlot?.slot_start_at === slot.slot_start_at} key={slot.slot_start_at} disabled={creatingHold !== null || hold !== null} onClick={() => chooseSlot(slot)}>
                             <strong>{hasEarlierArrival ? `Chegada ${time.format(new Date(slot.slot_start_at))}` : timeRange(slot.core_start_at, slot.core_end_at)}</strong>
                             {hasEarlierArrival ? <small>Atendimento contratado {timeRange(slot.core_start_at, slot.core_end_at)}</small> : <small>Período contratado</small>}
                             <span>{money.format(numeric(slot.commercial_value))}</span>
-                            {creatingHold === slot.slot_start_at ? <em>Reservando horário…</em> : null}
                           </button>
                         )
                       })}
@@ -442,11 +483,20 @@ export function BookingPageDuration({ slug }: { slug: string }) {
                   </aside>
                 ) : null}
 
+                {selectedSlot && !hold ? (
+                  <section className="booking-step" aria-live="polite">
+                    <div className="step-title"><span>•</span><div><h2>Continuar para seus dados</h2><p>O horário só fica reservado para você quando avançar. Confirmamos a disponibilidade e reservamos por 10 minutos.</p></div></div>
+                    <button type="button" className="primary" disabled={creatingHold !== null} onClick={() => void protectSelectedSlot()}>
+                      {creatingHold !== null ? 'Confirmando disponibilidade…' : 'Continuar para seus dados'}
+                    </button>
+                  </section>
+                ) : null}
+
                 {hold ? (
                   <section className="hold-confirmation" aria-live="polite">
                     <div className="hold-dot" />
                     <div>
-                      <small>Seu horário está reservado</small>
+                      <small>{remainingSeconds > 0 && remainingSeconds <= 120 ? 'Faltam menos de 2 minutos para concluir' : 'Horário reservado por 10 minutos'}</small>
                       <h2>{hold.slot_start_at !== hold.core_start_at ? `Chegada ${time.format(new Date(hold.slot_start_at))}` : timeRange(hold.core_start_at, hold.core_end_at)}</h2>
                       {hold.slot_start_at !== hold.core_start_at ? <p>Atendimento contratado {timeRange(hold.core_start_at, hold.core_end_at)}.</p> : null}
                       <p>Conclua sua reserva antes do tempo indicado para manter este horário.</p>

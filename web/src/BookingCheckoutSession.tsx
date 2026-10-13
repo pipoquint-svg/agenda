@@ -70,6 +70,8 @@ export function BookingCheckoutSession() {
       const currentManage = readManage()
 
       if (!stored && currentHold) setStored(currentHold)
+      // Hold substituído (nova seleção) ou liberado: o formulário segue o hold atual.
+      if (stored && currentHold && currentHold.token !== stored.token) setStored(currentHold)
       if (stored && !currentHold && !currentManage && new Date(stored.expiresAt).getTime() <= Date.now()) setStored(null)
 
       if (currentManage?.accessToken !== manage?.accessToken || currentManage?.status !== manage?.status) {
@@ -78,6 +80,16 @@ export function BookingCheckoutSession() {
     }, 400)
     return () => window.clearInterval(timer)
   }, [stored, manage])
+
+  // Hold liberado pelo próprio cliente ao trocar a seleção: some o formulário antigo.
+  useEffect(() => {
+    const onReleased = (event: Event) => {
+      const token = (event as CustomEvent<{ token?: string }>).detail?.token
+      setStored((current) => (current && current.token === token ? null : current))
+    }
+    window.addEventListener('bs:checkout-hold-released', onReleased)
+    return () => window.removeEventListener('bs:checkout-hold-released', onReleased)
+  }, [])
 
   function markConfirmed() {
     if (!manage) return

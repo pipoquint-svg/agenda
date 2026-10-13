@@ -2,7 +2,10 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 select plan(36);
-select set_config('agenda.test_now','2026-10-05 16:00:00-03',true);
+-- The fixture lives in the future (2037-10-05, also a Monday): collections use the
+-- agenda.test_now clock, but token resolution checks the real now(). A past fixture
+-- date turns into APPOINTMENT_TOKEN_EXPIRED as soon as the calendar passes it.
+select set_config('agenda.test_now','2037-10-05 16:00:00-03',true);
 
 insert into auth.users(id,email,created_at,updated_at)
 values('16500000-0000-4000-8000-000000000001','extras-admin@example.test',now(),now());
@@ -43,21 +46,21 @@ insert into public.appointments(id,public_code,service_id,service_employee_id,se
 values
 ('16500000-0000-4000-8000-000000000008','EXTRA-4H','16500000-0000-4000-8000-000000000005',
  '16500000-0000-4000-8000-000000000006','Locação Extras','16500000-0000-4000-8000-000000000007',
- 'CONFIRMED','PARTIALLY_PAID','2026-10-05 10:00:00-03','2026-10-05 14:00:00-03',
- '2026-10-05 10:00:00-03','2026-10-05 14:00:00-03',240,240,1,600,150,450,'CHECKOUT',50,now()),
+ 'CONFIRMED','PARTIALLY_PAID','2037-10-05 10:00:00-03','2037-10-05 14:00:00-03',
+ '2037-10-05 10:00:00-03','2037-10-05 14:00:00-03',240,240,1,600,150,450,'CHECKOUT',50,now()),
 ('16500000-0000-4000-8000-000000000009','EXTRA-1H','16500000-0000-4000-8000-000000000005',
  '16500000-0000-4000-8000-000000000006','Locação Extras','16500000-0000-4000-8000-000000000007',
- 'CONFIRMED','PAID','2026-10-05 11:00:00-03','2026-10-05 12:00:00-03',
- '2026-10-05 11:00:00-03','2026-10-05 12:00:00-03',60,60,1,190,0,190,'CHECKOUT',50,now());
+ 'CONFIRMED','PAID','2037-10-05 11:00:00-03','2037-10-05 12:00:00-03',
+ '2037-10-05 11:00:00-03','2037-10-05 12:00:00-03',60,60,1,190,0,190,'CHECKOUT',50,now());
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,status,
   contract_amount_settled,cash_amount,payment_purpose)
 values('16500000-0000-4000-8000-000000000008','CHARGE','CARD','MERCADO_PAGO','APPROVED',300,300,'CONTRACT'),
  ('16500000-0000-4000-8000-000000000009','CHARGE','CARD','MERCADO_PAGO','APPROVED',190,190,'CONTRACT');
 insert into public.resource_allocations(resource_id,appointment_id,allocation_type,status,occupied_range)
 values('16500000-0000-4000-8000-000000000014','16500000-0000-4000-8000-000000000008',
-  'APPOINTMENT','CONFIRMED',tstzrange('2026-10-05 10:00:00-03','2026-10-05 14:00:00-03','[)')),
+  'APPOINTMENT','CONFIRMED',tstzrange('2037-10-05 10:00:00-03','2037-10-05 14:00:00-03','[)')),
  ('16500000-0000-4000-8000-000000000014',null,
-  'MANUAL_BLOCK','BLOCKED',tstzrange('2026-10-05 14:00:00-03','2026-10-05 16:00:00-03','[)'));
+  'MANUAL_BLOCK','BLOCKED',tstzrange('2037-10-05 14:00:00-03','2037-10-05 16:00:00-03','[)'));
 
 select is((public.appointment_original_time_quote('16500000-0000-4000-8000-000000000008')->>'unit_price')::numeric,75::numeric,'four-hour block uses original undiscounted 600 / 8');
 select is((public.appointment_original_time_quote('16500000-0000-4000-8000-000000000009')->>'unit_price')::numeric,95::numeric,'one-hour block is more expensive');

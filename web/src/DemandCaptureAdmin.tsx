@@ -9,6 +9,7 @@ import {
   type DemandSummary,
 } from './api'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 type AdminData = {
   records: DemandRecord[]
@@ -60,11 +61,11 @@ export function DemandCaptureAdmin() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: sessionData }) => {
+    getAdminSession().then(({ data: sessionData }) => {
       setAccessToken(sessionData.session?.access_token ?? null)
       setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       setAccessToken(session?.access_token ?? null)
       setAuthReady(true)
     })
