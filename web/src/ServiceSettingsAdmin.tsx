@@ -19,6 +19,7 @@ import {
   type ServiceSettings,
 } from './serviceSettingsApi'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 function number(value: number | string | null | undefined): number {
   const next = Number(value ?? 0)
@@ -114,11 +115,11 @@ export function ServiceSettingsAdmin() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    getAdminSession().then(({ data }) => {
       setAccessToken(data.session?.access_token ?? null)
       setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       setAccessToken(session?.access_token ?? null)
       setAuthReady(true)
     })

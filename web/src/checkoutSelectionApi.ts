@@ -24,3 +24,21 @@ export async function updateCheckoutSelection(input: {
   const payload = await response.json().catch(() => ({})) as { error?: { code?: string } }
   if (!response.ok) throw new Error(payload.error?.code ?? `HTTP_${response.status}`)
 }
+
+/**
+ * Libera, de forma idempotente, um hold substituído pelo próprio cliente
+ * (booking-checkout RELEASE). Tokens expirados/desconhecidos são no-op.
+ */
+export async function releaseCheckoutHold(token: string): Promise<void> {
+  const response = await fetch(`${functionsBaseUrl}/booking-checkout`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      apikey: publicApiKey,
+      authorization: `Bearer ${publicApiKey}`,
+    },
+    body: JSON.stringify({ action: 'RELEASE', checkout_hold_token: token }),
+  })
+  const payload = await response.json().catch(() => ({})) as { error?: { code?: string } }
+  if (!response.ok) throw new Error(payload.error?.code ?? `HTTP_${response.status}`)
+}

@@ -13,6 +13,7 @@ import {
 import { AppointmentAuditPanel } from './AppointmentAuditPanel'
 import { AppointmentChangePreview } from './AppointmentChangePreview'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 type Tab = 'AGENDA' | 'AMELIA'
 
@@ -184,11 +185,11 @@ export function AgendaAdmin() {
   const [ameliaRecords, setAmeliaRecords] = useState<AmeliaHistoryRecord[]>([])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    getAdminSession().then(({ data }) => {
       setAccessToken(data.session?.access_token ?? null)
       setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       setAccessToken(session?.access_token ?? null)
       setAuthReady(true)
     })

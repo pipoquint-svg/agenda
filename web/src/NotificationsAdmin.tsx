@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { functionsBaseUrl, publicApiKey, supabase } from './supabase'
+import { getAdminSession } from './adminSession'
 
 type Template = {
   id: string; event_key: string; channel: string; audience: string; operation_scope: string | null;
@@ -46,7 +47,7 @@ export function NotificationsAdmin() {
     setData(next)
   }, [])
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: auth }) => {
+    getAdminSession().then(({ data: auth }) => {
       const accessToken = auth.session?.access_token ?? null
       setToken(accessToken)
       if (accessToken) void load(accessToken).catch((e) => setError(e instanceof Error ? e.message : 'LOAD_FAILED'))

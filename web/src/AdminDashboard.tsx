@@ -7,6 +7,7 @@ import {
   type DashboardScope,
 } from './adminDashboardApi'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 import './adminDashboard.css'
 
 const emptyDashboard: AdminDashboardResponse = {
@@ -135,11 +136,11 @@ export function AdminDashboard() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    getAdminSession().then(({ data }) => {
       setAccessToken(data.session?.access_token ?? null)
       setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       setAccessToken(session?.access_token ?? null)
       setAuthReady(true)
     })

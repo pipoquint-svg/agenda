@@ -259,13 +259,13 @@ Esses cálculos continuam com a contadora.
 
 | Slice | Migration | Conteúdo |
 | --- | --- | --- |
-| S1 | `20261008150000_workforce_foundation.sql` | schema `workforce`, empregadora, payroll settings, funcionário, jornada versionada, feriados, auditoria, idempotência |
-| S2 | `20261008160000_workforce_exceptions.sql` | `work_exceptions`, OPEN único, timestamps do servidor, retroativo, ocorrência do owner |
-| S3 | `20261008170000_workforce_calculation.sql` | `work_exception_segments`, interseção com a jornada, tolerância, resumos |
-| S4 | `20261008180000_workforce_review.sql` | ciência, contestação, correção, classificação versionada, bloqueios |
-| S5 | `20261008190000_workforce_compliance.sql` | `compliance_alerts` parametrizados e idempotentes |
-| S6 | `20261008200000_workforce_closure.sql` | competências, snapshots imutáveis, versões, diff, espelhos |
-| S8 | `20261008220000_workforce_delivery.sql` | 2º dia útil, ciclo do worker, envios, comprovantes, retries |
+| S1 | `20261013150000_workforce_foundation.sql` | schema `workforce`, empregadora, payroll settings, funcionário, jornada versionada, feriados, auditoria, idempotência |
+| S2 | `20261013160000_workforce_exceptions.sql` | `work_exceptions`, OPEN único, timestamps do servidor, retroativo, ocorrência do owner |
+| S3 | `20261013170000_workforce_calculation.sql` | `work_exception_segments`, interseção com a jornada, tolerância, resumos |
+| S4 | `20261013180000_workforce_review.sql` | ciência, contestação, correção, classificação versionada, bloqueios |
+| S5 | `20261013190000_workforce_compliance.sql` | `compliance_alerts` parametrizados e idempotentes |
+| S6 | `20261013200000_workforce_closure.sql` | competências, snapshots imutáveis, versões, diff, espelhos |
+| S8 | `20261013220000_workforce_delivery.sql` | 2º dia útil, ciclo do worker, envios, comprovantes, retries |
 
 ### Superfícies
 
@@ -304,7 +304,7 @@ Esses cálculos continuam com a contadora.
 
 ### Ativação (somente após autorização explícita)
 
-1. Rebasear `workforce-v1` sobre `main` e renomear as migrations `20261008*_workforce_*` para timestamps posteriores à última migration de `main`. O deploy de produção não usa `--include-all`.
+1. Antes de cada merge em `main`, sincronizar `workforce-v1` com `main` e conferir que as migrations `*_workforce_*` têm timestamp posterior à última migration de `main`. Em 2026-10-13 elas foram renomeadas para `20261013*`, depois de `20261012120000`. O deploy de produção não usa `--include-all`.
 2. Mergear `workforce-v1` → `main` nos dois repositórios, com CI verde.
 3. Fazer backup e rodar `production-deploy.yml` com o SHA exato:
    - migrations;

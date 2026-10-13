@@ -9,6 +9,7 @@ import {
   type OperationSettingsValues,
 } from './operationSettingsApi'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 import './operationSettingsAdmin.css'
 
 const textKeys: OperationSettingsKey[] = [
@@ -89,11 +90,11 @@ export function OperationSettingsAdmin() {
   const [success, setSuccess] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    getAdminSession().then(({ data }) => {
       setAccessToken(data.session?.access_token ?? null)
       setAuthReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       setAccessToken(session?.access_token ?? null)
       setAuthReady(true)
     })

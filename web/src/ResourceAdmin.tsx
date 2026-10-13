@@ -8,6 +8,7 @@ import {
   type ResourceRow,
 } from './resourceAdminApi'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 const weekdays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
@@ -47,8 +48,8 @@ export function ResourceAdmin() {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setToken(data.session?.access_token ?? null); setReady(true) })
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setToken(session?.access_token ?? null); setReady(true) })
+    getAdminSession().then(({ data }) => { setToken(data.session?.access_token ?? null); setReady(true) })
+    const { data } = onAdminSessionChange((_event, session) => { setToken(session?.access_token ?? null); setReady(true) })
     return () => data.subscription.unsubscribe()
   }, [])
 

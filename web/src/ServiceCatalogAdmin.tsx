@@ -6,6 +6,7 @@ import {
   type ServiceFieldType, type ServiceSettings,
 } from './serviceSettingsApi'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 const fieldTypes: Array<{ value: ServiceFieldType; label: string }> = [
   { value: 'TEXT', label: 'Texto curto' }, { value: 'TEXTAREA', label: 'Texto longo' }, { value: 'NUMBER', label: 'Número' },
@@ -29,7 +30,7 @@ export function ServiceCatalogAdmin() {
   const [selectedCategoryId, setSelectedCategoryId] = useState(''); const [selectedServiceId, setSelectedServiceId] = useState(''); const [draft, setDraft] = useState<ServiceSettings | null>(null)
   const [newName, setNewName] = useState(''); const [newSlug, setNewSlug] = useState(''); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
 
-  useEffect(() => { supabase.auth.getSession().then(({ data }) => { setToken(data.session?.access_token ?? null); setAuthReady(true) }); const { data } = supabase.auth.onAuthStateChange((_e, session) => { setToken(session?.access_token ?? null); setAuthReady(true) }); return () => data.subscription.unsubscribe() }, [])
+  useEffect(() => { getAdminSession().then(({ data }) => { setToken(data.session?.access_token ?? null); setAuthReady(true) }); const { data } = onAdminSessionChange((_e, session) => { setToken(session?.access_token ?? null); setAuthReady(true) }); return () => data.subscription.unsubscribe() }, [])
   async function load(preferredServiceId?: string) { if (!token) return; try { const bundle = await loadServiceCatalog(token); setServices(bundle.services); setCategories(bundle.categories); setExtras(bundle.extras); const opCats = bundle.categories.filter((c) => c.operation_scope === operation); const catId = selectedCategoryId && opCats.some((c) => c.id === selectedCategoryId) ? selectedCategoryId : opCats[0]?.id ?? ''; setSelectedCategoryId(catId); const visible = bundle.services.filter((s) => s.operation_scope === operation && (!catId || s.category_id === catId)); const sid = preferredServiceId && visible.some((s) => s.id === preferredServiceId) ? preferredServiceId : selectedServiceId && visible.some((s) => s.id === selectedServiceId) ? selectedServiceId : visible[0]?.id ?? ''; setSelectedServiceId(sid); const current = bundle.services.find((s) => s.id === sid); setDraft(current ? cloneService(current) : null) } catch { setError('Não foi possível carregar o catálogo.') } }
   useEffect(() => { if (token) void load() }, [token])
   useEffect(() => { if (!token) return; const opCats = categories.filter((c) => c.operation_scope === operation); const catId = opCats[0]?.id ?? ''; setSelectedCategoryId(catId); const visible = services.filter((s) => s.operation_scope === operation && (!catId || s.category_id === catId)); const current = visible[0] ?? null; setSelectedServiceId(current?.id ?? ''); setDraft(current ? cloneService(current) : null); setMessage(''); setError('') }, [operation])
