@@ -35,17 +35,22 @@ Deno.test('lê o sub sem confiar nele e rejeita formatos inválidos', () => {
 
 Deno.test('Auth e banco correm em paralelo e o resultado traz o perfil', async () => {
   const log: string[] = []
-  const started = performance.now()
-  const result = await authorizeAdmin(token(USER), deps({}, log))
-  const elapsed = performance.now() - started
+  const result = await authorizeAdmin(token(USER), deps({
+    getUser: async () => { log.push('auth-start'); await sleep(30); log.push('auth-end'); return { id: USER } },
+    resolveProfile: async (id) => {
+      log.push('profile-start')
+      await sleep(5)
+      return id === USER ? { admin_user_id: 'admin-1', display_name: 'Perf', permissions: { AGENDA_VIEW: true, FINANCE_VIEW: false } } : null
+    },
+  }, log))
   assertEquals(result, {
     adminId: 'admin-1',
     authUserId: USER,
     profile: { admin_user_id: 'admin-1', display_name: 'Perf', permissions: { AGENDA_VIEW: true, FINANCE_VIEW: false } },
   })
-  assertEquals(log.slice(0, 2).sort(), ['auth', `resolve:${USER}`].sort())
-  // Em fila seriam ~40 ms (30 + 10); em paralelo, ~30 ms.
-  assertEquals(elapsed < 38, true)
+  // Determinístico: a leitura do perfil começa antes de o Auth terminar (paralelo) e acontece uma vez só.
+  assertEquals(log.indexOf('profile-start') < log.indexOf('auth-end'), true)
+  assertEquals(log.filter((entry) => entry === 'profile-start').length, 1)
 })
 
 Deno.test('token rejeitado pelo Auth nunca autoriza, mesmo com admin resolvido', async () => {
