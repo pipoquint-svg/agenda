@@ -1,4 +1,4 @@
-import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
+import { adminClient, hasAdminPermission, rememberedProfile, requireAdmin } from '../_shared/supabase.ts'
 import { appointmentTimelineCsv } from '../_shared/audit-csv.ts'
 import { customerFinancialTermsChanged } from './customerTermsPermission.ts'
 
@@ -6,6 +6,7 @@ const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-max-age': '7200',
 }
 
 const financeKeys = new Set([
@@ -224,6 +225,9 @@ Deno.serve(async (req) => {
     const action = clean(url.searchParams.get('action')) ?? 'agenda'
 
     if (action === 'access_profile') {
+      // Já lido (em paralelo à validação do token) pelo requireAdmin desta requisição.
+      const remembered = rememberedProfile(admin.adminId)
+      if (remembered) return json(remembered)
       const { data, error } = await client.rpc('service_admin_get_access_profile', { p_admin_id: admin.adminId })
       if (error) throw new Error(error.message)
       return json(data)

@@ -4,6 +4,7 @@ const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
   'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'access-control-max-age': '7200',
 }
 const MAX_PAGE_SIZE = 100
 const DEFAULT_PAGE_SIZE = 25

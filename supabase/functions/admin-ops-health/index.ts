@@ -4,6 +4,7 @@ const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
   'access-control-allow-methods': 'GET, OPTIONS',
+  'access-control-max-age': '7200',
 }
 
 function json(body: unknown, status = 200): Response {
