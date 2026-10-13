@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { installLocalVerificationTransport } from './local-verification.ts'
+import { authorizeAdmin, bearerToken, rememberedPermission, rememberProfile, type AdminAccessProfile } from './admin-auth.ts'
+export { rememberedProfile } from './admin-auth.ts'
 
 installLocalVerificationTransport()
 
@@ -40,23 +42,33 @@ export function adminClient(): SupabaseClient {
 }
 
 export async function requireAdmin(req: Request): Promise<{ adminId: string; authUserId: string }> {
-  const header = req.headers.get('authorization') ?? ''
-  const match = header.match(/^Bearer\s+(.+)$/i)
-  if (!match) throw new Error('ADMIN_AUTH_REQUIRED')
-
+  const token = bearerToken(req)
   const client = adminClient()
-  const { data: userData, error: userError } = await client.auth.getUser(match[1])
-  if (userError || !userData.user) throw new Error('ADMIN_AUTH_INVALID')
-
-  const { data: adminId, error: adminError } = await client.rpc('service_admin_resolve_auth_user', {
-    p_auth_user_id: userData.user.id,
+  // Auth (token) e banco (admin + perfil) em paralelo; ver admin-auth.ts.
+  const identity = await authorizeAdmin(token, {
+    getUser: async (jwt) => {
+      const { data, error } = await client.auth.getUser(jwt)
+      return error || !data.user ? null : { id: data.user.id }
+    },
+    resolveProfile: async (authUserId) => {
+      const { data, error } = await client.rpc('service_admin_resolve_access_profile', { p_auth_user_id: authUserId })
+      if (!error) return data as AdminAccessProfile | null
+      // Janela de deploy (função ainda inexistente): caminho antigo em duas leituras.
+      if (error.code !== 'PGRST202' && error.code !== '42883') throw new Error(error.message)
+      const resolved = await client.rpc('service_admin_resolve_auth_user', { p_auth_user_id: authUserId })
+      if (resolved.error || typeof resolved.data !== 'string' || !resolved.data) return null
+      const profile = await client.rpc('service_admin_get_access_profile', { p_admin_id: resolved.data })
+      return profile.error ? null : profile.data as AdminAccessProfile | null
+    },
   })
-
-  if (adminError || typeof adminId !== 'string' || !adminId) throw new Error('ADMIN_ACCESS_DENIED')
-  return { adminId, authUserId: userData.user.id }
+  rememberProfile(identity.adminId, identity.profile)
+  return { adminId: identity.adminId, authUserId: identity.authUserId }
 }
 
 export async function hasAdminPermission(adminId: string, permission: string): Promise<boolean> {
+  // Perfil lido no requireAdmin desta mesma requisição (janela de 1 s); fora dele, RPC.
+  const remembered = rememberedPermission(adminId, permission)
+  if (remembered !== null) return remembered
   const client = adminClient()
   const { data, error } = await client.rpc('service_admin_has_permission', {
     p_admin_id: adminId,

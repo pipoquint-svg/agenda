@@ -5,6 +5,7 @@ const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
   'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-max-age': '7200',
 }
 
 type RefundPlanPayment = {

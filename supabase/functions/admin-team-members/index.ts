@@ -13,6 +13,7 @@ const corsHeaders = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-request-id',
   'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
+  'access-control-max-age': '7200',
 }
 
 const allowedPermissions = new Set([
