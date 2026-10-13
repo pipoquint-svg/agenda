@@ -67,4 +67,4 @@ export function isHoldGoneError(cause: unknown): boolean {
 }
 
 export const SLOT_TAKEN_MESSAGE = 'Este horário acabou de ser reservado por outra pessoa. Escolha outro horário para continuar.'
-export const HOLD_EXPIRED_DATA_MESSAGE = 'O prazo de 10 minutos terminou e o horário deixou de estar reservado. Seus dados foram mantidos — continue para confirmar a disponibilidade novamente.'
+export const HOLD_EXPIRED_DATA_MESSAGE = 'O prazo de 10 minutos terminou e o horário deixou de estar reservado. Seus dados foram mantidos. Continue para confirmar a disponibilidade novamente.'
