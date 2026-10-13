@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { AdminDashboard } from './AdminDashboard'
 import { supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 function basePath(): string {
   return import.meta.env.BASE_URL.replace(/\/+$/, '')
@@ -15,12 +16,12 @@ export function GestaoEntry() {
 
   useEffect(() => {
     let active = true
-    supabase.auth.getSession().then(({ data }) => {
+    getAdminSession().then(({ data }) => {
       if (!active) return
       setAuthenticated(Boolean(data.session))
       setReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = onAdminSessionChange((_event, session) => {
       if (!active) return
       setAuthenticated(Boolean(session))
       setReady(true)

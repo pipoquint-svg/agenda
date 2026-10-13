@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { functionsBaseUrl, publicApiKey, supabase } from './supabase'
+import { getAdminSession, onAdminSessionChange } from './adminSession'
 
 type Terms = { can_prebook:boolean; prebook_hold_minutes:number; max_active_prebooks:number; requires_manual_confirmation:boolean; billing_mode:'CHECKOUT'|'INVOICE'; invoice_due_days:number|null; is_active:boolean }
 type Customer = { id:string; customer_type:string; name:string; legal_name:string|null; cpf_cnpj:string|null; email:string|null; phone:string|null; birth_date?:string|null; commercial_terms:Terms|null }
@@ -20,7 +21,7 @@ function formatDateTime(value:string|null){return value?new Date(value).toLocale
 
 export function CustomerAdmin(){
   const[ready,setReady]=useState(false),[token,setToken]=useState<string|null>(null),[search,setSearch]=useState(''),[customers,setCustomers]=useState<Customer[]>([]),[selected,setSelected]=useState(''),[profile,setProfile]=useState<Profile|null>(null),[services,setServices]=useState<Service[]>([]),[terms,setTerms]=useState<Terms>(defaultTerms()),[authorized,setAuthorized]=useState<string[]>([]),[birthDate,setBirthDate]=useState(''),[birthDateReconciliation,setBirthDateReconciliation]=useState<BirthDateReconciliation|null>(null),[loading,setLoading]=useState(false),[saving,setSaving]=useState(false),[savingBirthDate,setSavingBirthDate]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('')
-  useEffect(()=>{supabase.auth.getSession().then(({data})=>{setToken(data.session?.access_token??null);setReady(true)});const{data:l}=supabase.auth.onAuthStateChange((_e,s)=>{setToken(s?.access_token??null);setReady(true)});return()=>l.subscription.unsubscribe()},[])
+  useEffect(()=>{getAdminSession().then(({data})=>{setToken(data.session?.access_token??null);setReady(true)});const{data:l}=onAdminSessionChange((_e,s)=>{setToken(s?.access_token??null);setReady(true)});return()=>l.subscription.unsubscribe()},[])
   const list=useCallback(async(accessToken:string,q='')=>{setLoading(true);setError('');try{const r=await api<{customers:Customer[]}>(accessToken,`?search=${encodeURIComponent(q)}&limit=100`);setCustomers(r.customers??[])}catch(e){setError(message(e))}finally{setLoading(false)}},[])
   useEffect(()=>{if(token)void list(token)},[token,list])
   async function open(id:string){if(!token)return;setSelected(id);setLoading(true);setError('');setNotice('');try{const r=await api<{profile:Profile;services:Service[];birth_date_reconciliation:BirthDateReconciliation}>(token,`?customer_id=${encodeURIComponent(id)}`);setProfile(r.profile);setServices(r.services??[]);setTerms(r.profile.terms?{...r.profile.terms}:defaultTerms());setAuthorized((r.profile.authorized_services??[]).map(s=>s.id));setBirthDate(r.profile.customer.birth_date??'');setBirthDateReconciliation(r.birth_date_reconciliation??{canonical_birth_date:r.profile.customer.birth_date??null,candidates:[]})}catch(e){setError(message(e));setBirthDateReconciliation(null)}finally{setLoading(false)}}

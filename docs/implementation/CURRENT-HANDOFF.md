@@ -1,5 +1,13 @@
 # CURRENT HANDOFF — Agenda
 
+## Late checkout hold + shared admin session — explicitly requested 2026-10-12
+
+The user requested implementation, merge and publication. Branch `feat/late-checkout-hold-admin-auth-20261012` in Agenda and in BlackSheep. Details, contract and measurements: `docs/LATE_CHECKOUT_HOLD_AND_ADMIN_SESSION_2026-10-12.md`.
+
+- Forward-only migration `20261012120000_public_checkout_hold_release.sql` (one service-role RPC) plus `booking-checkout` action `RELEASE`. Release order: Agenda migration + `booking-checkout` deploy before the BlackSheep frontend (the frontend tolerates a missing `RELEASE`: the hold simply expires).
+- The Sabrina embed bundle (`web/dist/embed`) is served from `sabrinapierri.com.br/agenda-native/`, outside this repository's pipelines; publishing it needs the site owner's upload step.
+- Known unrelated: `165_post_booking_extras_dynamic_balance` fails after 2026-10-05 (past-date fixture, open PR #473).
+
 ## Post-booking extras and dynamic balance — published 2026-10-05
 
 Agenda [PR #469](https://github.com/pipoquint-svg/agenda/pull/469) merged as `d3bb4008bf4c20716d418cb982b34fbabb8627de`. BlackSheep [PR #117](https://github.com/pipoquint-svg/black-sheep/pull/117) merged as `282b574d9f4ec0788b16edc82bdd5304acf7eb1b`. Both are published. The feature consists of migration `20261005150444_post_booking_extras_dynamic_balance.sql`, four affected Edge Functions, and the Gestão/payment UI. The prior magic PAY and legacy collection/email paths remain in place.
