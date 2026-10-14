@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
         return json({ versions: data ?? [] })
       }
       const [templates, services, categories] = await Promise.all([
-        client.rpc('service_admin_list_notification_templates_v2'),
+        client.rpc('service_admin_list_notification_templates_v3'),
         // Só os 5 campos usados nos filtros; a função completa de configurações lia
         // campos, faixas, atalhos e políticas de cada serviço para depois descartar.
         client.from('services').select('id,name,operation_scope,category_id,is_active').order('name'),
@@ -268,7 +268,9 @@ Deno.serve(async (req) => {
       throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
     }
 
-    const { data, error } = await client.rpc('service_admin_upsert_notification_template_v2', {
+    const scheduleMode = text(record.schedule_mode, true)?.toUpperCase() ?? 'IMMEDIATE'
+    const scheduleOffsetMinutes = integer(record.schedule_offset_minutes)
+    const { data, error } = await client.rpc('service_admin_upsert_notification_template_v3', {
       p_template_id: uuid(record.template_id, true),
       p_event_key: eventKey,
       p_channel: channel,
@@ -283,6 +285,8 @@ Deno.serve(async (req) => {
       p_reminder_offset_minutes: integer(record.reminder_offset_minutes),
       p_service_ids: uuidArray(record.service_ids ?? []),
       p_actor_admin_id: admin.adminId,
+      p_schedule_mode: scheduleMode,
+      p_schedule_offset_minutes: scheduleOffsetMinutes,
     })
     if (error) throw new Error(error.message)
     return json({ id: data }, req.method === 'POST' ? 201 : 200)
