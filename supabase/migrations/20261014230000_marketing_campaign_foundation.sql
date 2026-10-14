@@ -71,21 +71,22 @@ create table public.marketing_campaign_versions (
     check (discount_scope <> 'SERVICE_ONLY' or not applies_to_extras)
 );
 
--- An issuance ledger for S4; it does not generate coupons or send messages in S1.
--- The snapshot binds future issued coupons to the exact version of the offer.
--- A unique key prevents duplicate issuance for a given campaign/event identity.
+-- A composite key is needed to enforce coupon ownership at the database boundary.
+-- This adds a uniqueness constraint, not a new business system or a data backfill.
+alter table public.coupons add constraint coupons_id_customer_key unique (id, customer_id);
+
+-- Issuance ledger for S4: the immutable campaign version row IS the offer snapshot.
+-- Do not duplicate it as unchecked JSON that could contradict the canonical version.
+-- S1 does not generate coupons or send messages.
 create table public.marketing_campaign_issuances (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
   campaign_id uuid not null,
   campaign_version_id uuid not null,
-  coupon_id uuid not null unique references public.coupons(id) on delete restrict,
+  coupon_id uuid not null unique,
   customer_id uuid not null references public.customers(id) on delete restrict,
   source_appointment_id uuid references public.appointments(id) on delete restrict,
   idempotency_key text not null,
-  applied_version_snapshot jsonb not null
-    check (jsonb_typeof(applied_version_snapshot) = 'object'
-       and applied_version_snapshot <> '{}'::jsonb),
   issued_at timestamptz not null default now(),
   constraint marketing_campaign_issuance_key_nonempty
     check (length(btrim(idempotency_key)) between 8 and 256),
@@ -93,6 +94,9 @@ create table public.marketing_campaign_issuances (
     foreign key (campaign_version_id, campaign_id, tenant_id)
     references public.marketing_campaign_versions(id, campaign_id, tenant_id)
     on delete restrict,
+  constraint marketing_campaign_issuance_coupon_customer_fk
+    foreign key (coupon_id, customer_id)
+    references public.coupons(id, customer_id) on delete restrict,
   constraint marketing_campaign_issuance_idempotency_unique
     unique (campaign_id, idempotency_key)
 );
@@ -126,6 +130,8 @@ create index marketing_campaign_versions_tenant_campaign_idx
   on public.marketing_campaign_versions(tenant_id, campaign_id, version_number desc);
 create index marketing_campaign_issuances_customer_idx
   on public.marketing_campaign_issuances(customer_id, issued_at desc);
+create index marketing_campaign_issuances_version_idx
+  on public.marketing_campaign_issuances(campaign_version_id, campaign_id, tenant_id);
 create index marketing_campaign_issuances_origin_idx
   on public.marketing_campaign_issuances(source_appointment_id)
   where source_appointment_id is not null;
@@ -144,7 +150,8 @@ revoke all on public.marketing_campaigns,
   public.marketing_campaign_audit_events
   from public, anon, authenticated, service_role;
 
-grant select, insert, update on public.marketing_campaigns to service_role;
+-- No direct UPDATE until S2 supplies authenticated and atomically audited state changes.
+grant select, insert on public.marketing_campaigns to service_role;
 grant select, insert on public.marketing_campaign_versions to service_role;
 grant select, insert on public.marketing_campaign_issuances to service_role;
 grant select, insert on public.marketing_campaign_audit_events to service_role;
@@ -152,9 +159,9 @@ grant select, insert on public.marketing_campaign_audit_events to service_role;
 comment on table public.marketing_campaigns is
   'S1: inert tenant-scoped campaign catalogue; no automated activation or issuance.';
 comment on table public.marketing_campaign_versions is
-  'S1: append-only typed offer revisions; service_role cannot update or delete; S2 must enforce audited campaign publication.';
+  'S1: append-only typed offer revisions are the canonical immutable offer snapshots; S2 must enforce audited publication.';
 comment on table public.marketing_campaign_issuances is
-  'S1: future idempotent issuance linkage; no coupons are created by this migration.';
+  'S1: future idempotent linkage to an immutable offer version and exact coupon owner; no coupons are created by this migration.';
 comment on column public.marketing_campaign_versions.validity_basis is
   'BOOKING_CONFIRMATION checks new booking confirmation within validity_days; RENTAL_START checks the rental start. S5 must wire this to checkout.';
 comment on column public.marketing_campaign_versions.recurring_after_discounted_rental is
