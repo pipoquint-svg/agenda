@@ -24,11 +24,11 @@ fi
 grep -Fq 'ACL_PARITY_IDENTITY_DIFF_PRESENT' "$LOG_FILE"
 
 for expected in \
-  $'IDENTITY_SUMMARY\tfunction\t453\t3b2b94f4ab8758e5d9c054b52ccd5f4dafd035624c6388b15d70cc97ba3c7e8c' \
+  $'IDENTITY_SUMMARY\tfunction\t456\t7b23461278a43720e632e86c5b6ec04ed4e0724c884a6d0e095463d3e2dd03c8' \
   $'IDENTITY_SUMMARY\tsequence\t3\t175a4c7ab0f0c8b1f173a13ae52e1bb1fedc145cebd4a4b6d944a6c9f29a2ba0' \
   $'IDENTITY_SUMMARY\ttable\t114\t47098d3fc3c871939b099a30b9f65bcd3f98a90df3fee6d5909533bcb57d74af' \
   $'IDENTITY_SUMMARY\tview\t8\tbcb8b6692e6b40eaf95ef20d1c9e115ad622c27c4fc0f78d0e3b4907c5b1b6c2' \
-  $'ACL_SUMMARY\tfunction\t453\t871\t1bdbedcf9ed7481c062e8ad93f90297853a1b29b0fdbcddf6f59befe291aa5ad' \
+  $'ACL_SUMMARY\tfunction\t456\t877\ta52d5a702faa290b38103f825b4a9a4d9c621c0a02456e22488a884147ae1066' \
   $'ACL_SUMMARY\tsequence\t3\t15\tae67d7f57fc8786c476d71d39252720bc9a2bdc650696ff198556de85cc64294' \
   $'ACL_SUMMARY\ttable\t114\t1722\tb64d5f3bde02bba203fad64617aed0da3f1b9bb43b4c3c2d5c5c9cb1e7c9648d' \
   $'ACL_SUMMARY\tview\t8\t128\tf09dedfa6c33eb98d6840f295c537ce4be013f4f6949c094d7b28ebc14e164be'
@@ -40,7 +40,7 @@ done
 # production snapshot. Sequence/view drift would indicate an unrelated change.
 test "$(grep -c '^IDENTITY_DIFF' "$LOG_FILE" || true)" -eq 4
 for expected in \
-  $'IDENTITY_DIFF\tACTUAL\tfunction\t453\t3b2b94f4ab8758e5d9c054b52ccd5f4dafd035624c6388b15d70cc97ba3c7e8c' \
+  $'IDENTITY_DIFF\tACTUAL\tfunction\t456\t7b23461278a43720e632e86c5b6ec04ed4e0724c884a6d0e095463d3e2dd03c8' \
   $'IDENTITY_DIFF\tPRODUCTION\tfunction\t421\t7373e550eabdc3854b1feb70fcf2a84fcf3ec33183c0acec95b606eaa64af706' \
   $'IDENTITY_DIFF\tACTUAL\ttable\t114\t47098d3fc3c871939b099a30b9f65bcd3f98a90df3fee6d5909533bcb57d74af' \
   $'IDENTITY_DIFF\tPRODUCTION\ttable\t107\t11c6e40d0e805d0718ee7def831e0b43b608d38b33880e8c03a6b2928f08b535'
@@ -50,7 +50,7 @@ done
 
 test "$(grep -c '^ACL_SUMMARY_DIFF' "$LOG_FILE" || true)" -eq 4
 for expected in \
-  $'ACL_SUMMARY_DIFF\tACTUAL\tfunction\t453\t871\t1bdbedcf9ed7481c062e8ad93f90297853a1b29b0fdbcddf6f59befe291aa5ad' \
+  $'ACL_SUMMARY_DIFF\tACTUAL\tfunction\t456\t877\ta52d5a702faa290b38103f825b4a9a4d9c621c0a02456e22488a884147ae1066' \
   $'ACL_SUMMARY_DIFF\tPRODUCTION\tfunction\t421\t812\t28b8c4bf36d11fb225556a2a8cc3d0689734c518e5ac6b0adcc68c7330d4a6ed' \
   $'ACL_SUMMARY_DIFF\tACTUAL\ttable\t114\t1722\tb64d5f3bde02bba203fad64617aed0da3f1b9bb43b4c3c2d5c5c9cb1e7c9648d' \
   $'ACL_SUMMARY_DIFF\tPRODUCTION\ttable\t107\t1634\t29e28820938fa434b31793f0a66609b62829fc65a27d188f45ae3d59dbef5cdc'
