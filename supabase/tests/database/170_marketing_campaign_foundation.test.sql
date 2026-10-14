@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public, extensions;
-select plan(38);
+select plan(40);
 
 create function pg_temp.s1_throws(p_statement text, p_expected text)
 returns boolean language plpgsql as $$
@@ -29,7 +29,8 @@ values ('17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-00000000
  'BOOKING_CONFIRMATION',30,true);
 
 insert into public.customers(id,name,email,phone)
-values ('17000000-0000-4000-8000-000000000030','S1 test customer','s1-campaign@example.test','+5548999990001');
+values ('17000000-0000-4000-8000-000000000030','S1 test customer','s1-campaign@example.test','+5548999990001'),
+       ('17000000-0000-4000-8000-000000000031','S1 wrong customer','s1-other@example.test','+5548999990002');
 
 insert into public.coupons
 (id,code,discount_type,discount_value,is_active,source,customer_id,max_uses,discount_scope)
@@ -37,9 +38,9 @@ values ('17000000-0000-4000-8000-000000000040','S1DRAFTCOUPON','PERCENT',20,fals
        ('17000000-0000-4000-8000-000000000041','S1DRAFTCOUPON2','PERCENT',20,false,'PROMOTION','17000000-0000-4000-8000-000000000030',1,'SERVICE_ONLY');
 
 insert into public.marketing_campaign_issuances
-(tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot)
+(tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key)
 values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030',
- 'rent-2026-10-14-001','{"trigger":"RENTAL_COMPLETED_FINANCIALLY_CLEARED","scope":"SERVICE_ONLY"}');
+ 'rent-2026-10-14-001');
 
 select ok(to_regclass('public.marketing_campaigns') is not null, 'marketing_campaigns exists');
 
@@ -73,6 +74,8 @@ select ok(not has_table_privilege('anon','public.marketing_campaign_audit_events
 
 select ok(has_table_privilege('service_role','public.marketing_campaign_audit_events','SELECT,INSERT'), 'marketing_campaign_audit_events service-role access explicit');
 
+select ok(not has_table_privilege('service_role','public.marketing_campaigns','UPDATE'), 'campaign state cannot be changed directly without an audited S2 RPC');
+
 select ok(not has_table_privilege('service_role','public.marketing_campaign_versions','UPDATE') and not has_table_privilege('service_role','public.marketing_campaign_versions','DELETE'), 'marketing_campaign_versions is append-only for service_role');
 
 select ok(not has_table_privilege('service_role','public.marketing_campaign_issuances','UPDATE') and not has_table_privilege('service_role','public.marketing_campaign_issuances','DELETE'), 'marketing_campaign_issuances is append-only for service_role');
@@ -105,13 +108,15 @@ select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_versions(ten
 
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_versions(tenant_id,campaign_id,version_number,trigger_kind,discount_type,discount_value,discount_scope,validity_basis,validity_days,applies_to_extras) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010',2,'MANUAL','PERCENT',10,'SERVICE_ONLY','BOOKING_CONFIRMATION',30,true)$$,'23514'),'SERVICE_ONLY cannot include extras');
 
-select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-001','{"scope":"SERVICE_ONLY"}')$$,'23505'),'same event cannot issue twice');
+select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-001')$$,'23505'),'same event cannot issue twice');
 
-select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-002','{"scope":"SERVICE_ONLY"}')$$,'23505'),'same coupon cannot belong to multiple emissions');
+select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-002')$$,'23505'),'same coupon cannot belong to multiple emissions');
 
-select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000002','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000030','rent-2026-10-14-003','{"scope":"SERVICE_ONLY"}')$$,'23503'),'emission tenant must match campaign version');
+select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000002','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000030','rent-2026-10-14-003')$$,'23503'),'emission tenant must match campaign version');
 
-select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','short','{}')$$,'23514'),'empty snapshot is refused');
+select ok(pg_temp.s1_throws($insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000031','rent-2026-10-14-004')$,'23503'),'coupon cannot be attributed to another customer');
+
+select ok(exists (select 1 from pg_constraint where conrelid='public.marketing_campaign_issuances'::regclass and conname='marketing_campaign_issuance_coupon_customer_fk' and contype='f'), 'coupon owner enforced by composite FK');
 
 select ok((select count(*)=1 from public.marketing_campaign_issuances), 'failed duplicate attempts do not change ledger');
 
