@@ -59,3 +59,32 @@ returns table(
 $$;
 revoke all on function public.service_admin_list_notification_templates_v3() from public, anon, authenticated;
 grant execute on function public.service_admin_list_notification_templates_v3() to service_role;
+
+create or replace function public.enqueue_scheduled_notification_templates(p_appointment_id uuid)
+returns integer language plpgsql security definer set search_path to 'public', 'pg_temp' as $$
+declare v_count integer;
+begin
+  insert into public.integration_jobs(job_type,entity_type,entity_id,entity_version,payload_json,run_after,idempotency_key)
+  select
+    'APPOINTMENT_SCHEDULED_MESSAGE','APPOINTMENT',a.id,a.version,
+    jsonb_build_object('event_key',t.event_key,'schedule_key',t.id::text || ':' || a.version::text || ':' || t.schedule_mode || ':' || coalesce(t.schedule_offset_minutes,0)::text,'reason','SCHEDULED'),
+    case t.schedule_mode
+      when 'BEFORE_START' then a.start_at - make_interval(mins => t.schedule_offset_minutes)
+      when 'AFTER_END' then a.core_end_at + make_interval(mins => t.schedule_offset_minutes)
+      else now()
+    end,
+    'notification-schedule:' || t.id::text || ':' || a.id::text || ':v' || a.version::text || ':' || t.schedule_mode || ':' || coalesce(t.schedule_offset_minutes,0)::text
+  from public.appointments a
+  join public.services s on s.id=a.service_id
+  join public.notification_template_configs t on t.is_active and t.channel='EMAIL' and t.audience='CUSTOMER' and t.schedule_mode <> 'IMMEDIATE'
+    and (t.operation_scope is null or t.operation_scope=s.operation_scope)
+  where a.id=p_appointment_id and a.status='CONFIRMED'
+    and (not exists(select 1 from public.notification_template_services ts where ts.template_id=t.id)
+      or exists(select 1 from public.notification_template_services ts where ts.template_id=t.id and ts.service_id=a.service_id))
+  on conflict (idempotency_key) do nothing;
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+revoke all on function public.enqueue_scheduled_notification_templates(uuid) from public, anon, authenticated;
+grant execute on function public.enqueue_scheduled_notification_templates(uuid) to service_role;

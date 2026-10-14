@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const claimJobTypes: string[] = ['APPOINTMENT_CONFIRMED_MESSAGE']
+    const claimJobTypes: string[] = ['APPOINTMENT_CONFIRMED_MESSAGE', 'APPOINTMENT_SCHEDULED_MESSAGE']
     if (googleIntegrationEnabled) {
       if (!priorityMode) claimJobTypes.push('GOOGLE_CALENDAR_SYNC')
       claimJobTypes.push('GOOGLE_APPOINTMENT_SYNC')
@@ -278,10 +278,12 @@ Deno.serve(async (req) => {
             discardedStale += 1
             continue
           }
-        } else if (job.job_type === 'APPOINTMENT_CONFIRMED_MESSAGE') {
+        } else if (job.job_type === 'APPOINTMENT_CONFIRMED_MESSAGE' || job.job_type === 'APPOINTMENT_SCHEDULED_MESSAGE') {
           if (!Number.isInteger(job.entity_version) || job.entity_version < 1) throw new Error('APPOINTMENT_CONFIRMED_MESSAGE_VERSION_REQUIRED')
           const reason = typeof job.payload_json?.reason === 'string' ? job.payload_json.reason : 'CONFIRMED'
-          const result = await invokeFunction<{ stale?: boolean; current_version?: number; skipped?: boolean; reason?: string }>('email-send', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, reason })
+          const eventKey = typeof job.payload_json?.event_key === 'string' ? job.payload_json.event_key : 'APPOINTMENT_APPROVED'
+          const scheduleKey = typeof job.payload_json?.schedule_key === 'string' ? job.payload_json.schedule_key : ''
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number; skipped?: boolean; reason?: string }>('email-send', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, reason, event_key: eventKey, schedule_key: scheduleKey })
           if (result.stale) {
             await discardStaleJob(client, job, workerId, result.current_version, 'APPOINTMENT_CONFIRMED_MESSAGE_STALE_VERSION_MISSING')
             discardedStale += 1
