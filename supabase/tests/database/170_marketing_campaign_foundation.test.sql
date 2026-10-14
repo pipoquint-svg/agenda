@@ -114,7 +114,7 @@ select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (t
 
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000002','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000030','rent-2026-10-14-003')$$,'23503'),'emission tenant must match campaign version');
 
-select ok(pg_temp.s1_throws($insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000031','rent-2026-10-14-004')$,'23503'),'coupon cannot be attributed to another customer');
+select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000031','rent-2026-10-14-004')$$,'23503'),'coupon cannot be attributed to another customer');
 
 select ok(exists (select 1 from pg_constraint where conrelid='public.marketing_campaign_issuances'::regclass and conname='marketing_campaign_issuance_coupon_customer_fk' and contype='f'), 'coupon owner enforced by composite FK');
 
