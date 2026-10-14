@@ -161,7 +161,9 @@ Deno.serve(async (req) => {
       }
       const [templates, services, categories] = await Promise.all([
         client.rpc('service_admin_list_notification_templates_v2'),
-        client.rpc('service_admin_list_service_settings'),
+        // Só os 5 campos usados nos filtros; a função completa de configurações lia
+        // campos, faixas, atalhos e políticas de cada serviço para depois descartar.
+        client.from('services').select('id,name,operation_scope,category_id,is_active').order('name'),
         client.rpc('service_admin_list_categories'),
       ])
       if (templates.error) throw new Error(templates.error.message)
