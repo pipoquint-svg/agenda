@@ -111,6 +111,7 @@ async function sendRefundFailedNotification(client: any, body: Record<string, un
   try {
     const providerMessageId = await sendEmailWithProvider(payload, providerIdempotencyKey)
     await markNotificationSent(client, delivery.id, providerMessageId)
+
     return jsonResponse({ skipped: false, reason: eventKey, appointment_id: appointmentId, policy_action_id: policyActionId, operation_scope: scope, recipient_masked: maskEmail(recipient), provider: 'RESEND', provider_message_id: providerMessageId, template_id: template.id })
   } catch (error) {
     await markNotificationFailed(client, delivery.id, error)
@@ -174,6 +175,7 @@ async function sendRefundCompletedNotification(client: any, body: Record<string,
   try {
     const providerMessageId = await sendEmailWithProvider(payload, providerIdempotencyKey)
     await markNotificationSent(client, delivery.id, providerMessageId)
+
     return jsonResponse({ skipped: false, reason: eventKey, appointment_id: appointmentId, policy_action_id: policyActionId, operation_scope: scope, recipient_masked: maskEmail(recipient), provider: 'RESEND', provider_message_id: providerMessageId, template_id: template.id })
   } catch (error) {
     await markNotificationFailed(client, delivery.id, error)
@@ -216,9 +218,10 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
     return jsonResponse({ stale: false, skipped: true, reason: 'EMAIL_RECIPIENT_MISSING_OR_INVALID' })
   }
 
-  const eventKey = 'APPOINTMENT_APPROVED'
+  const eventKey = String(body.event_key ?? 'APPOINTMENT_APPROVED').trim().toUpperCase()
   const template = await resolveTemplate(client, eventKey, 'CUSTOMER', appointment.service_id)
-  const providerIdempotencyKey = `notification:${template.id}:${appointmentId}:v${entityVersion}:EMAIL:CUSTOMER`
+  const scheduleKey = String(body.schedule_key ?? '').trim()
+  const providerIdempotencyKey = `notification:${template.id}:${appointmentId}:v${entityVersion}:${eventKey}:${scheduleKey || 'IMMEDIATE'}:EMAIL:CUSTOMER`
   const delivery = await beginNotificationDelivery(client, {
     templateId: template.id,
     eventKey,
@@ -304,6 +307,10 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
       if (tokenDeliveryError) console.error('APPOINTMENT_TOKEN_DELIVERY_RECORD_FAILED')
     }
 
+    if (eventKey === 'APPOINTMENT_APPROVED') {
+      const { error: scheduleError } = await client.rpc('enqueue_scheduled_notification_templates', { p_appointment_id: appointmentId })
+      if (scheduleError) console.error('SCHEDULED_NOTIFICATION_ENQUEUE_FAILED')
+    }
     scheduleImmediateAppointmentIntegrations(appointmentId, 'CONFIRMATION_EMAIL_SENT')
     return jsonResponse({ stale: false, skipped: false, appointment_id: appointmentId, entity_version: entityVersion, reason, operation_scope: scope, recipient_masked: maskEmail(recipient), provider: 'RESEND', provider_message_id: providerMessageId, template_id: template.id })
   } catch (error) {
