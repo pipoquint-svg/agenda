@@ -8,6 +8,12 @@ Conflicts to resolve before merge: open PR #471 (global rental-only coupons, exc
 
 Next objective: confirm CI on the PR HEAD. Release requires separate authorization (backup, then canonical production deploy, then read-only checks). Do not start the BlackSheep Rewards engine (S1+).
 
+## Notification variable catalog — explicitly authorized 2026-10-14
+
+The user explicitly authorized `{{customer.phone}}` for notification templates. This isolated slice adds the variable to the admin contract and supplies it to customer appointment-confirmation and refund-completed email rendering. Legacy variables remain supported by the backend and persisted templates; BlackSheep hides the intentionally unused waitlist, employee/access, and refund-error options only from the editor catalog. No provider, production configuration, customer data, or live message is changed by this work.
+
+Pending: review, separate Agenda and BlackSheep PRs, CI, and the normal explicitly authorized publication gate. Rollback is a revert of either independent PR; templates using legacy variables remain valid.
+
 ## Late checkout hold + shared admin session — explicitly requested 2026-10-12
 
 **Published 2026-10-13.** Agenda PR #483 merged as `70fa65a74ebf49cc574861314e6a24642b808457` (main CI green on that SHA). Backup run 38402498564 produced protected artifact 11815977559 (5,667,866 bytes) before the database step. Production deploy run 38403906439 applied migration `20261012120000` and then failed only while bundling the Edge Function (ECR `toomanyrequests`); run 38404795520 deployed `booking-checkout` from the same SHA. Production readback without creating holds: `RELEASE` with an unknown token returns `NOT_FOUND`; direct anon call to `service_public_release_checkout_hold` returns 42501. BlackSheep PR #124 merged as `bde4265bd9100a8210628d7259e3497e67c7a030`, synchronized by Lovable and published (deployment `eb5924f8-38e2-4968-bc7f-71eabe524715`); the official domain serves the late-hold booking code and the Gestão chunk without "Verificando permissões…". The user confirmed both behaviors in production. Pending: Sabrina embed upload to `sabrinapierri.com.br/agenda-native/` (outside this repository's pipelines).

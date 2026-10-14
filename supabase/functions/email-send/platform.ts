@@ -134,7 +134,7 @@ async function sendRefundCompletedNotification(client: any, body: Record<string,
 
   const [{ data: service, error: serviceError }, { data: customer, error: customerError }] = await Promise.all([
     client.from('services').select('id,operation_scope').eq('id', appointment.service_id).maybeSingle(),
-    client.from('customers').select('id,name,email').eq('id', appointment.primary_customer_id).maybeSingle(),
+    client.from('customers').select('id,name,email,phone').eq('id', appointment.primary_customer_id).maybeSingle(),
   ])
   if (serviceError || !service) throw new Error('SERVICE_LOOKUP_FAILED')
   if (customerError || !customer) throw new Error('CUSTOMER_LOOKUP_FAILED')
@@ -153,6 +153,7 @@ async function sendRefundCompletedNotification(client: any, body: Record<string,
   const values: Record<string, string> = {
     'appointment.public_code': String(appointment.public_code ?? ''),
     'customer.name': String(customer.name ?? ''),
+    'customer.phone': String(customer.phone ?? ''),
     'refund.amount': money(refundAmount),
     'operation.name': String(operationSettings?.public_name ?? sender.brandName),
   }
@@ -205,7 +206,7 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
 
   const [{ data: service, error: serviceError }, { data: customer, error: customerError }] = await Promise.all([
     client.from('services').select('id,name,full_description,operation_scope').eq('id', appointment.service_id).maybeSingle(),
-    client.from('customers').select('id,name,email').eq('id', appointment.primary_customer_id).maybeSingle(),
+    client.from('customers').select('id,name,email,phone').eq('id', appointment.primary_customer_id).maybeSingle(),
   ])
   if (serviceError || !service) throw new Error('SERVICE_LOOKUP_FAILED')
   if (customerError || !customer) throw new Error('CUSTOMER_LOOKUP_FAILED')
@@ -273,6 +274,7 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
       'appointment.manage_url': manageUrl,
       'customer.name': String(customer.name ?? ''),
       'customer.email': recipient,
+      'customer.phone': String(customer.phone ?? ''),
       'employee.name': '',
       'service.name': String(appointment.service_name_snapshot ?? service.name ?? ''),
       'service.description': String(appointment.service_description_snapshot ?? service.full_description ?? ''),
