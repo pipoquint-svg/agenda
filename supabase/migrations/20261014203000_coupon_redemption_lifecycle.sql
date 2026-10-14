@@ -321,6 +321,9 @@ declare
   v_patch record;
   v_definition text;
   v_patched text;
+  -- Production FIXED quote function has the same arithmetic in a compact, single-line body.
+  -- Accept this exact alternate anchor without relaxing the fail-closed contract.
+  v_compact_quote_anchor text := E'if v_coupon.discount_type=''FIXED'' then v_coupon_discount:=least(v_coupon.discount_value,v_subtotal); else v_coupon_discount:=round(v_subtotal*(v_coupon.discount_value/100),2); end if;';
 begin
   for v_patch in
     select *
@@ -363,10 +366,14 @@ begin
     ) as p(signature, anchor, replacement)
   loop
     v_definition := pg_get_functiondef(v_patch.signature::regprocedure);
-    if position(v_patch.anchor in v_definition) = 0 then
+    if position(v_patch.anchor in v_definition) > 0 then
+      v_patched := replace(v_definition, v_patch.anchor, v_patch.replacement);
+    elsif v_patch.signature = 'public.calculate_booking_quote_catalog_base(uuid,uuid,jsonb,integer,timestamptz,text)'
+       and position(v_compact_quote_anchor in v_definition) > 0 then
+      v_patched := replace(v_definition, v_compact_quote_anchor, v_patch.replacement);
+    else
       raise exception 'S05_COUPON_SCOPE_ANCHOR_NOT_FOUND: %', v_patch.signature;
     end if;
-    v_patched := replace(v_definition, v_patch.anchor, v_patch.replacement);
     execute v_patched;
   end loop;
 end;
