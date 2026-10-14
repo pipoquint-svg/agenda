@@ -1,5 +1,13 @@
 # CURRENT HANDOFF — Agenda
 
+## S0.5 coupon redemption lifecycle — requested 2026-10-14
+
+Branch `fix/coupon-lifecycle-s05-20261014` from `origin/main` `f2600f4`. Commit, push and PR to `main` authorized on 2026-10-14; merge, deploy, production migrations and data correction are NOT authorized. No production access was used. Forward-only, expand-only migration `20261014203000_coupon_redemption_lifecycle.sql` with no data backfill: redemption ledger on `appointment_discounts`, idempotent release, per-customer limit ignores released redemptions, `coupons.discount_scope` (`ORDER_SUBTOTAL` default keeps every existing coupon and the birthday automation unchanged; `SERVICE_ONLY` excludes extras) in both pricing cores and both reschedule paths. Tests: `169_coupon_redemption_lifecycle.test.sql` (65) and `scripts/test-coupon-concurrency.sh` (added to Database Core). Local full pgTAP 172/2159 PASS, ACL/RLS overlays, concurrency and deploy gates PASS. Details, consumption policy, residual risks and a read-only reconciliation query: `docs/COUPON_REDEMPTION_LIFECYCLE_S05_2026-10-14.md`.
+
+Conflicts to resolve before merge: open PR #471 (global rental-only coupons, excludes additional people, patches the same functions) is mutually exclusive with this slice and needs a user decision; PR #491 also sets absolute ACL overlay counts, so whichever merges second must rebase and adjust them.
+
+Next objective: confirm CI on the PR HEAD. Release requires separate authorization (backup, then canonical production deploy, then read-only checks). Do not start the BlackSheep Rewards engine (S1+).
+
 ## Late checkout hold + shared admin session — explicitly requested 2026-10-12
 
 **Published 2026-10-13.** Agenda PR #483 merged as `70fa65a74ebf49cc574861314e6a24642b808457` (main CI green on that SHA). Backup run 38402498564 produced protected artifact 11815977559 (5,667,866 bytes) before the database step. Production deploy run 38403906439 applied migration `20261012120000` and then failed only while bundling the Edge Function (ECR `toomanyrequests`); run 38404795520 deployed `booking-checkout` from the same SHA. Production readback without creating holds: `RELEASE` with an unknown token returns `NOT_FOUND`; direct anon call to `service_public_release_checkout_hold` returns 42501. BlackSheep PR #124 merged as `bde4265bd9100a8210628d7259e3497e67c7a030`, synchronized by Lovable and published (deployment `eb5924f8-38e2-4968-bc7f-71eabe524715`); the official domain serves the late-hold booking code and the Gestão chunk without "Verificando permissões…". The user confirmed both behaviors in production. Pending: Sabrina embed upload to `sabrinapierri.com.br/agenda-native/` (outside this repository's pipelines).
