@@ -33,7 +33,8 @@ values ('17000000-0000-4000-8000-000000000030','S1 test customer','s1-campaign@e
 
 insert into public.coupons
 (id,code,discount_type,discount_value,is_active,source,customer_id,max_uses,discount_scope)
-values ('17000000-0000-4000-8000-000000000040','S1DRAFTCOUPON','PERCENT',20,false,'PROMOTION','17000000-0000-4000-8000-000000000030',1,'SERVICE_ONLY');
+values ('17000000-0000-4000-8000-000000000040','S1DRAFTCOUPON','PERCENT',20,false,'PROMOTION','17000000-0000-4000-8000-000000000030',1,'SERVICE_ONLY'),
+       ('17000000-0000-4000-8000-000000000041','S1DRAFTCOUPON2','PERCENT',20,false,'PROMOTION','17000000-0000-4000-8000-000000000030',1,'SERVICE_ONLY');
 
 insert into public.marketing_campaign_issuances
 (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot)
@@ -108,7 +109,7 @@ select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (t
 
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-002','{"scope":"SERVICE_ONLY"}')$$,'23505'),'same coupon cannot belong to multiple emissions');
 
-select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000002','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-003','{"scope":"SERVICE_ONLY"}')$$,'23503'),'emission tenant must match campaign version');
+select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000002','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000030','rent-2026-10-14-003','{"scope":"SERVICE_ONLY"}')$$,'23503'),'emission tenant must match campaign version');
 
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key,applied_version_snapshot) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','short','{}')$$,'23514'),'empty snapshot is refused');
 
