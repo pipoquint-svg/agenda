@@ -6,7 +6,7 @@ User explicitly requested implementing S1 in Codex, with repository checks and C
 
 Branch `feat/rewards-campaign-foundation-s1-20261014`: additive, tenant-scoped four-table campaign foundation, append-only versions and issuance/audit ledgers, 38 pgTAP assertions, RLS and historical Item 2A overlay. No new runtime functions, cron jobs, coupon emission, messages or frontend changes. Details: `docs/REWARDS_CAMPAIGN_FOUNDATION_S1_2026-10-14.md`.
 
-Next objective: inspect branch diff, run official CI to completion, fix only validated regressions, obtain adversarial review by Claude as review-only (no code modification by Claude), then hand off PR for review. DO NOT merge, deploy, issue coupons, or activate campaigns. Historical S0.5 instructions below are not the active scope.
+PR #495 (draft), code HEAD e53de1120751775ef3d0a544a14604f43f684729: 11/11 workflows passed, pgTAP 173 files / 2,197 assertions, including 38/38 S1, ACL/RLS and coupon-concurrency pass. Fixture-only correction followed a first CI failure: tenant mismatch was hidden by coupon uniqueness. Main advanced to 4260f21 from notification variable PR #493 (Edge and handoff only), with no new database migration; PR reports mergeable. Remaining gate: request Claude adversarial review strictly read-only, Codex handles any accepted correction. DO NOT merge, deploy, issue coupons, or activate campaigns. Historical S0.5 instructions below are not the active scope.
 
 ## S0.5 coupon redemption lifecycle — requested 2026-10-14
 
