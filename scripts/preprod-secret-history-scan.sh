@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Historical secret scan for V1 pre-production gate.
-# Coverage: every commit reachable from every fetched local/remote branch and tag.
-# Tooling: git rev-list + git grep. Findings are redacted to commit/path/line only.
+# Coverage: every unique blob reachable from every fetched local/remote branch and tag.
+# Tooling: git rev-list --objects + git cat-file. Findings are redacted to blob/path/line only.
 # Intentional non-secrets are classified from context without printing their values:
 # - Mercado Pago APP_USR values assigned to variables explicitly named PUBLIC_KEY;
 # - documented replace-* placeholders inside *.env.example files;
@@ -87,26 +87,26 @@ run_historical_secret_scan() {
     exit 2
   fi
 
-  mapfile -t commits < <(git rev-list --all | sort -u)
+  mapfile -t objects < <(git rev-list --objects --all | sort -u)
   echo "SECRET_SCAN_REFS=${#refs[@]}"
-  echo "SECRET_SCAN_COMMITS=${#commits[@]}"
+  echo "SECRET_SCAN_BLOBS=${#objects[@]}"
   printf 'SECRET_SCAN_REF=%s\n' "${refs[@]}"
 
   local findings=0
   local classified_public_keys=0
   local classified_placeholders=0
   local classified_local_synthetics=0
-  local commit pattern_index pattern match path line content
+  local object blob path pattern_index pattern line content
 
-  for commit in "${commits[@]}"; do
+  for object in "${objects[@]}"; do
+    blob="${object%% *}"
+    path="${object#* }"
+    [[ "$path" != "$object" ]] || path='[path-indisponivel]'
+    [[ "$(git cat-file -t "$blob")" == 'blob' ]] || continue
     for pattern_index in "${!patterns[@]}"; do
       pattern="${patterns[$pattern_index]}"
-      while IFS= read -r match; do
-        [[ -z "$match" ]] && continue
-        # git grep emits commit:path:line:content. Content is used only for classification and never printed.
-        path="$(printf '%s' "$match" | cut -d: -f2)"
-        line="$(printf '%s' "$match" | cut -d: -f3)"
-        content="$(printf '%s' "$match" | cut -d: -f4-)"
+      while IFS=: read -r line content; do
+        [[ -z "$line" ]] && continue
 
         if classify_intentional_non_secret "$pattern_index" "$path" "$content"; then
           case "$CLASSIFICATION_KIND" in
@@ -121,9 +121,9 @@ run_historical_secret_scan() {
           continue
         fi
 
-        echo "SECRET_CANDIDATE commit=$commit path=$path line=$line pattern_index=$pattern_index"
+        echo "SECRET_CANDIDATE blob=$blob path=$path line=$line pattern_index=$pattern_index"
         findings=$((findings + 1))
-      done < <(git grep -nI -E "$pattern" "$commit" -- ':!package-lock.json' ':!web/package-lock.json' 2>/dev/null || true)
+      done < <(git cat-file blob "$blob" | grep -nI -E "$pattern" 2>/dev/null || true)
     done
   done
 
