@@ -64,9 +64,11 @@ async function integrationSummary(req: Request): Promise<Response> {
     client.from('kommo_integration_settings')
       .select('enabled,operation_scope,pipeline_id,stage_initial_contact_id,stage_awaiting_payment_id,stage_confirmed_id,stage_rescheduled_id,stage_cancelled_id,stage_completed_id,stage_no_show_id,stage_expired_id,booking_mailbox,updated_at')
       .maybeSingle(),
+    // Jobs mais recentes pelo índice de created_at (updated_at não é indexado de propósito,
+    // para manter HOT updates dos workers); jobs são processados logo após criados.
     client.from('integration_jobs')
       .select('job_type,status,processed_at,updated_at')
-      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(500),
     client.from('notification_delivery_logs')
       .select('status,updated_at')
