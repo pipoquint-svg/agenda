@@ -195,6 +195,9 @@ jobs:
       - name: Run package balance concurrency test
         run: bash scripts/test-package-concurrency.sh
 
+      - name: Run coupon redemption concurrency test
+        run: bash scripts/test-coupon-concurrency.sh
+
       - name: Run distributed rate-limit concurrency test
         run: bash scripts/test-rate-limit-concurrency.sh
 
