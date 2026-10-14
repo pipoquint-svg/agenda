@@ -16,11 +16,15 @@ TABLE|tenant_capabilities|true|false
 TABLE|tenant_members|true|false
 TABLE|tenant_settings|true|false
 TABLE|tenants|true|false
+TABLE|marketing_campaigns|true|false
+TABLE|marketing_campaign_versions|true|false
+TABLE|marketing_campaign_issuances|true|false
+TABLE|marketing_campaign_audit_events|true|false
 EOF
 sort -o "$EXPECTED" "$EXPECTED"
 
 if ! diff -u "$EXPECTED" "$ACTUAL"; then
-  echo "Unexpected RLS delta beyond reviewed private-waitlist-round, tenant-foundation and post-booking-extra tables." >&2
+  echo "Unexpected RLS delta beyond reviewed private-table foundations and approved overlays." >&2
   exit 1
 fi
 
