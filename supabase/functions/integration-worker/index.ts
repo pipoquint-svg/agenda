@@ -289,7 +289,7 @@ Deno.serve(async (req) => {
             discardedStale += 1
             continue
           }
-          if (result.skipped === true && result.reason !== 'NOTIFICATION_ALREADY_SENT') {
+          if (result.skipped === true && result.reason !== 'NOTIFICATION_ALREADY_SENT' && result.reason !== 'APPOINTMENT_NOT_CONFIRMED') {
             const skipReason = String(result.reason ?? 'UNKNOWN').replace(/[^A-Z0-9_]/gi, '_').slice(0, 100)
             throw new Error(`APPOINTMENT_CONFIRMATION_EMAIL_SKIPPED:${skipReason}`)
           }

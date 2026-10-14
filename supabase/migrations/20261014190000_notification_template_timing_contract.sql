@@ -1,4 +1,4 @@
--- Additive timing contract. Runtime dispatch remains disabled until its worker is deployed.
+-- Additive timing contract. Scheduled jobs are consumed only by the matching worker deployment.
 alter table public.notification_template_configs
   add column if not exists schedule_mode text not null default 'IMMEDIATE'
     check (schedule_mode in ('IMMEDIATE', 'BEFORE_START', 'AFTER_END')),
