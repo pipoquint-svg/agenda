@@ -1,12 +1,20 @@
 # CURRENT HANDOFF — Agenda
 
+## BlackSheep Rewards S1 — authorized 2026-10-14 (active)
+
+User explicitly requested implementing S1 in Codex, with repository checks and Claude **only** for adversarial review; no merge or deploy authorization. Base: `main` at `cbcb29ccd16fa822e19d95af2d5eb480a20fc78c`, after S0.5 PR #492 and compact-anchor fix PR #494 were merged. Production readback confirmed S0.5 migration `20261014203000` applied, its functions/triggers exist, and `used_count` reconciliation has zero discrepancies across 8 coupons. No Rewards campaign activated.
+
+Branch `feat/rewards-campaign-foundation-s1-20261014`: additive, tenant-scoped four-table campaign foundation, append-only versions and issuance/audit ledgers, 38 pgTAP assertions, RLS and historical Item 2A overlay. No new runtime functions, cron jobs, coupon emission, messages or frontend changes. Details: `docs/REWARDS_CAMPAIGN_FOUNDATION_S1_2026-10-14.md`.
+
+Next objective: inspect branch diff, run official CI to completion, fix only validated regressions, obtain adversarial review by Claude as review-only (no code modification by Claude), then hand off PR for review. DO NOT merge, deploy, issue coupons, or activate campaigns. Historical S0.5 instructions below are not the active scope.
+
 ## S0.5 coupon redemption lifecycle — requested 2026-10-14
 
 Branch `fix/coupon-lifecycle-s05-20261014` from `origin/main` `f2600f4`. Commit, push and PR to `main` authorized on 2026-10-14; merge, deploy, production migrations and data correction are NOT authorized. No production access was used. Forward-only, expand-only migration `20261014203000_coupon_redemption_lifecycle.sql` with no data backfill: redemption ledger on `appointment_discounts`, idempotent release, per-customer limit ignores released redemptions, `coupons.discount_scope` (`ORDER_SUBTOTAL` default keeps every existing coupon and the birthday automation unchanged; `SERVICE_ONLY` excludes extras) in both pricing cores and both reschedule paths. Tests: `169_coupon_redemption_lifecycle.test.sql` (65) and `scripts/test-coupon-concurrency.sh` (added to Database Core). Local full pgTAP 172/2159 PASS, ACL/RLS overlays, concurrency and deploy gates PASS. Details, consumption policy, residual risks and a read-only reconciliation query: `docs/COUPON_REDEMPTION_LIFECYCLE_S05_2026-10-14.md`.
 
 Conflicts to resolve before merge: open PR #471 (global rental-only coupons, excludes additional people, patches the same functions) is mutually exclusive with this slice and needs a user decision; PR #491 also sets absolute ACL overlay counts, so whichever merges second must rebase and adjust them.
 
-Next objective: confirm CI on the PR HEAD. Release requires separate authorization (backup, then canonical production deploy, then read-only checks). Do not start the BlackSheep Rewards engine (S1+).
+Historical S0.5 handoff (superseded): PR #492 and fix PR #494 merged; S0.5 migration applied to production. The user's later explicit authorization starts S1 on a separate branch; no merge/deploy is authorized for S1.
 
 ## Late checkout hold + shared admin session — explicitly requested 2026-10-12
 
