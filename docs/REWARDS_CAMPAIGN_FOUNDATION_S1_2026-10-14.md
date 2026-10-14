@@ -13,13 +13,13 @@ Base de implementação: S0.5 aplicado em produção; `coupons.discount_scope` e
 - `marketing_campaign_issuances`: futuro vínculo de cupom emitido à versão exata, cliente, origem e chave idempotente única. S1 **não emite** cupons.
 - `marketing_campaign_audit_events`: envelope append-only para eventos de administração; S2 deve fazer as escritas auditadas em uma transação ou por RPC protegida. S1 não executa mudanças administrativas.
 
-A tripla `(campaign_version_id,campaign_id,tenant_id)` exige correspondência à versão e ao tenant corretos. O índice `unique(campaign_id,idempotency_key)` impede emitir duas vezes para a mesma identidade de evento por campanha; a restrição `unique(coupon_id)` impede vincular um cupom a múltiplas emissões.
+A tripla `(campaign_version_id,campaign_id,tenant_id)` exige correspondência à versão e ao tenant corretos. A FK composta `(coupon_id,customer_id)` para `coupons(id,customer_id)` impede atribuir um cupom ao cliente errado (constraint composta adicionada na tabela existente, sem backfill). O índice `unique(campaign_id,idempotency_key)` impede emitir duas vezes para a mesma identidade de evento por campanha; `unique(coupon_id)` impede vincular o mesmo cupom a mais de uma emissão. A versão persistida, imutável para o runtime, é a fonte canônica do snapshot do benefício; não há JSON duplicado com regras independentes.
 
 ## Segurança
 
-RLS habilitada e sem políticas em todas as quatro tabelas; `PUBLIC`, `anon` e `authenticated` não recebem grants de tabelas. `service_role` recebe SELECT/INSERT nas quatro e UPDATE **apenas** no catálogo de campanhas; não recebe DELETE. A imutabilidade de versões/issuances/auditoria é uma garantia de autorização para o runtime, não uma afirmação de que o owner do banco não pode reescrever dados.
+RLS habilitada e sem políticas em todas as quatro tabelas; `PUBLIC`, `anon` e `authenticated` não recebem grants de tabelas. `service_role` recebe apenas SELECT/INSERT nas quatro; **não recebe UPDATE nem DELETE em nenhuma tabela**. S2 precisará de uma operação autenticada que altere estado e registre a auditoria na mesma transação. A imutabilidade é garantida para o runtime, não para o proprietário privilegiado do banco.
 
-**Pendência de S2:** nenhuma API de edição é criada por S1. O S2 deverá implementar autorização OWNER/ADMIN, gravação obrigatória em `marketing_campaign_audit_events`, transições de estado e publicação só com versão aprovada. Não expor DML diretamente no browser.
+**Pendência de S2:** nenhuma API de edição é criada por S1; campanhas não podem transicionar de estado via DML do service_role. O S2 deverá implementar autorização OWNER/ADMIN, gravação obrigatória em `marketing_campaign_audit_events`, transições de estado e publicação só com versão aprovada. Não expor DML diretamente no browser.
 
 ## Regras da campanha inicial (não ativada no S1)
 
@@ -34,7 +34,7 @@ S5 deve adicionar uma verificação de validade para cupons vinculados à campan
 ## Gates
 
 - Migration: `supabase/migrations/20261014230000_marketing_campaign_foundation.sql`.
-- pgTAP: `supabase/tests/database/170_marketing_campaign_foundation.test.sql`, 38 assertions com dados temporários e rollback.
+- pgTAP: `supabase/tests/database/170_marketing_campaign_foundation.test.sql`, 40 assertions com dados temporários e rollback, incluindo bloqueio de atualização direta de campanha e tentativa de vincular cupom de um cliente a outro.
 - RLS baseline: quatro tabelas privadas adicionais no overlay.
 - Item 2A: migration S1 estacionada/restaurada no teste do baseline histórico.
 - ACL Item 2C: nenhum RPC ou função pública nova; os contadores de funções permanecem intactos.
