@@ -27,7 +27,7 @@ const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
   'appointment.manage_url',
-  'customer.name', 'customer.email', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
+  'customer.name', 'customer.email', 'customer.phone', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
   'waitlist.name', 'waitlist.email', 'waitlist.whatsapp', 'waitlist.created_at',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'payment.resume_url', 'payment.expires_at', 'extras.summary',
@@ -81,6 +81,7 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'appointment.manage_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=RESCHEDULE',
     'customer.name': 'Teste BlackSheep',
     'customer.email': recipient,
+    'customer.phone': '(48) 99999-0000',
     'employee.name': 'Equipe BlackSheep',
     'auth.invite_url': 'https://www.blacksheepestudiocriativo.com.br/gestao/primeiro-acesso',
     'service.name': 'Serviço de teste',
