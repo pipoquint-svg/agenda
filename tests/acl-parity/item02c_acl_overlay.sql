@@ -477,8 +477,8 @@ begin
   if v_public_function_count <> 478 then
     raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=478 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 409 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=409 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 412 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=412 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
