@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-12",
-    "active_total": 77,
-    "verify_jwt_false": 60,
+    "active_total": 78,
+    "verify_jwt_false": 61,
     "verify_jwt_true": 17,
-    "versioned_active": 72,
+    "versioned_active": 73,
     "production_orphans": 5,
     "versioned_inactive": 12
   },
@@ -22,6 +22,7 @@
       "admin-audit-log",
       "admin-customer-balance",
       "admin-dashboard",
+      "admin-dracma-messaging",
       "admin-external-block",
       "admin-finance",
       "admin-finance-launches",

@@ -1,4 +1,5 @@
 import { adminClient, requireAdminPermission } from '../_shared/supabase.ts'
+import { summarizeWhatsAppIntegration } from './whatsapp-contract.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -49,10 +50,10 @@ function row(key: string, label: string, status: IntegrationStatus, lastSyncAt: 
 }
 
 async function integrationSummary(req: Request): Promise<Response> {
-  await requireAdminPermission(req, 'INTEGRATIONS_VIEW')
+  const actor = await requireAdminPermission(req, 'INTEGRATIONS_VIEW')
   const client = adminClient()
 
-  const [connectionsResult, syncResult, kommoResult, jobsResult, notificationsResult] = await Promise.all([
+  const [connectionsResult, syncResult, kommoResult, jobsResult, notificationsResult, membershipResult] = await Promise.all([
     client.from('google_connections')
       .select('id,status,connected_at,updated_at,last_error')
       .order('connected_at', { ascending: false })
@@ -74,9 +75,14 @@ async function integrationSummary(req: Request): Promise<Response> {
       .select('status,updated_at')
       .order('updated_at', { ascending: false })
       .limit(200),
+    client.from('tenant_members')
+      .select('tenant_id')
+      .eq('user_id', actor.authUserId)
+      .eq('status', 'ACTIVE')
+      .limit(2),
   ])
 
-  const failures = [connectionsResult.error, syncResult.error, kommoResult.error, jobsResult.error, notificationsResult.error].filter(Boolean)
+  const failures = [connectionsResult.error, syncResult.error, kommoResult.error, jobsResult.error, notificationsResult.error, membershipResult.error].filter(Boolean)
   if (failures.length) throw new Error('ADMIN_INTEGRATIONS_QUERY_FAILED')
 
   const googleConnections = connectionsResult.data ?? []
@@ -110,6 +116,21 @@ async function integrationSummary(req: Request): Promise<Response> {
   const notificationLastSync = latestIso((notificationsResult.data ?? []).map((item) => item.updated_at))
   const notificationStatus: IntegrationStatus = notificationsConfigured && notificationsEnabled ? 'CONNECTED' : notificationsConfigured ? 'BACKEND_ONLY' : 'PENDING'
 
+  // Current Agenda admins may not yet be linked to a tenant. Do not infer a
+  // tenant, especially once more than one active membership exists.
+  const memberships = membershipResult.data ?? []
+  const tenantId = memberships.length === 1 ? String(memberships[0].tenant_id ?? '') : ''
+  const tenantBound = Boolean(tenantId)
+  const whatsappResult = tenantBound
+    ? await client.from('whatsapp_tenant_integrations')
+      .select('status,updated_at,embedded_signup_completed_at')
+      .eq('tenant_id', tenantId)
+      .order('updated_at', { ascending: false })
+      .limit(2)
+    : { data: [], error: null }
+  if (whatsappResult.error) throw new Error('ADMIN_INTEGRATIONS_QUERY_FAILED')
+  const whatsapp = summarizeWhatsAppIntegration(tenantBound, whatsappResult.data ?? [])
+
   return json({
     integrations: [
       row('google', 'Google Calendar', googleStatus, googleLastSync, {
@@ -134,6 +155,7 @@ async function integrationSummary(req: Request): Promise<Response> {
         worker_enabled: envEnabled('TRANSACTIONAL_EMAIL_WORKER_ENABLED'),
         real_recipients_allowed: envEnabled('ALLOW_REAL_EMAIL_RECIPIENTS'),
       }),
+      whatsapp,
     ],
     safety: {
       credentials_exposed: false,

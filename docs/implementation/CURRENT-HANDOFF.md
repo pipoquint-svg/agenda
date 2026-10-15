@@ -22,6 +22,18 @@ Forward-only migration: `20261015011437_whatsapp_tenant_foundation.sql`. Focused
 
 Next objective: review and CI on the isolated PR. A subsequent adapter slice requires explicit Meta setup/login authorization, a server-side secret-management design, callback validation, action/audit contracts and separate approval before any provider-facing mutation.
 
+## WhatsApp delegated access projection — local slice 2026-10-15
+
+The Agenda read model now includes a browser-safe WhatsApp integration projection derived from the active authenticated admin's single explicit tenant membership. It never guesses a tenant when the admin has zero or multiple active memberships, and it returns no WABA, phone, credential, raw provider-error or Dracma identifier. The corresponding BlackSheep UI explains that Dracma administers the connection and only exposes a future connection action after the server-side gateway reports it available.
+
+Files: `supabase/functions/admin-integrations/index.ts`, `supabase/functions/admin-integrations/whatsapp-contract.ts`, and its focused Deno test. Verification: `deno check` passed and the focused contract test passed 2/2. This is read-only and does not invoke Meta, create a Dracma organization, create a membership, alter a provider, or make the Embedded Signup popup available. The delegated bridge remains default-deny until a controlled tenant/operator binding, a signed server-to-server assertion contract, secret configuration, callback validation and deployment are separately implemented and verified.
+
+## Agenda → Dracma delegated WhatsApp signup — PR #498, 2026-10-15
+
+PR `pipoquint-svg/agenda#498` exposes a narrow authenticated proxy for the Dracma-owned Embedded Signup: authorized Agenda administrators can obtain status, start a short-lived session, complete it or cancel it. The browser receives no provider credential; the cross-project request is HMAC-signed and Dracma resolves the tenant/operator binding server-side. `admin-dracma-messaging` is declared as a `custom_admin` deployable function in the auth contract, with `verify_jwt=false` because it validates the bearer token and `INTEGRATIONS_*` permission inside the handler, matching `admin-integrations`.
+
+No deployment, provider configuration, Meta login, WABA/phone change, real message, or production data mutation occurred. Dependencies: Dracma PR #703 before Agenda PR #498; BlackSheep PR #134 depends on both. Current next objective: let current CI reach terminal state, correct only reproducible contract failures, then obtain separate merge/publication authorization.
+
 ## Late checkout hold + shared admin session — explicitly requested 2026-10-12
 
 **Published 2026-10-13.** Agenda PR #483 merged as `70fa65a74ebf49cc574861314e6a24642b808457` (main CI green on that SHA). Backup run 38402498564 produced protected artifact 11815977559 (5,667,866 bytes) before the database step. Production deploy run 38403906439 applied migration `20261012120000` and then failed only while bundling the Edge Function (ECR `toomanyrequests`); run 38404795520 deployed `booking-checkout` from the same SHA. Production readback without creating holds: `RELEASE` with an unknown token returns `NOT_FOUND`; direct anon call to `service_public_release_checkout_hold` returns 42501. BlackSheep PR #124 merged as `bde4265bd9100a8210628d7259e3497e67c7a030`, synchronized by Lovable and published (deployment `eb5924f8-38e2-4968-bc7f-71eabe524715`); the official domain serves the late-hold booking code and the Gestão chunk without "Verificando permissões…". The user confirmed both behaviors in production. Pending: Sabrina embed upload to `sabrinapierri.com.br/agenda-native/` (outside this repository's pipelines).
