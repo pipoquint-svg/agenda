@@ -48,7 +48,7 @@ select ok((select relrowsecurity and not relforcerowsecurity from pg_class where
 
 select ok(not has_table_privilege('anon','public.marketing_campaigns','SELECT') and not has_table_privilege('authenticated','public.marketing_campaigns','INSERT'), 'marketing_campaigns not directly exposed to browser roles');
 
-select ok(has_table_privilege('service_role','public.marketing_campaigns','SELECT,INSERT'), 'marketing_campaigns service-role access explicit');
+select ok(has_table_privilege('service_role','public.marketing_campaigns','SELECT') and not has_table_privilege('service_role','public.marketing_campaigns','INSERT'), 'marketing_campaigns is read-only for service_role until audited write APIs exist');
 
 select ok(to_regclass('public.marketing_campaign_versions') is not null, 'marketing_campaign_versions exists');
 
@@ -56,7 +56,7 @@ select ok((select relrowsecurity and not relforcerowsecurity from pg_class where
 
 select ok(not has_table_privilege('anon','public.marketing_campaign_versions','SELECT') and not has_table_privilege('authenticated','public.marketing_campaign_versions','INSERT'), 'marketing_campaign_versions not directly exposed to browser roles');
 
-select ok(has_table_privilege('service_role','public.marketing_campaign_versions','SELECT,INSERT'), 'marketing_campaign_versions service-role access explicit');
+select ok(has_table_privilege('service_role','public.marketing_campaign_versions','SELECT') and not has_table_privilege('service_role','public.marketing_campaign_versions','INSERT'), 'marketing_campaign_versions is read-only for service_role until audited write APIs exist');
 
 select ok(to_regclass('public.marketing_campaign_issuances') is not null, 'marketing_campaign_issuances exists');
 
@@ -64,7 +64,7 @@ select ok((select relrowsecurity and not relforcerowsecurity from pg_class where
 
 select ok(not has_table_privilege('anon','public.marketing_campaign_issuances','SELECT') and not has_table_privilege('authenticated','public.marketing_campaign_issuances','INSERT'), 'marketing_campaign_issuances not directly exposed to browser roles');
 
-select ok(has_table_privilege('service_role','public.marketing_campaign_issuances','SELECT,INSERT'), 'marketing_campaign_issuances service-role access explicit');
+select ok(has_table_privilege('service_role','public.marketing_campaign_issuances','SELECT') and not has_table_privilege('service_role','public.marketing_campaign_issuances','INSERT'), 'marketing_campaign_issuances is read-only for service_role until audited write APIs exist');
 
 select ok(to_regclass('public.marketing_campaign_audit_events') is not null, 'marketing_campaign_audit_events exists');
 
@@ -72,7 +72,7 @@ select ok((select relrowsecurity and not relforcerowsecurity from pg_class where
 
 select ok(not has_table_privilege('anon','public.marketing_campaign_audit_events','SELECT') and not has_table_privilege('authenticated','public.marketing_campaign_audit_events','INSERT'), 'marketing_campaign_audit_events not directly exposed to browser roles');
 
-select ok(has_table_privilege('service_role','public.marketing_campaign_audit_events','SELECT,INSERT'), 'marketing_campaign_audit_events service-role access explicit');
+select ok(has_table_privilege('service_role','public.marketing_campaign_audit_events','SELECT') and not has_table_privilege('service_role','public.marketing_campaign_audit_events','INSERT'), 'marketing_campaign_audit_events is read-only for service_role until audited write APIs exist');
 
 select ok(not has_table_privilege('service_role','public.marketing_campaigns','UPDATE'), 'campaign state cannot be changed directly without an audited S2 RPC');
 
