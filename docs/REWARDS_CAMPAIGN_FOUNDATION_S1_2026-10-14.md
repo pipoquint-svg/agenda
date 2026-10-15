@@ -17,7 +17,7 @@ A tripla `(campaign_version_id,campaign_id,tenant_id)` exige correspondência à
 
 ## Segurança
 
-RLS habilitada e sem políticas em todas as quatro tabelas; `PUBLIC`, `anon` e `authenticated` não recebem grants de tabelas. `service_role` recebe apenas SELECT/INSERT nas quatro; **não recebe UPDATE nem DELETE em nenhuma tabela**. S2 precisará de uma operação autenticada que altere estado e registre a auditoria na mesma transação. A imutabilidade é garantida para o runtime, não para o proprietário privilegiado do banco.
+RLS habilitada e sem políticas em todas as quatro tabelas; `PUBLIC`, `anon` e `authenticated` não recebem grants de tabelas. `service_role` recebe apenas SELECT nas quatro tabelas; **não recebe INSERT, UPDATE nem DELETE**. Isto também impede inserir uma campanha diretamente com estado ACTIVE. S2 precisará de uma operação autenticada e auditada, em transação única, para criar e alterar campanhas; o S4 precisará de uma operação protegida para vincular emissões. A imutabilidade é garantida para o runtime, não para o proprietário privilegiado do banco.
 
 **Pendência de S2:** nenhuma API de edição é criada por S1; campanhas não podem transicionar de estado via DML do service_role. O S2 deverá implementar autorização OWNER/ADMIN, gravação obrigatória em `marketing_campaign_audit_events`, transições de estado e publicação só com versão aprovada. Não expor DML diretamente no browser.
 
