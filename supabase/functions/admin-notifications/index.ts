@@ -22,7 +22,7 @@ const events = [
   'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'WAITLIST_SIGNUP_TEAM', 'BIRTHDAY',
   'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'PAYMENT_PENDING_CREATED', 'MANUAL',
 ]
-const channels = ['EMAIL', 'GOOGLE_CALENDAR']
+const channels = ['EMAIL', 'GOOGLE_CALENDAR', 'WHATSAPP']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
@@ -260,6 +260,7 @@ Deno.serve(async (req) => {
     const htmlTemplate = typeof record.html_template === 'string' ? record.html_template.trim() || null : null
     if (!events.includes(eventKey)) throw new Error('NOTIFICATION_EVENT_INVALID')
     if (!channels.includes(channel)) throw new Error('NOTIFICATION_CHANNEL_INVALID')
+    if (channel === 'WHATSAPP' && record.is_active === true) throw new Error('WHATSAPP_TEMPLATE_DRAFT_ONLY')
     if (!audiences.includes(audience)) throw new Error('NOTIFICATION_AUDIENCE_INVALID')
     if (operationScope !== null && !['SABRINA', 'BLACKSHEEP'].includes(operationScope)) throw new Error('NOTIFICATION_OPERATION_SCOPE_INVALID')
     assertSafeCustomHtml(htmlTemplate)
