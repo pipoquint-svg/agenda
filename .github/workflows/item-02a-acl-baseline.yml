@@ -26,6 +26,7 @@ on:
       - 'supabase/migrations/20261013180100_admin_access_profile_by_auth_user.sql'
       - 'supabase/migrations/20261014203000_coupon_redemption_lifecycle.sql'
       - 'supabase/migrations/20261014230000_marketing_campaign_foundation.sql'
+      - 'supabase/migrations/20261015010000_marketing_campaign_admin_control.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -40,6 +41,7 @@ on:
       - 'supabase/tests/database/147_infinitepay_runtime_config.test.sql'
       - 'supabase/tests/database/153_waitlist_private_round_contract.test.sql'
       - 'supabase/tests/database/155_admin_customers_operation_scope.test.sql'
+      - 'supabase/tests/database/171_marketing_campaign_admin_control.test.sql'
       - 'tests/local-verification/item01_e2e_test.ts'
       - 'tests/local-verification/item02a_google_worker_test.ts'
       - 'docs/item-02a-acl-baseline.md'
@@ -131,7 +133,8 @@ jobs:
             supabase/migrations/20261012120000_public_checkout_hold_release.sql \
             supabase/migrations/20261013180100_admin_access_profile_by_auth_user.sql \
             supabase/migrations/20261014203000_coupon_redemption_lifecycle.sql \
-            supabase/migrations/20261014230000_marketing_campaign_foundation.sql
+            supabase/migrations/20261014230000_marketing_campaign_foundation.sql \
+            supabase/migrations/20261015010000_marketing_campaign_admin_control.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -216,7 +219,8 @@ jobs:
             supabase/migrations/20261012120000_public_checkout_hold_release.sql \
             supabase/migrations/20261013180100_admin_access_profile_by_auth_user.sql \
             supabase/migrations/20261014203000_coupon_redemption_lifecycle.sql \
-            supabase/migrations/20261014230000_marketing_campaign_foundation.sql
+            supabase/migrations/20261014230000_marketing_campaign_foundation.sql \
+            supabase/migrations/20261015010000_marketing_campaign_admin_control.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
