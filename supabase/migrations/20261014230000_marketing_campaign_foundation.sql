@@ -132,8 +132,11 @@ create index marketing_campaign_issuances_customer_idx
   on public.marketing_campaign_issuances(customer_id, issued_at desc);
 create index marketing_campaign_issuances_version_idx
   on public.marketing_campaign_issuances(campaign_version_id, campaign_id, tenant_id);
-create index marketing_campaign_issuances_origin_idx
-  on public.marketing_campaign_issuances(source_appointment_id)
+-- A completed rental may yield at most one reward from a given campaign.
+-- The idempotency key protects a retry; this key protects against a future
+-- evaluator changing how that retry key is derived.
+create unique index marketing_campaign_issuances_campaign_source_unique
+  on public.marketing_campaign_issuances(source_appointment_id, campaign_id)
   where source_appointment_id is not null;
 create index marketing_campaign_audit_events_campaign_idx
   on public.marketing_campaign_audit_events(campaign_id, created_at desc);

@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public, extensions;
-select plan(40);
+select plan(41);
 
 create function pg_temp.s1_throws(p_statement text, p_expected text)
 returns boolean language plpgsql as $$
@@ -111,6 +111,8 @@ select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_versions(ten
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-001')$$,'23505'),'same event cannot issue twice');
 
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000001','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000040','17000000-0000-4000-8000-000000000030','rent-2026-10-14-002')$$,'23505'),'same coupon cannot belong to multiple emissions');
+
+select ok(exists (select 1 from pg_indexes where schemaname='public' and indexname='marketing_campaign_issuances_campaign_source_unique'), 'campaign source uniqueness prevents a rental from issuing a second reward');
 
 select ok(pg_temp.s1_throws($$insert into public.marketing_campaign_issuances (tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,idempotency_key) values ('17000000-0000-4000-8000-000000000002','17000000-0000-4000-8000-000000000010','17000000-0000-4000-8000-000000000020','17000000-0000-4000-8000-000000000041','17000000-0000-4000-8000-000000000030','rent-2026-10-14-003')$$,'23503'),'emission tenant must match campaign version');
 

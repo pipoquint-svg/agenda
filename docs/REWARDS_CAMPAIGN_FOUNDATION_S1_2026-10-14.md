@@ -34,7 +34,7 @@ S5 deve adicionar uma verificação de validade para cupons vinculados à campan
 ## Gates
 
 - Migration: `supabase/migrations/20261014230000_marketing_campaign_foundation.sql`.
-- pgTAP: `supabase/tests/database/170_marketing_campaign_foundation.test.sql`, 40 assertions com dados temporários e rollback, incluindo bloqueio de atualização direta de campanha e tentativa de vincular cupom de um cliente a outro.
+- pgTAP: `supabase/tests/database/170_marketing_campaign_foundation.test.sql`, 41 assertions com dados temporários e rollback, incluindo bloqueio de atualização direta de campanha, tentativa de vincular cupom de um cliente a outro e a chave única parcial por locação/campanha.
 - RLS baseline: quatro tabelas privadas adicionais no overlay.
 - Item 2A: migration S1 estacionada/restaurada no teste do baseline histórico.
 - ACL Item 2C: nenhum RPC ou função pública nova; os contadores de funções permanecem intactos.
