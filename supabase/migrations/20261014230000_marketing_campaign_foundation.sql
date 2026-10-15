@@ -150,11 +150,13 @@ revoke all on public.marketing_campaigns,
   public.marketing_campaign_audit_events
   from public, anon, authenticated, service_role;
 
--- No direct UPDATE until S2 supplies authenticated and atomically audited state changes.
-grant select, insert on public.marketing_campaigns to service_role;
-grant select, insert on public.marketing_campaign_versions to service_role;
-grant select, insert on public.marketing_campaign_issuances to service_role;
-grant select, insert on public.marketing_campaign_audit_events to service_role;
+-- Fail closed until S2/S4 provide audited, authorized transactional write endpoints.
+-- SELECT access is for internal diagnostics; even INSERT could create an ACTIVE
+-- campaign or fabricate an issuance without an audit trail.
+grant select on public.marketing_campaigns,
+  public.marketing_campaign_versions,
+  public.marketing_campaign_issuances,
+  public.marketing_campaign_audit_events to service_role;
 
 comment on table public.marketing_campaigns is
   'S1: inert tenant-scoped campaign catalogue; no automated activation or issuance.';
