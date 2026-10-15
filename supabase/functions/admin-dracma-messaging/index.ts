@@ -74,8 +74,21 @@ async function tenantForAdmin(authUserId: string) {
     .eq("status", "ACTIVE")
     .limit(2);
   if (error) throw new Error("DRACMA_MESSAGING_TENANT_LOOKUP_FAILED");
-  return data?.length === 1 && typeof data[0]?.tenant_id === "string"
+  const tenantId = data?.length === 1 && typeof data[0]?.tenant_id === "string"
     ? data[0].tenant_id
+    : null;
+  if (!tenantId) return null;
+  const { data: tenant, error: tenantError } = await adminClient().from(
+    "tenants",
+  )
+    .select("id,name")
+    .eq("id", tenantId)
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+  if (tenantError) throw new Error("DRACMA_MESSAGING_TENANT_LOOKUP_FAILED");
+  return tenant && typeof tenant.id === "string" &&
+      typeof tenant.name === "string" && tenant.name.trim()
+    ? { id: tenant.id, name: tenant.name.trim() }
     : null;
 }
 
@@ -93,7 +106,7 @@ Deno.serve(async (req) => {
     const operation = operationFor(req, requestBody);
     const actor = await requireAdminPermission(
       req,
-      req.method === "POST" ? "INTEGRATIONS_MANAGE" : "INTEGRATIONS_VIEW",
+      "INTEGRATIONS_MANAGE",
     );
     const tenantId = await tenantForAdmin(actor.authUserId);
     if (!tenantId) {
@@ -104,9 +117,12 @@ Deno.serve(async (req) => {
       contract:
         DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT as typeof DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT,
       request_id: crypto.randomUUID(),
-      agenda_tenant_id: tenantId,
+      agenda_tenant_id: tenantId.id,
       agenda_admin_id: actor.adminId,
-      operation: req.method === "POST" ? operation : "STATUS" as const,
+      agenda_tenant_name: tenantId.name,
+      // The GET read-model establishes only Dracma's technical projection.
+      // It never opens Meta or grants Messaging entitlement/capabilities.
+      operation: req.method === "POST" ? operation : "PROVISION" as const,
       issued_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 60_000).toISOString(),
     };
