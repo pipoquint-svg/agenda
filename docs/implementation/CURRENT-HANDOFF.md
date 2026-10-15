@@ -14,6 +14,14 @@ The user explicitly authorized `{{customer.phone}}` for notification templates. 
 
 Pending: review, separate Agenda and BlackSheep PRs, CI, and the normal explicitly authorized publication gate. Rollback is a revert of either independent PR; templates using legacy variables remain valid.
 
+## WhatsApp tenant foundation — explicitly authorized 2026-10-15
+
+Branch `codex/whatsapp-tenant-foundation` from `origin/main` `a546f2dc9232caa4cee74d8d6e1627abf35ae5db`. This isolated additive foundation reuses the canonical `tenants` record: it introduces tenant-bound Meta Cloud identifiers and onboarding state (`whatsapp_tenant_integrations`), phone-number identifiers (`whatsapp_tenant_phone_numbers`) and template-submission audit state (`whatsapp_template_submissions`). The submission record is constrained to the same tenant as its integration; WABA and provider phone IDs are globally unique when present.
+
+Forward-only migration: `20261015011437_whatsapp_tenant_foundation.sql`. Focused database proof: `171_whatsapp_tenant_foundation.test.sql`; the reviewed RLS-parity overlay explicitly records the three new closed tables. The tables are RLS-enabled and closed to anon/authenticated roles; they store no credentials or access tokens. This slice includes no Meta login, Embedded Signup callback, Graph API call, webhook, template submission, activation, message dispatch or production change. Rollback is a revert migration only before any data is stored; no operational integration state exists yet.
+
+Next objective: review and CI on the isolated PR. A subsequent adapter slice requires explicit Meta setup/login authorization, a server-side secret-management design, callback validation, action/audit contracts and separate approval before any provider-facing mutation.
+
 ## Late checkout hold + shared admin session — explicitly requested 2026-10-12
 
 **Published 2026-10-13.** Agenda PR #483 merged as `70fa65a74ebf49cc574861314e6a24642b808457` (main CI green on that SHA). Backup run 38402498564 produced protected artifact 11815977559 (5,667,866 bytes) before the database step. Production deploy run 38403906439 applied migration `20261012120000` and then failed only while bundling the Edge Function (ECR `toomanyrequests`); run 38404795520 deployed `booking-checkout` from the same SHA. Production readback without creating holds: `RELEASE` with an unknown token returns `NOT_FOUND`; direct anon call to `service_public_release_checkout_hold` returns 42501. BlackSheep PR #124 merged as `bde4265bd9100a8210628d7259e3497e67c7a030`, synchronized by Lovable and published (deployment `eb5924f8-38e2-4968-bc7f-71eabe524715`); the official domain serves the late-hold booking code and the Gestão chunk without "Verificando permissões…". The user confirmed both behaviors in production. Pending: Sabrina embed upload to `sabrinapierri.com.br/agenda-native/` (outside this repository's pipelines).
