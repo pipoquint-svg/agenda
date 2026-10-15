@@ -132,10 +132,16 @@ Deno.serve(async (req) => {
       data?: unknown;
     } | null;
     if (req.method === "GET") {
-      if (payload?.status !== "READY" || payload.signup_available !== false) {
+      if (
+        payload?.status !== "READY" ||
+        typeof payload.signup_available !== "boolean"
+      ) {
         throw new Error("DRACMA_MESSAGING_GATEWAY_INVALID");
       }
-      return json({ status: "READY", signup_available: false });
+      return json({
+        status: "READY",
+        signup_available: payload.signup_available,
+      });
     }
     if (operation === "COMPLETE_SESSION" || operation === "CANCEL_SESSION") {
       const data = payload?.data;
