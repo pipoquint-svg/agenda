@@ -16,11 +16,14 @@ TABLE|tenant_capabilities|true|false
 TABLE|tenant_members|true|false
 TABLE|tenant_settings|true|false
 TABLE|tenants|true|false
+TABLE|whatsapp_template_submissions|true|false
+TABLE|whatsapp_tenant_integrations|true|false
+TABLE|whatsapp_tenant_phone_numbers|true|false
 EOF
 sort -o "$EXPECTED" "$EXPECTED"
 
 if ! diff -u "$EXPECTED" "$ACTUAL"; then
-  echo "Unexpected RLS delta beyond reviewed private-waitlist-round, tenant-foundation and post-booking-extra tables." >&2
+  echo "Unexpected RLS delta beyond reviewed private-waitlist-round, tenant, WhatsApp and post-booking-extra tables." >&2
   exit 1
 fi
 
