@@ -35,9 +35,9 @@ async function tenantForAdmin(authUserId: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
-  if (req.method !== "GET") return json({ error: { code: "METHOD_NOT_ALLOWED" } }, 405)
+  if (req.method !== "GET" && req.method !== "POST") return json({ error: { code: "METHOD_NOT_ALLOWED" } }, 405)
   try {
-    const actor = await requireAdminPermission(req, "INTEGRATIONS_VIEW")
+    const actor = await requireAdminPermission(req, req.method === "POST" ? "INTEGRATIONS_MANAGE" : "INTEGRATIONS_VIEW")
     const tenantId = await tenantForAdmin(actor.authUserId)
     if (!tenantId) return json({ status: "SETUP_REQUIRED", signup_available: false })
 
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       request_id: crypto.randomUUID(),
       agenda_tenant_id: tenantId,
       agenda_admin_id: actor.adminId,
-      operation: "STATUS" as const,
+      operation: req.method === "POST" ? "START_SESSION" as const : "STATUS" as const,
       issued_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 60_000).toISOString(),
     }
@@ -59,8 +59,16 @@ Deno.serve(async (req) => {
     })
     if (!response.ok) throw new Error("DRACMA_MESSAGING_GATEWAY_UNAVAILABLE")
     const payload = await response.json().catch(() => null) as { status?: unknown; signup_available?: unknown } | null
-    if (payload?.status !== "READY" || payload.signup_available !== false) throw new Error("DRACMA_MESSAGING_GATEWAY_INVALID")
-    return json({ status: "READY", signup_available: false })
+    if (req.method === "GET") {
+      if (payload?.status !== "READY" || payload.signup_available !== false) throw new Error("DRACMA_MESSAGING_GATEWAY_INVALID")
+      return json({ status: "READY", signup_available: false })
+    }
+    const started = payload?.status === "STARTED" && typeof (payload as Record<string, unknown>).session_id === "string"
+      && typeof (payload as Record<string, unknown>).expires_at === "string"
+      && typeof (payload as Record<string, unknown>).app_id === "string"
+      && typeof (payload as Record<string, unknown>).configuration_id === "string"
+    if (!started) throw new Error("DRACMA_MESSAGING_GATEWAY_INVALID")
+    return json(payload)
   } catch (error) {
     const code = safeCode(error)
     if (code.startsWith("CONFIG_")) return json({ status: "SETUP_REQUIRED", signup_available: false })
