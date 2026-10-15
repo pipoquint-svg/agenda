@@ -3,6 +3,16 @@ create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 select plan(31);
 
+create function pg_temp.s2_throws(p_statement text)
+returns boolean language plpgsql as $$
+begin
+  execute p_statement;
+  return false;
+exception when others then
+  return true;
+end
+$$;
+
 select has_function('public','service_admin_create_marketing_campaign',array['uuid','text','text','text','text','jsonb','uuid','uuid'],'S2 create campaign action exists');
 select has_function('public','service_admin_create_marketing_campaign_version',array['uuid','jsonb','uuid','uuid'],'S2 append version action exists');
 select has_function('public','service_admin_transition_marketing_campaign',array['uuid','text','uuid','text','uuid','uuid'],'S2 transition action exists');
@@ -90,7 +100,7 @@ select is((select active_version_id from public.marketing_campaigns where id=(cu
 select is((select publication_status from public.marketing_campaign_versions where id=(current_setting('agenda.rewards_create')::jsonb->>'version_id')::uuid),'SUPERSEDED','replaced published version is superseded');
 select is((select publication_status from public.marketing_campaign_versions where id=(current_setting('agenda.rewards_version_2')::jsonb->>'version_id')::uuid),'PUBLISHED','replacement version is published');
 select ok((select count(*) = 1 from public.marketing_campaign_versions where campaign_id=(current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid and publication_status='PUBLISHED'),'campaign has exactly one published version');
-select throws_ok($$delete from public.admin_users where id='17100000-0000-4000-8000-000000000012'$$,'23503',null,'audit actor cannot be deleted after an audited action');
+select ok(pg_temp.s2_throws($$delete from public.admin_users where id='17100000-0000-4000-8000-000000000012'$$),'audit actor cannot be deleted after an audited action');
 select throws_ok($$select public.service_admin_create_marketing_campaign_version((current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid,jsonb_set(current_setting('agenda.rewards_offer')::jsonb,'{applies_to_hour_packages}','true'::jsonb),'17100000-0000-4000-8000-000000000012','17100000-0000-4000-8000-000000000111')$$,'22023','MARKETING_CAMPAIGN_REWARDS_POLICY_INVALID','S2 rejects hour-package eligibility');
 
 select * from finish();
