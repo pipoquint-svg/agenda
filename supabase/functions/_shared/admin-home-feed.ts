@@ -98,7 +98,7 @@ export function buildHomeFeed(
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
     .filter((row) => !operationScope || row.operation_scope === operationScope)
-    .slice(0, 10)
+    .slice(0, 5)
 
   return { pending_items: [] as unknown[], recent_appointments, recent_movements }
 }
