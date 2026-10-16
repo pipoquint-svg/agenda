@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(34);
 
 create function pg_temp.s2_throws(p_statement text)
 returns boolean language plpgsql as $$
@@ -39,12 +39,17 @@ insert into public.admin_users(id,auth_user_id,display_name,role,is_active) valu
   ('17100000-0000-4000-8000-000000000013','17100000-0000-4000-8000-000000000003','Rewards Operation','OPERATION',true);
 insert into public.tenants(id,name,slug,status)
 values ('17100000-0000-4000-8000-000000000020','Rewards S2','rewards-s2','ACTIVE');
+insert into public.categories(id,name,slug)
+values ('17100000-0000-4000-8000-000000000021','Rewards S2 services','rewards-s2-services');
+insert into public.services(id,category_id,name,slug,base_duration_minutes,base_price,minimum_people,maximum_people,operation_scope)
+values ('17100000-0000-4000-8000-000000000022','17100000-0000-4000-8000-000000000021','Rewards S2 eligible service','rewards-s2-eligible-service',60,100,1,10,'BLACKSHEEP');
 
 select set_config('agenda.rewards_offer', jsonb_build_object(
   'trigger_kind','RENTAL_COMPLETED_FINANCIALLY_CLEARED','discount_type','PERCENT','discount_value',20,
   'discount_scope','SERVICE_ONLY','validity_basis','BOOKING_CONFIRMATION','validity_days',30,
   'max_uses',1,'max_uses_per_customer',1,'applies_to_extras',false,'applies_to_hour_packages',false,
-  'stacking_policy','EXCLUSIVE'
+  'stacking_policy','EXCLUSIVE',
+  'eligibility_rules',jsonb_build_object('service_ids',jsonb_build_array('17100000-0000-4000-8000-000000000022'))
 )::text, true);
 select set_config('agenda.rewards_create', public.service_admin_create_marketing_campaign(
   '17100000-0000-4000-8000-000000000020','volte-sempre-s2','Volte Sempre S2','Volte Sempre','S2 test',
@@ -55,6 +60,9 @@ select is((current_setting('agenda.rewards_create')::jsonb->>'replayed')::boolea
 select is((select state from public.marketing_campaigns where id=(current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid),'DRAFT','new campaign is inert');
 select ok((select active_version_id is null from public.marketing_campaigns where id=(current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid),'draft has no active version pointer');
 select is((select publication_status from public.marketing_campaign_versions where id=(current_setting('agenda.rewards_create')::jsonb->>'version_id')::uuid),'DRAFT','initial offer is not published implicitly');
+select ok(to_regclass('public.marketing_campaign_version_services') is not null,'S4 target-service selection table exists');
+select is((select count(*)::integer from public.marketing_campaign_version_services where campaign_version_id=(current_setting('agenda.rewards_create')::jsonb->>'version_id')::uuid),1,'checkbox-selected service is stored with the immutable campaign version');
+select is((select service_id from public.marketing_campaign_version_services where campaign_version_id=(current_setting('agenda.rewards_create')::jsonb->>'version_id')::uuid),'17100000-0000-4000-8000-000000000022'::uuid,'stored target service matches the selected checkbox');
 select is((select count(*)::integer from public.marketing_campaign_audit_events where campaign_id=(current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid),2,'create records campaign and version audit events atomically');
 select is((select actor_admin_id from public.marketing_campaign_audit_events where request_id='17100000-0000-4000-8000-000000000101'),'17100000-0000-4000-8000-000000000011'::uuid,'create audit keeps immutable admin actor');
 select is((public.service_admin_create_marketing_campaign(

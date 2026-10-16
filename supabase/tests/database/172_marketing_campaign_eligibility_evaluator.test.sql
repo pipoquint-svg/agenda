@@ -50,7 +50,8 @@ select set_config('agenda.s3.offer', jsonb_build_object(
   'trigger_kind','RENTAL_COMPLETED_FINANCIALLY_CLEARED','discount_type','PERCENT','discount_value',20,
   'discount_scope','SERVICE_ONLY','validity_basis','BOOKING_CONFIRMATION','validity_days',30,
   'max_uses',1,'max_uses_per_customer',1,'applies_to_extras',false,'applies_to_hour_packages',false,
-  'stacking_policy','EXCLUSIVE','recurring_after_discounted_rental',false
+  'stacking_policy','EXCLUSIVE','recurring_after_discounted_rental',false,
+  'eligibility_rules',jsonb_build_object('service_ids',jsonb_build_array('17200000-0000-4000-8000-000000000013'))
 )::text,true);
 select set_config('agenda.s3.created', public.service_admin_create_marketing_campaign(
   '8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f','rewards-s3','Rewards S3',null,null,current_setting('agenda.s3.offer')::jsonb,
