@@ -144,6 +144,8 @@ select is(
   'MARKETING_CAMPAIGN_SOURCE_ALREADY_ISSUED','existing source issuance blocks a second Reward before S4'
 );
 
+update public.services set operation_scope='BLACKSHEEP' where id='17200000-0000-4000-8000-000000000013';
+
 insert into public.tenants(id,name,slug,status)
 values ('17200000-0000-4000-8000-000000000050','Rewards S3 unmapped','rewards-s3-unmapped','ACTIVE');
 select set_config('agenda.s3.unmapped', public.service_admin_create_marketing_campaign(
