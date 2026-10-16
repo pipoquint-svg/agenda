@@ -29,6 +29,12 @@ insert into public.services(
 insert into public.service_employees(id,service_id,employee_id) values
   ('17200000-0000-4000-8000-000000000015','17200000-0000-4000-8000-000000000013','17200000-0000-4000-8000-000000000011'),
   ('17200000-0000-4000-8000-000000000016','17200000-0000-4000-8000-000000000014','17200000-0000-4000-8000-000000000011');
+insert into public.service_change_policies(
+  service_id,notice_hours,reschedule_first_early_percent,reschedule_first_late_percent,
+  reschedule_repeat_percent,cancellation_late_percent
+) values
+  ('17200000-0000-4000-8000-000000000013',48,0,20,30,30),
+  ('17200000-0000-4000-8000-000000000014',48,0,20,30,30);
 insert into public.customers(id,name,email,phone)
 values ('17200000-0000-4000-8000-000000000017','Rewards S3 customer','rewards-s3@example.test','+5548999991720');
 insert into public.appointments(
