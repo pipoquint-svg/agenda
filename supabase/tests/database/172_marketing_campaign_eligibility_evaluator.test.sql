@@ -231,7 +231,7 @@ insert into public.appointment_discounts(
   'PERCENT',20,20
 );
 update public.coupons
-set valid_until=now()-interval '1 second'
+set valid_from=now()-interval '31 days', valid_until=now()-interval '1 second'
 where id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid;
 select throws_ok(
   $$update public.appointments set status='CONFIRMED' where id='17200000-0000-4000-8000-000000000022'$$,

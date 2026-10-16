@@ -93,16 +93,6 @@ begin
         'public.calculate_booking_quotes_for_duration_batch(uuid,uuid,integer,jsonb,integer,timestamp with time zone[],text)',
         E'      if (v_coupon.valid_from is not null and coalesce(v_start, now()) < v_coupon.valid_from)\n         or (v_coupon.valid_until is not null and coalesce(v_start, now()) > v_coupon.valid_until)\n      then',
         E'      if not public.coupon_is_valid_for_booking(v_coupon, v_start) then'
-      ),
-      (
-        'public.apply_checkout_coupon(text,text)',
-        E'if not found or not v_coupon.is_active or (v_coupon.valid_from is not null and now()<v_coupon.valid_from) or (v_coupon.valid_until is not null and now()>v_coupon.valid_until) then',
-        E'if not found or not public.coupon_is_valid_for_booking(v_coupon, v_hold.core_start_at) then'
-      ),
-      (
-        'public.enforce_checkout_coupon_customer()',
-        E'if not found or not v_coupon.is_active or (v_coupon.valid_from is not null and now() < v_coupon.valid_from) or (v_coupon.valid_until is not null and now() > v_coupon.valid_until) then',
-        E'if not found or not public.coupon_is_valid_for_booking(v_coupon, new.core_start_at) then'
       )
     ) as p(signature, anchor, replacement)
   loop
@@ -114,21 +104,6 @@ begin
     execute v_patched;
   end loop;
 
-  v_definition := pg_get_functiondef(
-    'public.promote_checkout_hold_standard(uuid,uuid,text,uuid[],jsonb,jsonb,inet,text)'::regprocedure
-  );
-  if position(
-    E'or (v_coupon.valid_from is not null and now() < v_coupon.valid_from)\n        or (v_coupon.valid_until is not null and now() > v_coupon.valid_until)'
-    in v_definition
-  ) = 0 then
-    raise exception 'REWARDS_S5_PROMOTION_VALIDITY_ANCHOR_NOT_FOUND';
-  end if;
-  v_patched := replace(
-    v_definition,
-    E'or (v_coupon.valid_from is not null and now() < v_coupon.valid_from)\n        or (v_coupon.valid_until is not null and now() > v_coupon.valid_until)',
-    E'or not public.coupon_is_valid_for_booking(v_coupon, v_hold.core_start_at)'
-  );
-  execute v_patched;
 end;
 $patch_coupon_booking_validity$;
 
