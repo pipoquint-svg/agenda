@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(32);
+select plan(36);
 
 insert into auth.users(id,email,created_at,updated_at)
 values ('17200000-0000-4000-8000-000000000001','rewards-s3-owner@example.test',now(),now());
@@ -158,6 +158,7 @@ select is(
     'discount_type', c.discount_type,
     'discount_value', c.discount_value,
     'discount_scope', c.discount_scope,
+    'validity_basis', c.validity_basis,
     'source', c.source,
     'customer_id', c.customer_id,
     'source_appointment_id', c.source_appointment_id,
@@ -166,7 +167,7 @@ select is(
     'used_count', c.used_count
   ) from public.coupons c where c.id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
   jsonb_build_object(
-    'discount_type','PERCENT','discount_value',20,'discount_scope','SERVICE_ONLY',
+    'discount_type','PERCENT','discount_value',20,'discount_scope','SERVICE_ONLY','validity_basis','BOOKING_CONFIRMATION',
     'source','PROMOTION','customer_id','17200000-0000-4000-8000-000000000017'::uuid,
     'source_appointment_id','17200000-0000-4000-8000-000000000020'::uuid,
     'max_uses',1,'max_uses_per_customer',1,'used_count',0
@@ -179,6 +180,23 @@ select ok(
    from public.coupons c
    where c.id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
   'S4 coupon validity is derived from the published version'
+);
+select ok(
+  public.coupon_is_valid_for_booking(
+    (select c from public.coupons c where c.id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
+    now() + interval '31 days'
+  ),
+  'S5 accepts a Rewards coupon for a rental after its window when confirmation is still in-window'
+);
+update public.coupons
+set valid_from=now()-interval '1 day', valid_until=now()+interval '1 day'
+where id='17200000-0000-4000-8000-000000000040';
+select ok(
+  not public.coupon_is_valid_for_booking(
+    (select c from public.coupons c where c.id='17200000-0000-4000-8000-000000000040'),
+    now() + interval '2 days'
+  ),
+  'S5 preserves rental-start validity for a legacy coupon'
 );
 select is(
   (select count(*)::integer from public.coupon_services where coupon_id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
@@ -203,6 +221,26 @@ select is(
    where campaign_id=(current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid
      and after_snapshot->>'coupon_id'=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')),
   '17200000-0000-4000-8000-000000000002'::uuid,'S4 audit attributes issuance to the publisher who authorized the active version'
+);
+insert into public.appointment_discounts(
+  appointment_id,coupon_id,code_snapshot,discount_type_snapshot,discount_value_snapshot,calculated_discount_amount
+) values (
+  '17200000-0000-4000-8000-000000000022',
+  (current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid,
+  (current_setting('agenda.s4.issued')::jsonb->>'coupon_code'),
+  'PERCENT',20,20
+);
+update public.coupons
+set valid_until=now()-interval '1 second'
+where id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid;
+select throws_ok(
+  $$update public.appointments set status='CONFIRMED' where id='17200000-0000-4000-8000-000000000022'$$,
+  'P0001','MARKETING_CAMPAIGN_COUPON_EXPIRED_AT_CONFIRMATION',
+  'S5 blocks confirmation when the Rewards window expired after checkout'
+);
+select is(
+  (select status from public.appointments where id='17200000-0000-4000-8000-000000000022'),
+  'AWAITING_PAYMENT','S5 expiration rejection leaves the appointment unconfirmed'
 );
 select is(
   (public.service_issue_marketing_campaign_coupon(

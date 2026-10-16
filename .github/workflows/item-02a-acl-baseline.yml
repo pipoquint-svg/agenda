@@ -29,6 +29,7 @@ on:
       - 'supabase/migrations/20261015010000_marketing_campaign_admin_control.sql'
       - 'supabase/migrations/20261016201444_marketing_campaign_eligibility_evaluator.sql'
       - 'supabase/migrations/20261016213000_marketing_campaign_target_services.sql'
+      - 'supabase/migrations/20261016233000_marketing_campaign_checkout_validity.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -141,7 +142,8 @@ jobs:
             supabase/migrations/20261015011437_whatsapp_tenant_foundation.sql \
             supabase/migrations/20261016201444_marketing_campaign_eligibility_evaluator.sql \
             supabase/migrations/20261016213000_marketing_campaign_target_services.sql \
-            supabase/migrations/20261016223000_marketing_campaign_coupon_issuance.sql
+            supabase/migrations/20261016223000_marketing_campaign_coupon_issuance.sql \
+            supabase/migrations/20261016233000_marketing_campaign_checkout_validity.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -231,7 +233,8 @@ jobs:
             supabase/migrations/20261015011437_whatsapp_tenant_foundation.sql \
             supabase/migrations/20261016201444_marketing_campaign_eligibility_evaluator.sql \
             supabase/migrations/20261016213000_marketing_campaign_target_services.sql \
-            supabase/migrations/20261016223000_marketing_campaign_coupon_issuance.sql
+            supabase/migrations/20261016223000_marketing_campaign_coupon_issuance.sql \
+            supabase/migrations/20261016233000_marketing_campaign_checkout_validity.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
