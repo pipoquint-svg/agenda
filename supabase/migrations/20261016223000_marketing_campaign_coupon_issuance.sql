@@ -119,7 +119,7 @@ begin
   insert into public.marketing_campaign_audit_events(
     tenant_id, campaign_id, actor_admin_id, event_kind, after_snapshot
   ) values (
-    (v_eligibility->>'tenant_id')::uuid, p_campaign_id, null, 'ISSUANCE_LINKED',
+    (v_eligibility->>'tenant_id')::uuid, p_campaign_id, v_version.published_by_admin_id, 'ISSUANCE_LINKED',
     jsonb_build_object(
       'coupon_id', v_coupon_id,
       'campaign_version_id', v_version.id,

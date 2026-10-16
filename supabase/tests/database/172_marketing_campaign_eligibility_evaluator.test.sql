@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(32);
 
 insert into auth.users(id,email,created_at,updated_at)
 values ('17200000-0000-4000-8000-000000000001','rewards-s3-owner@example.test',now(),now());
@@ -195,6 +195,10 @@ select is(
 select is(
   (select event_kind from public.marketing_campaign_audit_events where campaign_id=(current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid order by created_at desc, id desc limit 1),
   'ISSUANCE_LINKED','S4 records the immutable issuance audit event'
+);
+select is(
+  (select actor_admin_id from public.marketing_campaign_audit_events where campaign_id=(current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid order by created_at desc, id desc limit 1),
+  '17200000-0000-4000-8000-000000000002'::uuid,'S4 audit attributes issuance to the publisher who authorized the active version'
 );
 select is(
   (public.service_issue_marketing_campaign_coupon(
