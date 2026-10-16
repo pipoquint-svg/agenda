@@ -22,6 +22,7 @@ TABLE|whatsapp_tenant_phone_numbers|true|false
 TABLE|marketing_campaigns|true|false
 TABLE|marketing_campaign_versions|true|false
 TABLE|marketing_campaign_issuances|true|false
+TABLE|marketing_campaign_version_services|true|false
 TABLE|marketing_campaign_audit_events|true|false
 EOF
 sort -o "$EXPECTED" "$EXPECTED"

@@ -524,8 +524,8 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 490 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=490 actual=%', v_public_function_count;
+  if v_public_function_count <> 492 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=492 actual=%', v_public_function_count;
   end if;
   if v_service_role_execute_count <> 420 then
     raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=420 actual=%', v_service_role_execute_count;

@@ -78,5 +78,8 @@ create trigger marketing_campaigns_require_target_services_on_activation
 before update of state, active_version_id on public.marketing_campaigns
 for each row execute function public.enforce_marketing_campaign_target_services_on_activation();
 
+revoke all on function public.capture_marketing_campaign_version_target_services() from public, anon, authenticated, service_role;
+revoke all on function public.enforce_marketing_campaign_target_services_on_activation() from public, anon, authenticated, service_role;
+
 comment on table public.marketing_campaign_version_services is
   'Immutable projection of checkbox-selected BlackSheep services from a campaign version eligibility_rules.service_ids payload.';
