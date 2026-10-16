@@ -118,8 +118,8 @@ begin
     'public.promote_checkout_hold_standard(uuid,uuid,text,uuid[],jsonb,jsonb,inet,text)'::regprocedure
   );
   if position(
-    E'or (v_coupon.valid_from is not null and now() < v_coupon.valid_from)\n        or (v_coupon.valid_until is not null and now() > v_coupon.valid_until)',
-    v_definition
+    E'or (v_coupon.valid_from is not null and now() < v_coupon.valid_from)\n        or (v_coupon.valid_until is not null and now() > v_coupon.valid_until)'
+    in v_definition
   ) = 0 then
     raise exception 'REWARDS_S5_PROMOTION_VALIDITY_ANCHOR_NOT_FOUND';
   end if;
