@@ -26,10 +26,9 @@ begin
     raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_ISSUANCE_INPUT_INVALID';
   end if;
 
-  select i, c
-    into v_existing_issuance, v_existing_coupon
+  select i.*
+    into v_existing_issuance
   from public.marketing_campaign_issuances i
-  join public.coupons c on c.id = i.coupon_id
   where i.campaign_id = p_campaign_id
     and i.idempotency_key = btrim(p_idempotency_key)
   for update of i;
@@ -38,6 +37,9 @@ begin
     if v_existing_issuance.source_appointment_id is distinct from p_source_appointment_id then
       raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_ISSUANCE_IDEMPOTENCY_KEY_REUSED';
     end if;
+    select * into v_existing_coupon
+    from public.coupons
+    where id = v_existing_issuance.coupon_id;
     return jsonb_build_object(
       'coupon_id', v_existing_coupon.id,
       'coupon_code', v_existing_coupon.code,
