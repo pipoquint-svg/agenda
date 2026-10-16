@@ -37,7 +37,7 @@ insert into public.appointments(
 ) values
   ('17200000-0000-4000-8000-000000000020','REWARDS-S3-ELIGIBLE','17200000-0000-4000-8000-000000000013','17200000-0000-4000-8000-000000000015','17200000-0000-4000-8000-000000000017','COMPLETED','PAID',now()-interval '3 days',now()-interval '3 days'+interval '1 hour',60,1,'Rewards S3 rental',100),
   ('17200000-0000-4000-8000-000000000021','REWARDS-S3-UNPAID','17200000-0000-4000-8000-000000000013','17200000-0000-4000-8000-000000000015','17200000-0000-4000-8000-000000000017','COMPLETED','PARTIALLY_PAID',now()-interval '2 days',now()-interval '2 days'+interval '1 hour',60,1,'Rewards S3 rental',100),
-  ('17200000-0000-4000-8000-000000000022','REWARDS-S3-PENDING','17200000-0000-4000-8000-000000000013','17200000-0000-4000-8000-000000000015','17200000-0000-4000-8000-000000000017','CONFIRMED','PAID',now()-interval '1 day',now()-interval '1 day'+interval '1 hour',60,1,'Rewards S3 rental',100),
+  ('17200000-0000-4000-8000-000000000022','REWARDS-S3-PENDING','17200000-0000-4000-8000-000000000013','17200000-0000-4000-8000-000000000015','17200000-0000-4000-8000-000000000017','AWAITING_PAYMENT','PAID',now()-interval '1 day',now()-interval '1 day'+interval '1 hour',60,1,'Rewards S3 rental',100),
   ('17200000-0000-4000-8000-000000000023','REWARDS-S3-FOREIGN','17200000-0000-4000-8000-000000000014','17200000-0000-4000-8000-000000000016','17200000-0000-4000-8000-000000000017','COMPLETED','PAID',now()-interval '4 days',now()-interval '4 days'+interval '1 hour',60,1,'Rewards S3 foreign',100);
 
 select set_config('agenda.s3.offer', jsonb_build_object(
@@ -79,7 +79,7 @@ select is(
 );
 select is(
   public.service_evaluate_marketing_campaign_eligibility((current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,'17200000-0000-4000-8000-000000000022')->>'reason_code',
-  'MARKETING_CAMPAIGN_SOURCE_NOT_COMPLETED','confirmed rental is not completed'
+  'MARKETING_CAMPAIGN_SOURCE_NOT_COMPLETED','uncompleted rental is not eligible'
 );
 select is(
   public.service_evaluate_marketing_campaign_eligibility((current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,'17200000-0000-4000-8000-000000000023')->>'reason_code',
