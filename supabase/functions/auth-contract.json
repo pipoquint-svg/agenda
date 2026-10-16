@@ -3,10 +3,10 @@
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
     "captured_on": "2026-09-12",
-    "active_total": 78,
+    "active_total": 79,
     "verify_jwt_false": 61,
-    "verify_jwt_true": 17,
-    "versioned_active": 73,
+    "verify_jwt_true": 18,
+    "versioned_active": 74,
     "production_orphans": 5,
     "versioned_inactive": 12
   },
@@ -54,6 +54,7 @@
       "admin-change-actions",
       "admin-copy-availability",
       "admin-coupons",
+      "admin-marketing-campaigns",
       "admin-customers",
       "admin-employees",
       "admin-notifications",

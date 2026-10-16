@@ -20,6 +20,7 @@ const EmployeeAdmin = lazy(() => import('./EmployeeAdmin').then((m) => ({ defaul
 const GestaoEntry = lazy(() => import('./GestaoEntry').then((m) => ({ default: m.GestaoEntry })))
 const GestaoSettingsPage = lazy(() => import('./GestaoSettingsPage').then((m) => ({ default: m.GestaoSettingsPage })))
 const ManageReservation = lazy(() => import('./ManageReservation').then((m) => ({ default: m.ManageReservation })))
+const MarketingCampaignAdmin = lazy(() => import('./MarketingCampaignAdmin').then((m) => ({ default: m.MarketingCampaignAdmin })))
 const NotificationsAdmin = lazy(() => import('./NotificationsAdmin').then((m) => ({ default: m.NotificationsAdmin })))
 const OperationSettingsAdmin = lazy(() => import('./OperationSettingsAdmin').then((m) => ({ default: m.OperationSettingsAdmin })))
 const OpsHealthAdmin = lazy(() => import('./OpsHealthAdmin').then((m) => ({ default: m.OpsHealthAdmin })))
@@ -154,6 +155,7 @@ function AppRoutes() {
   if (path.startsWith('/gestao/clientes')) return adminPage(<CustomerAdmin />)
   if (path.startsWith('/gestao/pagamentos')) return adminPage(<AdminBalancesPage />)
   if (path.startsWith('/gestao/cupons')) return adminPage(<CouponAdmin />)
+  if (path.startsWith('/gestao/marketing')) return adminPage(<MarketingCampaignAdmin />)
   if (path.startsWith('/gestao/notificacoes')) return adminPage(<NotificationsAdmin />)
   if (path.startsWith('/gestao/aniversarios')) return adminPage(<BirthdaySettingsAdmin />)
   if (path.startsWith('/gestao/saude')) return adminPage(<OpsHealthAdmin />)
@@ -162,6 +164,7 @@ function AppRoutes() {
 
   if (path.startsWith('/admin/pagamentos')) return adminPage(<AdminBalancesPage />)
   if (path.startsWith('/admin/cupons')) return adminPage(<CouponAdmin />)
+  if (path.startsWith('/admin/marketing')) return adminPage(<MarketingCampaignAdmin />)
   if (path.startsWith('/admin/clientes')) return adminPage(<CustomerAdmin />)
   if (path.startsWith('/admin/funcionarios')) return adminPage(<EmployeeAdmin />)
   if (path.startsWith('/admin/notificacoes')) return adminPage(<NotificationsAdmin />)

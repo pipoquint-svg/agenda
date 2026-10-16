@@ -20,6 +20,8 @@
 -- Coupon redemption lifecycle (S0.5) adds five functions: three SECURITY INVOKER
 -- helpers executable only by service_role and two SECURITY DEFINER trigger-only
 -- functions that no API role can execute.
+-- Rewards S4 adds one service-only issuance RPC; S5 adds one service-only
+-- validity helper plus one trigger-only confirmation guard.
 do $$
 declare
   v_identity text;
@@ -496,7 +498,8 @@ begin
 
   foreach v_identity in array array[
     'public.trg_appointment_discount_lifecycle_defaults()',
-    'public.trg_appointment_coupon_redemption_lifecycle()'
+    'public.trg_appointment_coupon_redemption_lifecycle()',
+    'public.trg_appointment_enforce_campaign_coupon_confirmation_validity()'
   ] loop
     v_oid := to_regprocedure(v_identity);
     if v_oid is null then raise exception 'ITEM02C_COUPON_LIFECYCLE_FUNCTION_MISSING:%', v_identity; end if;
@@ -517,6 +520,15 @@ begin
     end if;
   end loop;
 
+  v_identity := 'public.coupon_is_valid_for_booking(public.coupons,timestamp with time zone,timestamp with time zone)';
+  v_oid := to_regprocedure(v_identity);
+  if v_oid is null then raise exception 'ITEM02C_REWARDS_VALIDITY_HELPER_MISSING:%', v_identity; end if;
+  if not has_function_privilege('service_role', v_oid, 'EXECUTE')
+     or has_function_privilege('anon', v_oid, 'EXECUTE')
+     or has_function_privilege('authenticated', v_oid, 'EXECUTE') then
+    raise exception 'ITEM02C_REWARDS_VALIDITY_HELPER_ACL_DRIFT:%', v_identity;
+  end if;
+
   select count(*)::integer,
          count(*) filter (where has_function_privilege('service_role', p.oid, 'EXECUTE'))::integer
     into v_public_function_count, v_service_role_execute_count
@@ -524,11 +536,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 483 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=483 actual=%', v_public_function_count;
+  if v_public_function_count <> 495 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=495 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 415 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=415 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 422 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=422 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

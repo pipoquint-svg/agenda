@@ -63,6 +63,7 @@ export function GestaoEntry() {
         <div className="agenda-header-actions">
           <a className="secondary agenda-link-button" href={`${basePath()}/gestao/dashboard`}>Dashboard</a>
           <a className="secondary agenda-link-button" href={`${basePath()}/gestao/agenda`}>Agenda</a>
+          <a className="secondary agenda-link-button" href={`${basePath()}/gestao/marketing`}>Marketing</a>
           <a className="secondary agenda-link-button" href={`${basePath()}/gestao/configuracoes`}>Configurações</a>
         </div>
       </nav>
