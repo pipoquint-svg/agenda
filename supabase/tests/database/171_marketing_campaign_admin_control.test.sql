@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(34);
+select plan(36);
 
 create function pg_temp.s2_throws(p_statement text)
 returns boolean language plpgsql as $$
@@ -73,6 +73,7 @@ select is((select count(*)::integer from public.marketing_campaigns where tenant
 select throws_ok($$select public.service_admin_create_marketing_campaign('17100000-0000-4000-8000-000000000020','operation-denied','Denied',null,null,current_setting('agenda.rewards_offer')::jsonb,'17100000-0000-4000-8000-000000000013','17100000-0000-4000-8000-000000000102')$$,'42501','MARKETING_CAMPAIGN_ADMIN_PERMISSION_DENIED','only OWNER and ADMIN can administer campaigns');
 select throws_ok($$select public.service_admin_create_marketing_campaign('17100000-0000-4000-8000-000000000020','extras-denied','Denied',null,null,jsonb_set(current_setting('agenda.rewards_offer')::jsonb,'{applies_to_extras}','true'::jsonb),'17100000-0000-4000-8000-000000000011','17100000-0000-4000-8000-000000000103')$$,'22023','MARKETING_CAMPAIGN_REWARDS_POLICY_INVALID','S2 rejects rewards that include extras');
 select throws_ok($$select public.service_admin_create_marketing_campaign('17100000-0000-4000-8000-000000000020','multi-use-denied','Denied',null,null,jsonb_set(current_setting('agenda.rewards_offer')::jsonb,'{max_uses}','2'::jsonb),'17100000-0000-4000-8000-000000000011','17100000-0000-4000-8000-000000000104')$$,'22023','MARKETING_CAMPAIGN_REWARDS_POLICY_INVALID','S2 rejects multi-use rewards');
+select throws_ok($$select public.service_admin_create_marketing_campaign('17100000-0000-4000-8000-000000000020','missing-target-services','Denied',null,null,jsonb_set(current_setting('agenda.rewards_offer')::jsonb,'{eligibility_rules}','{}'::jsonb),'17100000-0000-4000-8000-000000000011','17100000-0000-4000-8000-000000000112')$$,'22023','MARKETING_CAMPAIGN_TARGET_SERVICES_REQUIRED','campaign creation requires at least one checkbox-selected service');
 
 select throws_ok($$select public.service_admin_transition_marketing_campaign((current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid,'ACTIVE',null,null,'17100000-0000-4000-8000-000000000011','17100000-0000-4000-8000-000000000105')$$,'22023','MARKETING_CAMPAIGN_PUBLISHED_VERSION_REQUIRED','campaign cannot activate without an explicit published version');
 select set_config('agenda.rewards_active', public.service_admin_transition_marketing_campaign(
@@ -110,6 +111,7 @@ select is((select publication_status from public.marketing_campaign_versions whe
 select ok((select count(*) = 1 from public.marketing_campaign_versions where campaign_id=(current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid and publication_status='PUBLISHED'),'campaign has exactly one published version');
 select ok(pg_temp.s2_throws($$delete from public.admin_users where id='17100000-0000-4000-8000-000000000012'$$),'audit actor cannot be deleted after an audited action');
 select throws_ok($$select public.service_admin_create_marketing_campaign_version((current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid,jsonb_set(current_setting('agenda.rewards_offer')::jsonb,'{applies_to_hour_packages}','true'::jsonb),'17100000-0000-4000-8000-000000000012','17100000-0000-4000-8000-000000000111')$$,'22023','MARKETING_CAMPAIGN_REWARDS_POLICY_INVALID','S2 rejects hour-package eligibility');
+select throws_ok($$select public.service_admin_create_marketing_campaign_version((current_setting('agenda.rewards_create')::jsonb->>'campaign_id')::uuid,jsonb_set(current_setting('agenda.rewards_offer')::jsonb,'{eligibility_rules}','{}'::jsonb),'17100000-0000-4000-8000-000000000012','17100000-0000-4000-8000-000000000113')$$,'22023','MARKETING_CAMPAIGN_TARGET_SERVICES_REQUIRED','new campaign version also requires a checkbox-selected service');
 
 select * from finish();
 rollback;

@@ -92,6 +92,7 @@ declare
   v_max_uses integer := coalesce((p_offer->>'max_uses')::integer, 1);
   v_max_uses_per_customer integer := coalesce((p_offer->>'max_uses_per_customer')::integer, 1);
   v_stacking_policy text := upper(btrim(coalesce(p_offer->>'stacking_policy', 'EXCLUSIVE')));
+  v_service_ids jsonb := p_offer->'eligibility_rules'->'service_ids';
 begin
   perform public.service_admin_assert_marketing_campaign_actor(p_admin_id);
   if p_tenant_id is null or not exists (select 1 from public.tenants where id = p_tenant_id) then
@@ -116,6 +117,12 @@ begin
   end if;
   if jsonb_typeof(p_offer) <> 'object' then
     raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_OFFER_INVALID';
+  end if;
+  if v_service_ids is null then
+    raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_TARGET_SERVICES_REQUIRED';
+  end if;
+  if jsonb_typeof(v_service_ids) <> 'array' or jsonb_array_length(v_service_ids) = 0 then
+    raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_TARGET_SERVICES_INVALID';
   end if;
   if v_discount_scope <> 'SERVICE_ONLY'
     or coalesce((p_offer->>'applies_to_extras')::boolean, false)
@@ -198,6 +205,7 @@ declare
   v_max_uses integer := coalesce((p_offer->>'max_uses')::integer, 1);
   v_max_uses_per_customer integer := coalesce((p_offer->>'max_uses_per_customer')::integer, 1);
   v_stacking_policy text := upper(btrim(coalesce(p_offer->>'stacking_policy', 'EXCLUSIVE')));
+  v_service_ids jsonb := p_offer->'eligibility_rules'->'service_ids';
 begin
   perform public.service_admin_assert_marketing_campaign_actor(p_admin_id);
   if p_request_id is null then
@@ -214,6 +222,12 @@ begin
   end if;
   if jsonb_typeof(p_offer) <> 'object' then
     raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_OFFER_INVALID';
+  end if;
+  if v_service_ids is null then
+    raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_TARGET_SERVICES_REQUIRED';
+  end if;
+  if jsonb_typeof(v_service_ids) <> 'array' or jsonb_array_length(v_service_ids) = 0 then
+    raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_TARGET_SERVICES_INVALID';
   end if;
   if v_discount_scope <> 'SERVICE_ONLY'
     or coalesce((p_offer->>'applies_to_extras')::boolean, false)
