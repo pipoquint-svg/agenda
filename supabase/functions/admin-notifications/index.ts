@@ -22,12 +22,12 @@ const events = [
   'APPOINTMENT_CHANGED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_REMINDER', 'WAITLIST_AVAILABLE', 'WAITLIST_SIGNUP_TEAM', 'BIRTHDAY',
   'RENTAL_BALANCE_DUE', 'ADMIN_USER_INVITE', 'PRE_RESERVATION_CREATED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'PAYMENT_PENDING_CREATED', 'MANUAL',
 ]
-const channels = ['EMAIL', 'GOOGLE_CALENDAR']
+const channels = ['EMAIL', 'GOOGLE_CALENDAR', 'WHATSAPP']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
   'appointment.manage_url',
-  'customer.name', 'customer.email', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
+  'customer.name', 'customer.email', 'customer.phone', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
   'waitlist.name', 'waitlist.email', 'waitlist.whatsapp', 'waitlist.created_at',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'payment.resume_url', 'payment.expires_at', 'extras.summary',
@@ -81,6 +81,7 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'appointment.manage_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=RESCHEDULE',
     'customer.name': 'Teste BlackSheep',
     'customer.email': recipient,
+    'customer.phone': '(48) 99999-0000',
     'employee.name': 'Equipe BlackSheep',
     'auth.invite_url': 'https://www.blacksheepestudiocriativo.com.br/gestao/primeiro-acesso',
     'service.name': 'Serviço de teste',
@@ -259,6 +260,7 @@ Deno.serve(async (req) => {
     const htmlTemplate = typeof record.html_template === 'string' ? record.html_template.trim() || null : null
     if (!events.includes(eventKey)) throw new Error('NOTIFICATION_EVENT_INVALID')
     if (!channels.includes(channel)) throw new Error('NOTIFICATION_CHANNEL_INVALID')
+    if (channel === 'WHATSAPP' && record.is_active === true) throw new Error('WHATSAPP_TEMPLATE_DRAFT_ONLY')
     if (!audiences.includes(audience)) throw new Error('NOTIFICATION_AUDIENCE_INVALID')
     if (operationScope !== null && !['SABRINA', 'BLACKSHEEP'].includes(operationScope)) throw new Error('NOTIFICATION_OPERATION_SCOPE_INVALID')
     assertSafeCustomHtml(htmlTemplate)

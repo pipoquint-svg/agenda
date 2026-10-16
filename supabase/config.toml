@@ -41,6 +41,12 @@ verify_jwt = false
 [functions.admin-google]
 verify_jwt = false
 
+# Agenda authenticates the browser and delegates a bounded, signed status check
+# to Dracma. The handler fails closed until its server-only gateway settings are
+# configured; it never exposes the shared secret to the browser.
+[functions.admin-dracma-messaging]
+verify_jwt = false
+
 # Internal Kommo mirror adapter. It requires x-internal-secret and reads the provider
 # token only from the Edge secret environment.
 [functions.kommo-sync]

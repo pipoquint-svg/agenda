@@ -40,3 +40,20 @@ Deno.test('home feed honors operation scope and limits', () => {
   assertEquals(feed.recent_appointments.every((r) => r.operation_scope === 'BLACKSHEEP'), true)
   assertEquals(buildHomeFeed(recent, [], [], null).recent_appointments.length, 5)
 })
+
+Deno.test('home feed returns only the five most recent movements', () => {
+  const appointments = Array.from({ length: 6 }, (_, index) => appt(`movement-${index}`, 'BLACKSHEEP'))
+  const audits = appointments.map((appointment, index): HomeAuditRow => ({
+    id: `audit-${index}`,
+    entity_id: appointment.id,
+    action: 'PAYMENT_HOLD_EXPIRED',
+    before_json: null,
+    after_json: null,
+    created_at: `2026-10-13T1${index}:00:00Z`,
+  }))
+
+  const feed = buildHomeFeed([], audits, appointments, null)
+
+  assertEquals(feed.recent_movements.length, 5)
+  assertEquals(feed.recent_movements.map((movement) => movement.id), ['audit-0', 'audit-1', 'audit-2', 'audit-3', 'audit-4'])
+})
