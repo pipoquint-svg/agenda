@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(18);
+select plan(31);
 
 insert into auth.users(id,email,created_at,updated_at)
 values ('17200000-0000-4000-8000-000000000001','rewards-s3-owner@example.test',now(),now());
@@ -64,11 +64,18 @@ select set_config('agenda.s3.active', public.service_admin_transition_marketing_
 )::text,true);
 
 select has_function('public','service_evaluate_marketing_campaign_eligibility',array['uuid','uuid'],'S3 evaluator exists');
+select has_function('public','service_issue_marketing_campaign_coupon',array['uuid','uuid','text'],'S4 coupon issuance action exists');
 select ok(
   not has_function_privilege('anon','public.service_evaluate_marketing_campaign_eligibility(uuid,uuid)','EXECUTE')
   and not has_function_privilege('authenticated','public.service_evaluate_marketing_campaign_eligibility(uuid,uuid)','EXECUTE')
   and has_function_privilege('service_role','public.service_evaluate_marketing_campaign_eligibility(uuid,uuid)','EXECUTE'),
   'S3 evaluator remains private to the trusted backend'
+);
+select ok(
+  not has_function_privilege('anon','public.service_issue_marketing_campaign_coupon(uuid,uuid,text)','EXECUTE')
+  and not has_function_privilege('authenticated','public.service_issue_marketing_campaign_coupon(uuid,uuid,text)','EXECUTE')
+  and has_function_privilege('service_role','public.service_issue_marketing_campaign_coupon(uuid,uuid,text)','EXECUTE'),
+  'S4 issuance remains private to the trusted backend'
 );
 select is(
   public.service_evaluate_marketing_campaign_eligibility((current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,'17200000-0000-4000-8000-000000000020')->>'decision',
@@ -137,11 +144,86 @@ select is(
   'ELIGIBLE','later catalog reclassification cannot rewrite the rental source snapshot'
 );
 
-insert into public.marketing_campaign_issuances(tenant_id,campaign_id,campaign_version_id,coupon_id,customer_id,source_appointment_id,idempotency_key)
-values ('8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f',(current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,(current_setting('agenda.s3.created')::jsonb->>'version_id')::uuid,'17200000-0000-4000-8000-000000000040','17200000-0000-4000-8000-000000000017','17200000-0000-4000-8000-000000000020','rewards-s3-existing-source');
+select set_config('agenda.s4.issued', public.service_issue_marketing_campaign_coupon(
+  (current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,
+  '17200000-0000-4000-8000-000000000020',
+  'rewards-s4-eligible-source-0001'
+)::text, true);
+select is(
+  (current_setting('agenda.s4.issued')::jsonb->>'replayed')::boolean,
+  false,'first S4 issuance is not a replay'
+);
+select is(
+  (select jsonb_build_object(
+    'discount_type', c.discount_type,
+    'discount_value', c.discount_value,
+    'discount_scope', c.discount_scope,
+    'source', c.source,
+    'customer_id', c.customer_id,
+    'source_appointment_id', c.source_appointment_id,
+    'max_uses', c.max_uses,
+    'max_uses_per_customer', c.max_uses_per_customer,
+    'used_count', c.used_count
+  ) from public.coupons c where c.id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
+  jsonb_build_object(
+    'discount_type','PERCENT','discount_value',20,'discount_scope','SERVICE_ONLY',
+    'source','PROMOTION','customer_id','17200000-0000-4000-8000-000000000017'::uuid,
+    'source_appointment_id','17200000-0000-4000-8000-000000000020'::uuid,
+    'max_uses',1,'max_uses_per_customer',1,'used_count',0
+  ),'S4 coupon snapshots the published offer and eligible customer'
+);
+select ok(
+  (select c.valid_from <= now()
+    and c.valid_until > now() + interval '29 days'
+    and c.valid_until <= now() + interval '30 days' + interval '2 seconds'
+   from public.coupons c
+   where c.id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
+  'S4 coupon validity is derived from the published version'
+);
+select is(
+  (select count(*)::integer from public.coupon_services where coupon_id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
+  1,'S4 coupon receives exactly the checkbox-selected service scope'
+);
+select is(
+  (select service_id from public.coupon_services where coupon_id=(current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid),
+  '17200000-0000-4000-8000-000000000013'::uuid,'S4 coupon service scope matches the checkbox selection'
+);
+select is(
+  (select count(*)::integer from public.marketing_campaign_issuances where source_appointment_id='17200000-0000-4000-8000-000000000020'),
+  1,'S4 links exactly one issuance to the source rental'
+);
+select is(
+  (select event_kind from public.marketing_campaign_audit_events where campaign_id=(current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid order by created_at desc, id desc limit 1),
+  'ISSUANCE_LINKED','S4 records the immutable issuance audit event'
+);
+select is(
+  (public.service_issue_marketing_campaign_coupon(
+    (current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,
+    '17200000-0000-4000-8000-000000000020',
+    'rewards-s4-eligible-source-0001'
+  )->>'coupon_id')::uuid,
+  (current_setting('agenda.s4.issued')::jsonb->>'coupon_id')::uuid,
+  'same S4 idempotency key returns the original coupon'
+);
+select is(
+  (public.service_issue_marketing_campaign_coupon(
+    (current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,
+    '17200000-0000-4000-8000-000000000020',
+    'rewards-s4-eligible-source-0001'
+  )->>'replayed')::boolean,
+  true,'same S4 idempotency key is replay-safe'
+);
+select throws_ok(
+  $$select public.service_issue_marketing_campaign_coupon((current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,'17200000-0000-4000-8000-000000000021','rewards-s4-unpaid-source-00001')$$,
+  'P0001','MARKETING_CAMPAIGN_ISSUANCE_INELIGIBLE','S4 cannot issue from an unpaid rental'
+);
+select is(
+  (select count(*)::integer from public.marketing_campaign_issuances where campaign_id=(current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid),
+  1,'failed S4 issuance does not create a ledger row'
+);
 select is(
   public.service_evaluate_marketing_campaign_eligibility((current_setting('agenda.s3.created')::jsonb->>'campaign_id')::uuid,'17200000-0000-4000-8000-000000000020')->>'reason_code',
-  'MARKETING_CAMPAIGN_SOURCE_ALREADY_ISSUED','existing source issuance blocks a second Reward before S4'
+  'MARKETING_CAMPAIGN_SOURCE_ALREADY_ISSUED','issued source cannot receive a second Reward'
 );
 
 update public.services set operation_scope='BLACKSHEEP' where id='17200000-0000-4000-8000-000000000013';

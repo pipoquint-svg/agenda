@@ -20,6 +20,8 @@
 -- Coupon redemption lifecycle (S0.5) adds five functions: three SECURITY INVOKER
 -- helpers executable only by service_role and two SECURITY DEFINER trigger-only
 -- functions that no API role can execute.
+-- Rewards S4 adds one service-only issuance RPC; its campaign/version/service
+-- checks and all coupon + audit writes remain inside the database boundary.
 do $$
 declare
   v_identity text;
@@ -524,11 +526,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 492 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=492 actual=%', v_public_function_count;
+  if v_public_function_count <> 493 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=493 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 420 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=420 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 421 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=421 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
