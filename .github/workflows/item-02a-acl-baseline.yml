@@ -137,6 +137,7 @@ jobs:
             supabase/migrations/20261014203000_coupon_redemption_lifecycle.sql \
             supabase/migrations/20261014230000_marketing_campaign_foundation.sql \
             supabase/migrations/20261015010000_marketing_campaign_admin_control.sql \
+            supabase/migrations/20261015011437_whatsapp_tenant_foundation.sql \
             supabase/migrations/20261016201444_marketing_campaign_eligibility_evaluator.sql
           do
             filename="$(basename "$migration")"
@@ -224,6 +225,7 @@ jobs:
             supabase/migrations/20261014203000_coupon_redemption_lifecycle.sql \
             supabase/migrations/20261014230000_marketing_campaign_foundation.sql \
             supabase/migrations/20261015010000_marketing_campaign_admin_control.sql \
+            supabase/migrations/20261015011437_whatsapp_tenant_foundation.sql \
             supabase/migrations/20261016201444_marketing_campaign_eligibility_evaluator.sql
           do
             filename="$(basename "$migration")"
