@@ -11,7 +11,14 @@ records that exact migration and adds explicit ACL regression assertions.
 Production ACLs were previously verified; no production changes authorized by
 this work. Clean local rebuild including the migration passed; all 177 pgTAP
 files / 2,289 assertions passed, as did local security advisors at error level.
-Next: review the diff, open a PR, and monitor CI on its actual HEAD.
+PR [#505](https://github.com/pipoquint-svg/agenda/pull/505) contains implementation
+commit `d848e51`. Manual diff review completed; `ce-code-review` was unavailable.
+Rescheduling end-to-end tests were not run. GitHub CI is in progress; Supabase
+Preview was cancelled because the project reached its simultaneous preview
+branch limit. Do not remove previews or change the plan without user approval.
+Next: monitor the PR's actual HEAD to terminal CI, investigate any other failures,
+and resolve the preview capacity blocker with the user if it remains required.
+Do not merge or make further production changes without explicit authorization.
 The Rewards PR #495 referenced below is merged; leave its other work untouched.
 
 ## BlackSheep Rewards S1–S5 — active PR #495
