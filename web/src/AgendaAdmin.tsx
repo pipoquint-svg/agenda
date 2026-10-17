@@ -279,6 +279,7 @@ export function AgendaAdmin() {
           <p>Reservas nativas, ocupação real dos recursos e histórico legado.</p>
         </div>
         <div className="agenda-header-actions">
+          <a className="secondary agenda-link-button" href="/admin/marketing">Rewards</a>
           <a className="secondary agenda-link-button" href="/admin/configuracoes">Configurações</a>
           <a className="secondary agenda-link-button" href="/admin/demand">Demanda</a>
           <button className="secondary" type="button" onClick={() => supabase.auth.signOut()}>Sair</button>
