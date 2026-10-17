@@ -3,7 +3,21 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(5);
+select plan(7);
+
+select ok(
+  not has_function_privilege('anon', 'public.service_admin_create_reschedule_hold(uuid,timestamptz,timestamptz,text,uuid)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.service_admin_create_reschedule_hold(uuid,timestamptz,timestamptz,text,uuid)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.service_admin_create_reschedule_hold(uuid,timestamptz,timestamptz,text,uuid)', 'EXECUTE'),
+  'reschedule hold RPC is executable only by the trusted service role'
+);
+
+select ok(
+  not has_function_privilege('anon', 'public.service_create_reschedule_difference_payment_intent(uuid,text,text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.service_create_reschedule_difference_payment_intent(uuid,text,text)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.service_create_reschedule_difference_payment_intent(uuid,text,text)', 'EXECUTE'),
+  'reschedule payment intent RPC is executable only by the trusted service role'
+);
 
 with exposed as (
   select
