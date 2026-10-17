@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(22);
+select plan(27);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at,raw_app_meta_data,raw_user_meta_data)
 values ('6b000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','finance6b@example.test','',now(),now(),now(),'{}'::jsonb,'{}'::jsonb);
@@ -65,9 +65,19 @@ values (
 );
 insert into public.payment_transactions(appointment_id,transaction_type,method,provider,status,contract_amount_settled,cash_amount,paid_at,payment_purpose)
 values ('6b000000-0000-4000-8000-000000000043','CHARGE','PIX','MANUAL','APPROVED',200,200,now()-interval '2 hours','CONTRACT');
-select is((public.service_admin_finance_month_close(date_trunc('month',now())::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'services'->>'service_count')::integer,1,'elapsed confirmed reservation counts as a realized service');
-select is((public.service_admin_finance_nfse_export(date_trunc('month',now())::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'rows'->0->>'appointment_status'),'CONFIRMED','NFS-e export includes an elapsed confirmed reservation without rewriting its status');
+select is((public.service_admin_finance_month_close(date_trunc('month',(now()-interval '2 hours') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'services'->>'service_count')::integer,1,'elapsed confirmed reservation counts as a realized service');
+select is((public.service_admin_finance_month_close(date_trunc('month',(now()-interval '2 hours') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'services'->>'contracted')::numeric,500::numeric,'elapsed confirmed reservation includes the contracted amount');
+select is((public.service_admin_finance_month_close(date_trunc('month',(now()-interval '2 hours') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'contract'->>'net_settled')::numeric,200::numeric,'elapsed confirmed reservation includes the settled amount');
+select is((public.service_admin_finance_month_close(date_trunc('month',(now()-interval '2 hours') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'contract'->>'outstanding')::numeric,300::numeric,'elapsed confirmed reservation includes the outstanding amount');
+select is((public.service_admin_finance_nfse_export(date_trunc('month',(now()-interval '2 hours') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'rows'->0->>'appointment_status'),'CONFIRMED','NFS-e export includes an elapsed confirmed reservation without rewriting its status');
 select is((select status from public.appointments where id='6b000000-0000-4000-8000-000000000043'),'CONFIRMED','finance reporting does not mutate the operational appointment status');
+
+insert into public.appointments(id,public_code,service_id,service_employee_id,status,financial_status,start_at,end_at,duration_minutes,people_count,primary_customer_id,commercial_value,confirmed_at)
+values
+  ('6b000000-0000-4000-8000-000000000044','6B-IN-PROGRESS','6b000000-0000-4000-8000-000000000022','6b000000-0000-4000-8000-000000000023','CONFIRMED','NOT_STARTED',now()-interval '10 minutes',now()+interval '50 minutes',60,1,'6b000000-0000-4000-8000-000000000012',500,now()-interval '1 hour'),
+  ('6b000000-0000-4000-8000-000000000045','6B-FUTURE','6b000000-0000-4000-8000-000000000022','6b000000-0000-4000-8000-000000000023','CONFIRMED','NOT_STARTED',now()+interval '3 hours',now()+interval '4 hours',60,1,'6b000000-0000-4000-8000-000000000012',500,now());
+select ok(not exists (select 1 from jsonb_array_elements(public.service_admin_finance_nfse_export(date_trunc('month',(now()-interval '10 minutes') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'rows') row where row->>'appointment_id'='6b000000-0000-4000-8000-000000000044'),'NFS-e excludes confirmed reservations still in progress');
+select ok(not exists (select 1 from jsonb_array_elements(public.service_admin_finance_nfse_export(date_trunc('month',(now()+interval '3 hours') at time zone 'America/Sao_Paulo')::date,'BLACKSHEEP','6b000000-0000-4000-8000-000000000002')->'rows') row where row->>'appointment_id'='6b000000-0000-4000-8000-000000000045'),'NFS-e excludes future confirmed reservations');
 
 select ok(not has_function_privilege('anon','public.service_admin_record_cancellation_manual_refund(uuid,text,numeric,text,timestamptz,uuid,inet,text,text)','EXECUTE') and not has_function_privilege('authenticated','public.service_admin_record_cancellation_manual_refund(uuid,text,numeric,text,timestamptz,uuid,inet,text,text)','EXECUTE'),'manual refund RPC is not exposed to browser database roles');
 select ok(not exists(select 1 from pg_trigger t join pg_proc p on p.oid=t.tgfoid where not t.tgisinternal and p.proname='enqueue_no_show_balance_cancellation'),'legacy no-show balance cancellation remains unattached');

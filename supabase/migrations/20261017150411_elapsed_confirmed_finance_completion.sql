@@ -2,6 +2,7 @@
 -- reporting once its scheduled end is in the past. This is a read-model rule:
 -- it deliberately does not mutate the operational appointment status or create
 -- payment/collection side effects.
+-- Versioned after the production migration history tail for a normal gated deploy.
 
 create or replace function public.service_admin_finance_nfse_export(p_month date, p_operation_scope text, p_admin_id uuid)
 returns jsonb
