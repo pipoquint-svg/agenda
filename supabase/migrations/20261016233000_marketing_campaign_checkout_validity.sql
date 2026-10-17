@@ -86,21 +86,26 @@ begin
     from (values
       (
         'public.calculate_booking_quote_catalog_base(uuid,uuid,jsonb,integer,timestamp with time zone,text)',
-        E'      and (c.valid_from is null or coalesce(p_requested_start_at,now())>=c.valid_from)\n      and (c.valid_until is null or coalesce(p_requested_start_at,now())<=c.valid_until)',
-        E'      and public.coupon_is_valid_for_booking(c, p_requested_start_at)'
+        E'and[[:space:]]*\\(c\\.valid_from is null or coalesce\\(p_requested_start_at,now\\(\\)\\)>=c\\.valid_from\\)[[:space:]]*and[[:space:]]*\\(c\\.valid_until is null or coalesce\\(p_requested_start_at,now\\(\\)\\)<=c\\.valid_until\\)',
+        E'      and public.coupon_is_valid_for_booking(c, p_requested_start_at)',
+        true
       ),
       (
         'public.calculate_booking_quotes_for_duration_batch(uuid,uuid,integer,jsonb,integer,timestamp with time zone[],text)',
         E'      if (v_coupon.valid_from is not null and coalesce(v_start, now()) < v_coupon.valid_from)\n         or (v_coupon.valid_until is not null and coalesce(v_start, now()) > v_coupon.valid_until)\n      then',
-        E'      if not public.coupon_is_valid_for_booking(v_coupon, v_start) then'
+        E'      if not public.coupon_is_valid_for_booking(v_coupon, v_start) then',
+        false
       )
-    ) as p(signature, anchor, replacement)
+    ) as p(signature, anchor, replacement, use_regex)
   loop
     v_definition := pg_get_functiondef(v_patch.signature::regprocedure);
-    if position(v_patch.anchor in v_definition) = 0 then
+    v_patched := case
+      when v_patch.use_regex then regexp_replace(v_definition, v_patch.anchor, v_patch.replacement)
+      else replace(v_definition, v_patch.anchor, v_patch.replacement)
+    end;
+    if v_patched = v_definition then
       raise exception 'REWARDS_S5_BOOKING_VALIDITY_ANCHOR_NOT_FOUND: %', v_patch.signature;
     end if;
-    v_patched := replace(v_definition, v_patch.anchor, v_patch.replacement);
     execute v_patched;
   end loop;
 
