@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(13);
+select plan(14);
 
 select has_function(
   'public', 'service_admin_list_agenda', array['timestamp with time zone','timestamp with time zone'],
@@ -73,6 +73,11 @@ select ok(
 select ok(
   pg_get_functiondef('public.service_admin_list_agenda(timestamptz,timestamptz)'::regprocedure) like '%contracted_minutes%',
   'admin agenda exposes contracted minutes separately from buffers'
+);
+
+select ok(
+  pg_get_functiondef('public.service_admin_get_appointment(uuid)'::regprocedure) like '%included_people%',
+  'admin appointment detail preserves the included-people service snapshot'
 );
 
 select * from finish();
