@@ -13,11 +13,11 @@ this work. Clean local rebuild including the migration passed; all 177 pgTAP
 files / 2,289 assertions passed, as did local security advisors at error level.
 PR [#505](https://github.com/pipoquint-svg/agenda/pull/505) contains implementation
 commit `d848e51`. Manual diff review completed; `ce-code-review` was unavailable.
-Rescheduling end-to-end tests were not run. GitHub CI is in progress; Supabase
-Preview was cancelled because the project reached its simultaneous preview
-branch limit. Do not remove previews or change the plan without user approval.
-Next: monitor the PR's actual HEAD to terminal CI, investigate any other failures,
-and resolve the preview capacity blocker with the user if it remains required.
+Rescheduling end-to-end tests were not run. On PR HEAD `896a9eb`, all 11 GitHub
+Actions checks passed; Supabase Preview was skipped after an earlier attempt was
+cancelled because the project reached its simultaneous preview branch limit.
+Do not remove previews or change the plan without user approval. Next: verify CI
+on the actual PR HEAD, and confirm preview capacity if a preview is needed.
 Do not merge or make further production changes without explicit authorization.
 The Rewards PR #495 referenced below is merged; leave its other work untouched.
 
