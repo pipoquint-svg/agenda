@@ -3,6 +3,7 @@ import {
   hasAdminPermission,
   requireAdmin,
 } from "../_shared/supabase.ts";
+import { recurrenceOption } from "./recurrence.ts";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -80,7 +81,7 @@ Deno.serve(async (req) => {
           "id,campaign_key,internal_name,public_name,description,state,starts_at,ends_at,active_version_id,created_at,updated_at",
         ).eq("tenant_id", tenantId).order("created_at", { ascending: false }),
         client.from("marketing_campaign_versions").select(
-          "id,campaign_id,version_number,publication_status,discount_type,discount_value,validity_basis,validity_days,eligibility_rules,created_at,published_at",
+          "id,campaign_id,version_number,publication_status,discount_type,discount_value,validity_basis,validity_days,recurring_after_discounted_rental,eligibility_rules,created_at,published_at",
         ).eq("tenant_id", tenantId).order("version_number", {
           ascending: false,
         }),
@@ -96,6 +97,7 @@ Deno.serve(async (req) => {
         campaigns: campaigns.data ?? [],
         versions: versions.data ?? [],
         services: services.data ?? [],
+        capabilities: { recurring_after_discounted_rental: true },
         delivery: {
           status: "FROZEN",
           channel: "WHATSAPP",
@@ -141,7 +143,9 @@ Deno.serve(async (req) => {
         applies_to_extras: false,
         applies_to_hour_packages: false,
         stacking_policy: "EXCLUSIVE",
-        recurring_after_discounted_rental: false,
+        recurring_after_discounted_rental: recurrenceOption(
+          (body as Record<string, unknown>).recurring_after_discounted_rental,
+        ),
         eligibility_rules: {
           service_ids: serviceIds.map((id) =>
             uuid(id, "MARKETING_CAMPAIGN_TARGET_SERVICE_INVALID")
