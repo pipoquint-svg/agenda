@@ -1,4 +1,5 @@
 import { adminClient, hasAdminPermission, requireAdmin } from '../_shared/supabase.ts'
+import { financeServerDate, manualReceiptPaidAt } from './manual_receipt_date.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -204,6 +205,8 @@ Deno.serve(async (req) => {
       if (!action) throw new Error('FINANCE_ACTION_REQUIRED')
       const operationScope = scope(url.searchParams.get('operation_scope'))
 
+      if (action === 'server_date') return json({ date: financeServerDate(), timezone: TZ })
+
       if (action === 'month_close' || action === 'closing') {
         const selected = selectedMonth(url)
         const data = await monthClose(admin.adminId, selected, operationScope)
@@ -315,7 +318,7 @@ Deno.serve(async (req) => {
         p_appointment_id: uuid(body.appointment_id, 'APPOINTMENT_ID_INVALID'),
         p_method: clean(body.method),
         p_amount: amount(body.amount),
-        p_paid_at: paidAt(body.paid_at),
+        p_paid_at: manualReceiptPaidAt(body.paid_date, body.paid_at, new Date(), body.server_date),
         p_notes: clean(body.notes),
         p_admin_id: admin.adminId,
       })
