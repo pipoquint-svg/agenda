@@ -1,5 +1,19 @@
 # CURRENT HANDOFF — Agenda
 
+## 2026-10-17 — rescheduling RPC security hotfix
+
+User prioritized recording the production security correction in GitHub. Isolated
+branch `fix/restrict-reschedule-rpc-20261017`, based on main `65bd6c3`.
+Production migration `20261017092418_restrict_reschedule_internal_rpc_execute`
+revoked public, anon and authenticated execution of the reschedule hold and
+difference payment intent RPCs and retained service-role access. This branch
+records that exact migration and adds explicit ACL regression assertions.
+Production ACLs were previously verified; no production changes authorized by
+this work. Clean local rebuild including the migration passed; all 177 pgTAP
+files / 2,289 assertions passed, as did local security advisors at error level.
+Next: review the diff, open a PR, and monitor CI on its actual HEAD.
+The Rewards PR #495 referenced below is merged; leave its other work untouched.
+
 ## BlackSheep Rewards S1–S5 — active PR #495
 
 Branch `feat/rewards-campaign-foundation-s1-20261014`, PR [#495](https://github.com/pipoquint-svg/agenda/pull/495), with the local Marketing publication commit ready to push. S3 is a private, service-role-only and read-only eligibility evaluation for a completed, paid BlackSheep rental. The legacy Agenda source bridge uses immutable appointment snapshots of operation scope and service type; legacy appointments without a snapshot fail closed. S4 adds `service_issue_marketing_campaign_coupon(uuid,uuid,text)`: a service-only, idempotent transactional issuer. It requires S3 eligibility, creates one customer-bound `SERVICE_ONLY` promotional coupon from the immutable published version, copies the checkbox-selected service scope, records one issuance ledger row, and writes `ISSUANCE_LINKED` audit evidence attributed to the admin who published that version. Campaign creation and versioning require a nonempty checkbox selection via `eligibility_rules.service_ids`; the typed version-service projection is immutable. S5 snapshots `validity_basis` on the issued coupon. Rewards with `BOOKING_CONFIRMATION` are accepted in pricing while the confirmation window remains valid even when the rental is later; a `BEFORE` confirmation guard rejects `MARKETING_CAMPAIGN_COUPON_EXPIRED_AT_CONFIRMATION` if that window closed after checkout. Legacy coupons retain `RENTAL_START` behavior, including their existing hold guards. The Gestão now exposes **Marketing** at `/gestao/marketing`: an authenticated `SERVICES_MANAGE` administrator can list BlackSheep campaigns, create the checkbox-scoped immutable first version and transition it through its existing S2 lifecycle; all reads and transitions are tenant-bound before the private RPC is called. The screen labels S6 as frozen: it neither creates delivery jobs nor calls Dracma, Meta or WhatsApp. Focused pgTAP: `172_marketing_campaign_eligibility_evaluator.test.sql` (36 assertions). Canonical CI was green at `e985a41` before this UI slice. Next objective: push the local commit, obtain green CI, then execute only the publication explicitly authorized by the user; S6 remains frozen and real campaign activation, issuance and delivery remain out of scope unless separately authorized.
