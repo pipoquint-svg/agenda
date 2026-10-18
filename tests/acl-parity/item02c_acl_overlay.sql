@@ -22,6 +22,8 @@
 -- functions that no API role can execute.
 -- Rewards S4 adds one service-only issuance RPC; S5 adds one service-only
 -- validity helper plus one trigger-only confirmation guard.
+-- Public studio stats adds one SECURITY DEFINER aggregate RPC for the home page,
+-- executable by anon, authenticated and service_role; it returns three counts only.
 do $$
 declare
   v_identity text;
@@ -536,11 +538,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 495 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=495 actual=%', v_public_function_count;
+  if v_public_function_count <> 496 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=496 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 422 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=422 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 423 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=423 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
