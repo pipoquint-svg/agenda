@@ -42,8 +42,8 @@ values (
   '2026-10-17 00:00:00-03',
   666,
   1362.3,
-  158,
-  'Google Calendar ESTÚDIO + agenda@blacksheepestudiocriativo.com.br, 2025-05-03..2026-10-16: 279 rentals and 387 sessions; 156 renters plus Sabrina Pierri and Jheneffe Pierri'
+  139,
+  'Google Calendar ESTÚDIO + agenda@blacksheepestudiocriativo.com.br, 2025-05-03..2026-10-16: 279 rentals and 387 sessions; 137 distinct renters (names deduplicated) plus Sabrina Pierri and Jheneffe Pierri'
 );
 
 create or replace function public.public_get_studio_stats()
