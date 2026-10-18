@@ -24,6 +24,7 @@ TABLE|marketing_campaign_versions|true|false
 TABLE|marketing_campaign_issuances|true|false
 TABLE|marketing_campaign_version_services|true|false
 TABLE|marketing_campaign_audit_events|true|false
+TABLE|studio_stats_baselines|true|false
 EOF
 sort -o "$EXPECTED" "$EXPECTED"
 
