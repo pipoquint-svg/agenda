@@ -3,43 +3,22 @@ import {
   DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT,
   signAgendaMessagingHandoff,
 } from "../_shared/dracma-messaging-handoff.ts";
+import {
+  clientPayload,
+  messagingStatus,
+  operationFor,
+  ownedNumberBrowserResult,
+  type OwnedNumberConnection,
+  ownedNumberConnection,
+} from "./contract.ts";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers":
     "content-type, authorization, apikey, x-client-info",
-  "access-control-allow-methods": "GET, OPTIONS",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-max-age": "7200",
 };
-
-type SignupOperation = "START_SESSION" | "COMPLETE_SESSION" | "CANCEL_SESSION";
-
-function operationFor(req: Request, body: unknown): SignupOperation {
-  if (req.method !== "POST") return "START_SESSION";
-  const requested = body && typeof body === "object" && !Array.isArray(body)
-    ? String((body as Record<string, unknown>).operation ?? "START_SESSION")
-      .trim().toUpperCase()
-    : "START_SESSION";
-  if (
-    requested === "START_SESSION" || requested === "COMPLETE_SESSION" ||
-    requested === "CANCEL_SESSION"
-  ) {
-    return requested;
-  }
-  throw new Error("DRACMA_MESSAGING_OPERATION_INVALID");
-}
-
-function clientPayload(operation: SignupOperation, body: unknown) {
-  if (operation === "START_SESSION") return undefined;
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("DRACMA_MESSAGING_PAYLOAD_INVALID");
-  }
-  const payload = (body as Record<string, unknown>).payload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error("DRACMA_MESSAGING_PAYLOAD_INVALID");
-  }
-  return payload;
-}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -65,6 +44,65 @@ function safeCode(error: unknown) {
   return /^[A-Z][A-Z0-9_]{2,95}$/.test(code)
     ? code
     : "DRACMA_MESSAGING_STATUS_FAILED";
+}
+
+/**
+ * Mirrors the connected owned number into Agenda's tenant read model so the
+ * Integrations screen can report it. Failure here never undoes the Dracma
+ * connection; the caller reports the projection as pending.
+ */
+async function projectOwnedNumber(
+  tenantId: string,
+  connection: OwnedNumberConnection,
+) {
+  const client = adminClient();
+  const now = new Date().toISOString();
+  const { data: existing, error: readError } = await client
+    .from("whatsapp_tenant_integrations")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (readError) throw new Error("WHATSAPP_PROJECTION_FAILED");
+  const fields = {
+    waba_id: connection.waba_id,
+    status: "CONNECTED",
+    embedded_signup_completed_at: now,
+    last_provider_error_code: null,
+    last_provider_error_at: null,
+    updated_at: now,
+  };
+  const integration = existing?.id
+    ? await client.from("whatsapp_tenant_integrations").update(fields)
+      .eq("id", existing.id).eq("tenant_id", tenantId).select("id").single()
+    : await client.from("whatsapp_tenant_integrations")
+      .insert({ tenant_id: tenantId, ...fields }).select("id").single();
+  if (integration.error || !integration.data?.id) {
+    throw new Error("WHATSAPP_PROJECTION_FAILED");
+  }
+  const phoneFields = {
+    integration_id: integration.data.id,
+    phone_number_id: connection.phone_number_id,
+    display_phone_number: connection.masked_phone,
+    status: "CONNECTED",
+    updated_at: now,
+  };
+  const { data: phone, error: phoneReadError } = await client
+    .from("whatsapp_tenant_phone_numbers")
+    .select("id,integration_id")
+    .eq("phone_number_id", connection.phone_number_id)
+    .maybeSingle();
+  if (
+    phoneReadError || (phone && phone.integration_id !== integration.data.id)
+  ) {
+    throw new Error("WHATSAPP_PROJECTION_FAILED");
+  }
+  const saved = phone?.id
+    ? await client.from("whatsapp_tenant_phone_numbers").update(phoneFields)
+      .eq("id", phone.id)
+    : await client.from("whatsapp_tenant_phone_numbers").insert(phoneFields);
+  if (saved.error) throw new Error("WHATSAPP_PROJECTION_FAILED");
 }
 
 async function tenantForAdmin(authUserId: string) {
@@ -103,14 +141,18 @@ Deno.serve(async (req) => {
     const requestBody = req.method === "POST"
       ? await req.json().catch(() => ({}))
       : undefined;
-    const operation = operationFor(req, requestBody);
+    const operation = operationFor(req.method, requestBody);
     const actor = await requireAdminPermission(
       req,
       "INTEGRATIONS_MANAGE",
     );
     const tenantId = await tenantForAdmin(actor.authUserId);
     if (!tenantId) {
-      return json({ status: "SETUP_REQUIRED", signup_available: false });
+      return json({
+        status: "SETUP_REQUIRED",
+        signup_available: false,
+        owned_number_available: false,
+      });
     }
 
     const handoff = {
@@ -140,24 +182,41 @@ Deno.serve(async (req) => {
         handoff,
         payload: clientPayload(operation, requestBody),
       }),
-      signal: AbortSignal.timeout(8_000),
+      // Connecting an owned number makes several Meta and runtime calls.
+      signal: AbortSignal.timeout(
+        operation === "CONNECT_OWNED_NUMBER" && req.method === "POST"
+          ? 45_000
+          : 8_000,
+      ),
     });
     const payload = await response.json().catch(() => null) as {
       status?: unknown;
       signup_available?: unknown;
       data?: unknown;
     } | null;
-    if (req.method === "GET") {
-      if (
-        payload?.status !== "READY" ||
-        typeof payload.signup_available !== "boolean"
-      ) {
-        throw new Error("DRACMA_MESSAGING_GATEWAY_INVALID");
+    if (req.method === "GET") return json(messagingStatus(payload));
+    if (operation === "CONNECT_OWNED_NUMBER") {
+      if (!response.ok) {
+        const code = (payload as { error?: { code?: unknown } } | null)?.error
+          ?.code;
+        return json({
+          error: {
+            code:
+              typeof code === "string" && /^[A-Z][A-Z0-9_]{2,95}$/.test(code)
+                ? code
+                : "DRACMA_MESSAGING_GATEWAY_UNAVAILABLE",
+          },
+        }, response.status >= 400 && response.status < 500 ? 409 : 502);
       }
-      return json({
-        status: "READY",
-        signup_available: payload.signup_available,
-      });
+      const connection = ownedNumberConnection(payload);
+      let projected = true;
+      try {
+        await projectOwnedNumber(tenantId.id, connection);
+      } catch {
+        projected = false;
+        console.error("admin-dracma-messaging", "WHATSAPP_PROJECTION_FAILED");
+      }
+      return json(ownedNumberBrowserResult(connection, projected));
     }
     if (operation === "COMPLETE_SESSION" || operation === "CANCEL_SESSION") {
       const data = payload?.data;
@@ -184,7 +243,11 @@ Deno.serve(async (req) => {
   } catch (error) {
     const code = safeCode(error);
     if (code.startsWith("CONFIG_")) {
-      return json({ status: "SETUP_REQUIRED", signup_available: false });
+      return json({
+        status: "SETUP_REQUIRED",
+        signup_available: false,
+        owned_number_available: false,
+      });
     }
     const status = code === "ADMIN_PERMISSION_DENIED"
       ? 403
