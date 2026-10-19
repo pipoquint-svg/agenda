@@ -1,6 +1,17 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
-import { requireAdminPermission } from '../_shared/supabase.ts'
+import { requireAdmin, requireAdminPermission } from '../_shared/supabase.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
+import {
+  assertPasswordManagementAllowed,
+  authPasswordUpdateErrorCode,
+  PASSWORD_RATE_LIMITS,
+  passwordAuditRow,
+  passwordErrorStatus,
+  RECOVERY_REDIRECT_URL,
+  validateOwnerPassword,
+  type PasswordActor,
+  type PasswordOperation,
+} from '../_shared/team-password.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -293,6 +304,96 @@ async function resendInvite(req: Request, client: SupabaseClient, memberId: stri
   }
 }
 
+// Password management is Owner-only: TEAM_MANAGE alone is never enough. The role
+// and the active flag are read from admin_users on every request.
+async function requireOwner(req: Request, client: SupabaseClient): Promise<PasswordActor> {
+  const { adminId } = await requireAdmin(req)
+  const { data: actor, error } = await client
+    .from('admin_users')
+    .select('role,is_active')
+    .eq('id', adminId)
+    .maybeSingle()
+  if (error || !actor) throw new Error('ADMIN_ACCESS_DENIED')
+  const owner = { adminId, role: String(actor.role ?? ''), isActive: actor.is_active === true }
+  if (!owner.isActive || owner.role.toUpperCase() !== 'OWNER') throw new Error('ADMIN_OWNER_REQUIRED')
+  return owner
+}
+
+async function consumePasswordRateLimits(client: SupabaseClient, operation: PasswordOperation, actorId: string, targetId: string) {
+  const policies = PASSWORD_RATE_LIMITS[operation]
+  for (const [policy, key] of [[policies.target, `admin_user:${targetId}`], [policies.actor, `owner:${actorId}`]] as const) {
+    const { error } = await client.rpc('service_consume_public_rate_limit', {
+      p_scope: policy.scope,
+      p_client_key: key,
+      p_limit: policy.limit,
+      p_window_seconds: policy.windowSeconds,
+    })
+    if (error) throw new Error(error.message.includes('RATE_LIMITED') ? 'RATE_LIMITED' : 'RATE_LIMIT_BACKEND_FAILED')
+  }
+}
+
+async function auditPassword(
+  client: SupabaseClient,
+  operation: PasswordOperation,
+  actorId: string,
+  targetId: string,
+  result: 'SUCCESS' | 'FAILED',
+  errorCode?: string,
+) {
+  try {
+    const { error } = await client.from('audit_logs').insert(passwordAuditRow(operation, actorId, targetId, result, errorCode))
+    if (error) console.error('ADMIN_PASSWORD_AUDIT_FAILED', operation, result)
+  } catch {
+    console.error('ADMIN_PASSWORD_AUDIT_FAILED', operation, result)
+  }
+}
+
+async function loadPasswordTarget(client: SupabaseClient, actor: PasswordActor, memberId: string) {
+  const target = await loadTarget(client, memberId)
+  assertPasswordManagementAllowed(actor, target)
+  const authLookup = await client.auth.admin.getUserById(target.auth_user_id)
+  if (authLookup.error || !authLookup.data.user) throw new Error('ADMIN_AUTH_USER_NOT_FOUND')
+  return { target, authUser: authLookup.data.user }
+}
+
+async function setMemberPassword(req: Request, client: SupabaseClient, memberId: string, password: unknown): Promise<Response> {
+  const actor = await requireOwner(req, client)
+  const newPassword = validateOwnerPassword(password)
+  const { target } = await loadPasswordTarget(client, actor, memberId)
+  await consumePasswordRateLimits(client, 'SET_PASSWORD', actor.adminId, target.id)
+
+  // Only the password changes: no role, permission, e-mail or metadata in the payload.
+  const { error } = await client.auth.admin.updateUserById(target.auth_user_id, { password: newPassword })
+  if (error) {
+    const code = authPasswordUpdateErrorCode(error)
+    await auditPassword(client, 'SET_PASSWORD', actor.adminId, target.id, 'FAILED', code)
+    throw new Error(code)
+  }
+  await auditPassword(client, 'SET_PASSWORD', actor.adminId, target.id, 'SUCCESS')
+
+  return json({ member_id: target.id, password_updated: true })
+}
+
+async function sendMemberPasswordRecovery(req: Request, client: SupabaseClient, memberId: string): Promise<Response> {
+  const actor = await requireOwner(req, client)
+  const { target, authUser } = await loadPasswordTarget(client, actor, memberId)
+  const memberEmail = normalizedEmail(authUser.email)
+  if (!memberEmail) throw new Error('ADMIN_EMAIL_INVALID')
+  await consumePasswordRateLimits(client, 'SEND_PASSWORD_RECOVERY', actor.adminId, target.id)
+
+  // Same Auth recovery flow and e-mail as "Esqueci minha senha": Auth creates the
+  // token and sends the message, so the link never passes through this function.
+  const { error } = await client.auth.resetPasswordForEmail(memberEmail, { redirectTo: RECOVERY_REDIRECT_URL })
+  if (error) {
+    const code = Number(error.status) === 429 ? 'ADMIN_PASSWORD_RECOVERY_RATE_LIMITED' : 'ADMIN_PASSWORD_RECOVERY_SEND_FAILED'
+    await auditPassword(client, 'SEND_PASSWORD_RECOVERY', actor.adminId, target.id, 'FAILED', code)
+    throw new Error(code)
+  }
+  await auditPassword(client, 'SEND_PASSWORD_RECOVERY', actor.adminId, target.id, 'SUCCESS')
+
+  return json({ member_id: target.id, recovery_email_sent: true, recipient_masked: maskEmail(memberEmail) })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -305,15 +406,17 @@ Deno.serve(async (req) => {
 
     if (action === 'REACTIVATE') return await reactivateMember(req, client, memberId)
     if (action === 'RESEND_INVITE') return await resendInvite(req, client, memberId)
+    if (action === 'SET_PASSWORD') return await setMemberPassword(req, client, memberId, body.password)
+    if (action === 'SEND_PASSWORD_RECOVERY') return await sendMemberPasswordRecovery(req, client, memberId)
     throw new Error('ADMIN_TEAM_ACTION_INVALID')
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'ADMIN_TEAM_ACCESS_FAILED'
-    const status = code === 'ADMIN_AUTH_REQUIRED' || code === 'ADMIN_AUTH_INVALID' || code === 'ADMIN_ACCESS_DENIED' ? 401
+    const status = passwordErrorStatus(code) ?? (code === 'ADMIN_AUTH_REQUIRED' || code === 'ADMIN_AUTH_INVALID' || code === 'ADMIN_ACCESS_DENIED' ? 401
       : code === 'ADMIN_PERMISSION_DENIED' || code === 'ADMIN_OWNER_REQUIRED' ? 403
       : code === 'ADMIN_USER_NOT_FOUND' || code === 'ADMIN_AUTH_USER_NOT_FOUND' ? 404
       : code === 'ADMIN_TARGET_INACTIVE' || code === 'ADMIN_INVITE_ALREADY_COMPLETED' ? 409
       : code.startsWith('EMAIL_PROVIDER_') || code === 'ADMIN_AUTH_UNBAN_FAILED' ? 502
-      : 400
+      : 400)
     return json({ error: { code } }, status)
   }
 })
