@@ -96,6 +96,7 @@ export function authPasswordUpdateErrorCode(error: { status?: number; code?: str
 export function passwordErrorStatus(code: string): number | null {
   if (code === 'ADMIN_OWNER_REQUIRED' || code === 'ADMIN_SELF_PASSWORD_FORBIDDEN' || code === 'ADMIN_OWNER_PASSWORD_FORBIDDEN') return 403
   if (code === 'ADMIN_PASSWORD_INVALID' || code === 'ADMIN_PASSWORD_TOO_SHORT' || code === 'ADMIN_PASSWORD_TOO_LONG' || code === 'ADMIN_PASSWORD_WEAK') return 422
+  if (code === 'ADMIN_PASSWORD_INVITE_PENDING') return 409
   if (code === 'RATE_LIMITED' || code === 'ADMIN_PASSWORD_RECOVERY_RATE_LIMITED') return 429
   if (code === 'ADMIN_AUTH_PASSWORD_UPDATE_FAILED' || code === 'ADMIN_PASSWORD_RECOVERY_SEND_FAILED') return 502
   if (code === 'RATE_LIMIT_BACKEND_FAILED') return 503

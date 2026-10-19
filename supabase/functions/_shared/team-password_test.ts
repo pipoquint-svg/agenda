@@ -86,6 +86,7 @@ Deno.test('maps Auth and policy failures to stable HTTP statuses', () => {
   assertEquals(passwordErrorStatus('ADMIN_SELF_PASSWORD_FORBIDDEN'), 403)
   assertEquals(passwordErrorStatus('ADMIN_OWNER_PASSWORD_FORBIDDEN'), 403)
   assertEquals(passwordErrorStatus('ADMIN_PASSWORD_WEAK'), 422)
+  assertEquals(passwordErrorStatus('ADMIN_PASSWORD_INVITE_PENDING'), 409)
   assertEquals(passwordErrorStatus('RATE_LIMITED'), 429)
   assertEquals(passwordErrorStatus('ADMIN_PASSWORD_RECOVERY_SEND_FAILED'), 502)
   assertEquals(passwordErrorStatus('RATE_LIMIT_BACKEND_FAILED'), 503)
