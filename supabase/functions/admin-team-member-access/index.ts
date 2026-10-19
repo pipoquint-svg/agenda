@@ -359,7 +359,10 @@ async function loadPasswordTarget(client: SupabaseClient, actor: PasswordActor, 
 async function setMemberPassword(req: Request, client: SupabaseClient, memberId: string, password: unknown): Promise<Response> {
   const actor = await requireOwner(req, client)
   const newPassword = validateOwnerPassword(password)
-  const { target } = await loadPasswordTarget(client, actor, memberId)
+  const { target, authUser } = await loadPasswordTarget(client, actor, memberId)
+  // Auth requires a confirmed e-mail to sign in, so a password alone would not
+  // let a pending invitee in. Recovery (or a new invite) confirms the e-mail.
+  if (!authUser.email_confirmed_at) throw new Error('ADMIN_PASSWORD_INVITE_PENDING')
   await consumePasswordRateLimits(client, 'SET_PASSWORD', actor.adminId, target.id)
 
   // Only the password changes: no role, permission, e-mail or metadata in the payload.

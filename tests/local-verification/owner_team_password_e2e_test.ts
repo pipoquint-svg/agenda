@@ -38,13 +38,13 @@ function strongPassword(): string {
   return `Local-${crypto.randomUUID().slice(0, 8)}-Aa1!`
 }
 
-async function createMember(role: string, isActive: boolean, permissions: string[] = []): Promise<Member> {
+async function createMember(role: string, isActive: boolean, permissions: string[] = [], emailConfirmed = true): Promise<Member> {
   const email = `owner-pw-${role.toLowerCase()}-${crypto.randomUUID()}@example.test`
   const password = strongPassword()
   const created = await http(`${API_URL}/auth/v1/admin/users`, {
     method: 'POST',
     headers: serviceHeaders(),
-    body: JSON.stringify({ email, password, email_confirm: true }),
+    body: JSON.stringify({ email, password, email_confirm: emailConfirmed }),
   })
   assert([200, 201].includes(created.status), `auth user must be created: ${created.status}`)
   const authUserId = String(created.body.id ?? created.body.user?.id ?? '')
@@ -124,6 +124,7 @@ const finance = await createMember('FINANCE', true, ['FINANCE_VIEW'])
 const target = await createMember('OPERATION', true, ['AGENDA_VIEW', 'CUSTOMERS_VIEW'])
 const recoveryTarget = await createMember('FINANCE', true, ['FINANCE_VIEW'])
 const inactive = await createMember('OPERATION', false, ['AGENDA_VIEW'])
+const pendingInvite = await createMember('OPERATION', true, ['AGENDA_VIEW'], false)
 const ownerToken = await accessToken(owner)
 
 Deno.test('ADMIN (even with TEAM_MANAGE), OPERATION and FINANCE cannot run either action through the API', async () => {
@@ -158,6 +159,18 @@ Deno.test('the Owner cannot change another Owner, itself or an inactive member',
   assertEquals([missing.status, missing.body.error?.code], [404, 'ADMIN_USER_NOT_FOUND'])
   assertEquals((await signIn(otherOwner.email, otherOwner.password)).status, 200)
   assertEquals((await signIn(inactive.email, inactive.password)).status, 200, 'inactive fixture password is untouched')
+})
+
+Deno.test('a pending invitee cannot get a password, only the recovery e-mail that confirms the address', async () => {
+  const before = await snapshot(pendingInvite)
+  const set = await passwordAction(ownerToken, 'SET_PASSWORD', pendingInvite.adminId, strongPassword())
+  assertEquals([set.status, set.body.error?.code], [409, 'ADMIN_PASSWORD_INVITE_PENDING'])
+  assertEquals(await snapshot(pendingInvite), before)
+  assertEquals(await auditRows(pendingInvite.adminId), [])
+
+  const send = await passwordAction(ownerToken, 'SEND_PASSWORD_RECOVERY', pendingInvite.adminId)
+  assertEquals(send.status, 200, send.text)
+  assertEquals(send.body.recovery_email_sent, true)
 })
 
 Deno.test('invalid passwords are rejected and never echoed', async () => {
