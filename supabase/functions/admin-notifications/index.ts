@@ -36,7 +36,7 @@ const channels = ['EMAIL', 'GOOGLE_CALENDAR', 'WHATSAPP']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
-  'appointment.manage_url',
+  'appointment.manage_url', 'appointment.previous_start_at',
   'customer.name', 'customer.email', 'customer.phone', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
   'waitlist.name', 'waitlist.email', 'waitlist.whatsapp', 'waitlist.created_at',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
@@ -88,6 +88,7 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'appointment.start_at': '30/08/2026 14:00',
     'appointment.end_at': '30/08/2026 15:00',
     'appointment.duration': '60 min',
+    'appointment.previous_start_at': '28/08/2026 10:00',
     'appointment.manage_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=RESCHEDULE',
     'customer.name': 'Teste BlackSheep',
     'customer.email': recipient,
