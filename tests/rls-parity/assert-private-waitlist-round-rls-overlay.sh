@@ -16,6 +16,7 @@ TABLE|tenant_capabilities|true|false
 TABLE|tenant_members|true|false
 TABLE|tenant_settings|true|false
 TABLE|tenants|true|false
+TABLE|notification_whatsapp_settings|true|false
 TABLE|whatsapp_template_submissions|true|false
 TABLE|whatsapp_tenant_integrations|true|false
 TABLE|whatsapp_tenant_phone_numbers|true|false

@@ -1,5 +1,9 @@
 # CURRENT HANDOFF — Agenda
 
+## WhatsApp — categoria, validade, cabeçalho e rodapé nos rascunhos, 2026-10-20
+
+O editor de templates (agenda#512, dracma#717, black-sheep#171) está publicado. A pedido do usuário, entram categoria escolhida, validade (só Utilidade, 10 min a 12 h), cabeçalho em texto (até 60, no máximo 1 variável) e rodapé (até 60, sem variáveis), mais prévia estilo WhatsApp. Botões, mídia, carrossel e Flows ficam para depois. Nova tabela fechada `notification_whatsapp_settings` (migração `20261020230000`, pgTAP `174`, overlays de RLS e ACL atualizados). Rascunhos sem os campos novos mantêm o nome Meta já usado. Publicação exige deploy de banco (backup antes) e das funções.
+
 ## WhatsApp — envio de templates para aprovação da Meta, 2026-10-20
 
 O número da BlackSheep está conectado e ativo no Dracma Produção (conexão `primary`, origem `DRACMA_AGENDA_OWNED_NUMBER_V1`, webhook migrado do legado com aprovação explícita). Branch `codex/whatsapp-template-submission` em Agenda e BlackSheep; Dracma pipoquint-svg/dracma#717.

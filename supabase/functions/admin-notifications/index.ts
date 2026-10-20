@@ -14,6 +14,8 @@ import {
   type SubmissionRow,
   submissionStatus,
   submissionView,
+  type WhatsAppSettings,
+  whatsappSettings,
   whatsappTemplateDefinition,
 } from './whatsapp-template.ts'
 
@@ -156,8 +158,39 @@ function variablesIn(body: string) {
   return [...body.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((match) => match[1].trim())
 }
 
-async function templateDefinition(template: Record<string, unknown>, tenant: AgendaTenant) {
+type StoredWhatsAppSettings = WhatsAppSettings & { updated_at: string | null }
+
+/** WhatsApp-only fields per template id. */
+async function loadWhatsAppSettings(templateIds: string[]) {
+  const settings = new Map<string, StoredWhatsAppSettings>()
+  if (!templateIds.length) return settings
+  const { data, error } = await adminClient().from('notification_whatsapp_settings')
+    .select('template_id,category,header_text,footer_text,ttl_seconds,variable_examples,updated_at').in('template_id', templateIds)
+  if (error) throw new Error('WHATSAPP_SETTINGS_LOOKUP_FAILED')
+  for (const row of records(data)) {
+    settings.set(String(row.template_id), {
+      category: row.category === 'MARKETING' ? 'MARKETING' : 'UTILITY',
+      header_text: typeof row.header_text === 'string' ? row.header_text : null,
+      footer_text: typeof row.footer_text === 'string' ? row.footer_text : null,
+      ttl_seconds: typeof row.ttl_seconds === 'number' ? row.ttl_seconds : null,
+      variable_examples: row.variable_examples && typeof row.variable_examples === 'object' && !Array.isArray(row.variable_examples)
+        ? Object.fromEntries(Object.entries(row.variable_examples as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+        : {},
+      updated_at: row.updated_at ? String(row.updated_at) : null,
+    })
+  }
+  return settings
+}
+
+/** A draft changes when either the template or its WhatsApp fields change. */
+function latest(...values: (string | null | undefined)[]) {
+  return values.filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(String(value))))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null
+}
+
+async function templateDefinition(template: Record<string, unknown>, tenant: AgendaTenant, settings: WhatsAppSettings | null = null) {
   return await whatsappTemplateDefinition({
+    settings,
     templateId: String(template.id),
     eventKey: String(template.event_key),
     body: String(template.body_template ?? ''),
@@ -221,6 +254,7 @@ Deno.serve(async (req) => {
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
+      const whatsappByTemplate = await loadWhatsAppSettings(records(templates.data).filter((item) => item.channel === 'WHATSAPP').map((item) => String(item.id)))
       // WhatsApp approval status per template, for the admin's tenant only.
       let whatsappSubmissions: ReturnType<typeof submissionView>[] = []
       const tenant = await tenantForAdmin(admin.authUserId).catch(() => null)
@@ -228,12 +262,14 @@ Deno.serve(async (req) => {
         const { data: rows, error: rowsError } = await client.from('whatsapp_template_submissions')
           .select(submissionColumns).eq('tenant_id', tenant.id)
         if (rowsError) throw new Error(rowsError.message)
-        const updatedAt = new Map(records(templates.data).map((item) => [String(item.id), item.updated_at ? String(item.updated_at) : null]))
+        const updatedAt = new Map(records(templates.data).map((item) => [String(item.id), latest(item.updated_at ? String(item.updated_at) : null, whatsappByTemplate.get(String(item.id))?.updated_at)]))
         whatsappSubmissions = ((rows ?? []) as SubmissionRow[]).map((row) => submissionView(row, updatedAt.get(row.notification_template_id) ?? null))
       }
       return json({
         whatsapp_submissions: whatsappSubmissions,
-        templates: templates.data ?? [],
+        templates: records(templates.data).map((item) => item.channel === 'WHATSAPP'
+          ? { ...item, whatsapp: whatsappByTemplate.get(String(item.id)) ?? null }
+          : item),
         services: records(services.data).map((service) => ({
           id: service.id, name: service.name, operation_scope: service.operation_scope, category_id: service.category_id, is_active: service.is_active,
         })),
@@ -245,6 +281,9 @@ Deno.serve(async (req) => {
           channels,
           audiences,
           variables: canViewFinance ? variables : variables.filter((item) => !financialVariables.has(item)),
+          // Default samples the editor pre-fills for WhatsApp variables.
+          whatsapp_examples: Object.fromEntries(Object.entries(testValues('cliente@exemplo.com.br', 'BlackSheep'))
+            .filter(([key]) => canViewFinance || !financialVariables.has(key))),
         },
       })
     }
@@ -267,7 +306,9 @@ Deno.serve(async (req) => {
         throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
       }
       const { tenant, integrationId } = await whatsappContext(admin.authUserId)
-      const definition = await templateDefinition(template, tenant)
+      const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+      const draftUpdatedAt = latest(String(template.updated_at ?? ''), settings?.updated_at)
+      const definition = await templateDefinition(template, tenant, settings)
       const base = { tenant_id: tenant.id, integration_id: integrationId, notification_template_id: templateId }
       try {
         // Re-sending unchanged text finds the template Meta already has.
@@ -287,7 +328,7 @@ Deno.serve(async (req) => {
           submitted_at: now,
           approved_at: mapped.status === 'APPROVED' ? now : null,
         })
-        return json({ submission: submissionView(row, String(template.updated_at ?? '')), category: definition.category })
+        return json({ submission: submissionView(row, draftUpdatedAt), category: definition.category })
       } catch (submitError) {
         const code = submitError instanceof Error && /^[A-Z][A-Z0-9_]{2,95}$/.test(submitError.message)
           ? submitError.message
@@ -308,12 +349,16 @@ Deno.serve(async (req) => {
         .select('id,event_key,body_template,updated_at').in('id', submissions.map((row) => row.notification_template_id))
       if (templateRowsError) throw new Error(templateRowsError.message)
       const templatesById = new Map(records(templateRows).map((item) => [String(item.id), item]))
+      const settingsById = await loadWhatsAppSettings([...templatesById.keys()])
       // Only unchanged drafts still match the name that was sent to Meta.
       const tracked: { row: SubmissionRow; name: string; updatedAt: string | null }[] = []
       for (const row of submissions) {
         const template = templatesById.get(row.notification_template_id)
-        if (!template || submissionView(row, String(template.updated_at ?? '')).changed_since_submission) continue
-        tracked.push({ row, name: (await templateDefinition(template, tenant)).name, updatedAt: String(template.updated_at ?? '') })
+        if (!template) continue
+        const settings = settingsById.get(row.notification_template_id) ?? null
+        const updatedAt = latest(String(template.updated_at ?? ''), settings?.updated_at)
+        if (submissionView(row, updatedAt).changed_since_submission) continue
+        tracked.push({ row, name: (await templateDefinition(template, tenant, settings)).name, updatedAt })
       }
       const result = tracked.length
         ? await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId: admin.adminId, payload: { names: tracked.map((item) => item.name) } })
@@ -412,6 +457,11 @@ Deno.serve(async (req) => {
       throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
     }
 
+    // Validate the WhatsApp fields before saving anything, so a bad field never
+    // leaves a half-saved draft.
+    const whatsapp = channel === 'WHATSAPP' && record.whatsapp !== undefined && record.whatsapp !== null
+      ? whatsappSettings(record.whatsapp, variables)
+      : null
     const scheduleMode = text(record.schedule_mode, true)?.toUpperCase() ?? 'IMMEDIATE'
     const scheduleOffsetMinutes = integer(record.schedule_offset_minutes)
     const { data, error } = await client.rpc('service_admin_upsert_notification_template_v3', {
@@ -433,6 +483,15 @@ Deno.serve(async (req) => {
       p_schedule_offset_minutes: scheduleOffsetMinutes,
     })
     if (error) throw new Error(error.message)
+    if (whatsapp) {
+      const { error: settingsError } = await client.from('notification_whatsapp_settings').upsert({
+        template_id: data,
+        ...whatsapp,
+        updated_by_admin_id: admin.adminId,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'template_id' })
+      if (settingsError) throw new Error('WHATSAPP_SETTINGS_SAVE_FAILED')
+    }
     return json({ id: data }, req.method === 'POST' ? 201 : 200)
   } catch (error) {
     const code = error instanceof Error ? error.message.split(':')[0] : 'NOTIFICATION_ADMIN_FAILED'
