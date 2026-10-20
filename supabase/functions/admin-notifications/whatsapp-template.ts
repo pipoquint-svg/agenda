@@ -10,6 +10,9 @@ export type WhatsAppTemplateDefinition = {
   header_example: string | null
   footer_text: string | null
   ttl_seconds: number | null
+  button_text: string | null
+  button_url: string | null
+  button_example: string | null
 }
 
 export type WhatsAppSettings = {
@@ -19,7 +22,19 @@ export type WhatsAppSettings = {
   ttl_seconds: number | null
   /** Admin-provided sample per variable; missing ones fall back to defaults. */
   variable_examples: Record<string, string>
+  /** Optional URL button: its label and the customer link it opens. */
+  button_text: string | null
+  button_variable: string | null
 }
+
+/** Customer links a URL button may open. */
+export const WHATSAPP_BUTTON_VARIABLES = [
+  'appointment.manage_url',
+  'pre_reservation.payment_url',
+  'balance.payment_url',
+  'payment.resume_url',
+]
+const MAX_BUTTON_TEXT_LENGTH = 25
 
 /** Validity choices offered to admins; Meta accepts 30 s to 12 h for utility. */
 export const WHATSAPP_TTL_OPTIONS = [600, 1800, 3600, 10800, 21600, 43200]
@@ -51,7 +66,21 @@ export function whatsappSettings(value: unknown, catalog: string[]): WhatsAppSet
   if (footer?.includes('{{')) throw new Error('WHATSAPP_FOOTER_VARIABLE')
   const ttl = source.ttl_seconds === null || source.ttl_seconds === undefined || source.ttl_seconds === '' ? null : Number(source.ttl_seconds)
   if (ttl !== null && (category !== 'UTILITY' || !WHATSAPP_TTL_OPTIONS.includes(ttl))) throw new Error('WHATSAPP_TTL_INVALID')
-  return { category, header_text: header, footer_text: footer, ttl_seconds: ttl, variable_examples: variableExamples(source.variable_examples, catalog) }
+  const buttonText = optionalLine(source.button_text, MAX_BUTTON_TEXT_LENGTH, 'WHATSAPP_BUTTON_INVALID')
+  const buttonVariable = typeof source.button_variable === 'string' && source.button_variable.trim() ? source.button_variable.trim() : null
+  if (Boolean(buttonText) !== Boolean(buttonVariable) || buttonText?.includes('{{')) throw new Error('WHATSAPP_BUTTON_INVALID')
+  if (buttonVariable && (!WHATSAPP_BUTTON_VARIABLES.includes(buttonVariable) || !catalog.includes(buttonVariable))) {
+    throw new Error('WHATSAPP_BUTTON_LINK_INVALID')
+  }
+  return {
+    category,
+    header_text: header,
+    footer_text: footer,
+    ttl_seconds: ttl,
+    variable_examples: variableExamples(source.variable_examples, catalog),
+    button_text: buttonText,
+    button_variable: buttonVariable,
+  }
 }
 
 function variableExamples(value: unknown, catalog: string[]) {
@@ -97,6 +126,8 @@ export async function whatsappTemplateDefinition(input: {
   catalog: string[]
   examples: Record<string, string>
   settings?: WhatsAppSettings | null
+  /** Fixed URL with {{1}} and a full sample for a customer link button. */
+  buttonLink?: (variable: string) => { url: string; example: string }
 }): Promise<WhatsAppTemplateDefinition> {
   const examples = { ...input.examples, ...(input.settings?.variable_examples ?? {}) }
   const source = input.body.trim()
@@ -146,8 +177,14 @@ export async function whatsappTemplateDefinition(input: {
   const used = [...order, ...(headerKey ? [headerKey] : [])]
   const customSamples = used.filter((key) => input.settings?.variable_examples?.[key]).sort()
     .map((key) => `${key}=${input.settings?.variable_examples[key]}`).join('\n')
-  const fingerprint = headerText || footerText || ttlSeconds || customSamples
-    ? [category, headerText ?? '', bodyText, footerText ?? '', ttlSeconds ?? '', customSamples].join('\n')
+  let button: { text: string; url: string; example: string } | null = null
+  if (settings?.button_text && settings.button_variable) {
+    if (!input.buttonLink) throw new Error('WHATSAPP_BUTTON_LINK_UNAVAILABLE')
+    button = { text: settings.button_text, ...input.buttonLink(settings.button_variable) }
+  }
+  const buttonPart = button ? `button=${button.text}|${button.url}` : ''
+  const fingerprint = headerText || footerText || ttlSeconds || customSamples || buttonPart
+    ? [category, headerText ?? '', bodyText, footerText ?? '', ttlSeconds ?? '', customSamples, buttonPart].filter((part, index) => index < 6 || part).join('\n')
     : `${category}\n${bodyText}`
   return {
     name: `agenda_${event}_${id}_${await shortHash(fingerprint)}`,
@@ -159,6 +196,9 @@ export async function whatsappTemplateDefinition(input: {
     header_example: headerExample,
     footer_text: footerText,
     ttl_seconds: ttlSeconds,
+    button_text: button?.text ?? null,
+    button_url: button?.url ?? null,
+    button_example: button?.example ?? null,
   }
 }
 

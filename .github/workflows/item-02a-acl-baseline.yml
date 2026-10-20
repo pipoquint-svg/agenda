@@ -147,7 +147,8 @@ jobs:
             supabase/migrations/20261016223000_marketing_campaign_coupon_issuance.sql \
             supabase/migrations/20261016233000_marketing_campaign_checkout_validity.sql \
             supabase/migrations/20261017220000_public_studio_stats.sql \
-            supabase/migrations/20261020230000_notification_whatsapp_settings.sql
+            supabase/migrations/20261020230000_notification_whatsapp_settings.sql \
+            supabase/migrations/20261021000000_notification_whatsapp_button.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -240,7 +241,8 @@ jobs:
             supabase/migrations/20261016223000_marketing_campaign_coupon_issuance.sql \
             supabase/migrations/20261016233000_marketing_campaign_checkout_validity.sql \
             supabase/migrations/20261017220000_public_studio_stats.sql \
-            supabase/migrations/20261020230000_notification_whatsapp_settings.sql
+            supabase/migrations/20261020230000_notification_whatsapp_settings.sql \
+            supabase/migrations/20261021000000_notification_whatsapp_button.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then

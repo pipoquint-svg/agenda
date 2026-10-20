@@ -23,7 +23,7 @@ function dateTime(value: unknown): string {
   }).format(parsed)
 }
 
-function paymentResumeBaseUrl(): string {
+export function paymentResumeBaseUrl(): string {
   const configured = (Deno.env.get('PAYMENT_RESUME_PUBLIC_BASE_URL') ?? '').trim().replace(/\/+$/, '')
   const raw = configured || 'https://www.sabrinapierri.com.br'
   const parsed = new URL(raw)
