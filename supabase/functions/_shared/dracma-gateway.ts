@@ -52,8 +52,8 @@ export async function callDracmaGateway(input: {
   timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
   const handoff = {
-    contract: DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT as
-      typeof DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT,
+    contract:
+      DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT as typeof DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT,
     request_id: crypto.randomUUID(),
     agenda_tenant_id: input.tenant.id,
     agenda_admin_id: input.adminId,
