@@ -1,5 +1,5 @@
-import { assertEquals, assertMatch, assertNotEquals, assertRejects } from 'jsr:@std/assert@1'
-import { submissionStatus, submissionView, whatsappCategory, whatsappTemplateDefinition } from './whatsapp-template.ts'
+import { assertEquals, assertMatch, assertNotEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1'
+import { submissionStatus, submissionView, whatsappCategory, whatsappSettings, whatsappTemplateDefinition } from './whatsapp-template.ts'
 
 const catalog = ['customer.name', 'appointment.public_code', 'appointment.start_at']
 const examples = {
@@ -72,4 +72,44 @@ Deno.test('flags drafts edited after submission and hides provider ids', () => {
   assertEquals(view.rejected_reason, 'INVALID_FORMAT')
   assertEquals('provider_template_id' in view, false)
   assertEquals(submissionView(row, '2026-10-20T19:00:00Z').changed_since_submission, false)
+})
+
+Deno.test('adds header, footer and validity and renames the template', async () => {
+  const body = 'Olá {{customer.name}}, tudo certo.'
+  const plain = await whatsappTemplateDefinition({ ...base, body })
+  const full = await whatsappTemplateDefinition({
+    ...base,
+    body,
+    settings: { category: 'UTILITY', header_text: 'Reserva {{appointment.public_code}}', footer_text: 'BlackSheep', ttl_seconds: 3600 },
+  })
+  assertEquals(full.header_text, 'Reserva {{1}}')
+  assertEquals(full.header_example, 'TESTE-1234')
+  assertEquals(full.body_text, 'Olá {{1}}, tudo certo.')
+  assertEquals(full.footer_text, 'BlackSheep')
+  assertEquals(full.ttl_seconds, 3600)
+  assertNotEquals(full.name, plain.name)
+  const bodyOnly = await whatsappTemplateDefinition({ ...base, body, settings: { category: 'UTILITY', header_text: null, footer_text: null, ttl_seconds: null } })
+  assertEquals(bodyOnly.name, plain.name)
+})
+
+Deno.test('the chosen category wins and marketing drops the validity', async () => {
+  const definition = await whatsappTemplateDefinition({
+    ...base,
+    body: 'Olá {{customer.name}}, novidade.',
+    settings: { category: 'MARKETING', header_text: null, footer_text: null, ttl_seconds: 3600 },
+  })
+  assertEquals(definition.category, 'MARKETING')
+  assertEquals(definition.ttl_seconds, null)
+})
+
+Deno.test('validates the WhatsApp fields an admin saves', () => {
+  assertEquals(whatsappSettings({ category: 'utility', header_text: ' Olá {{customer.name}} ', footer_text: '', ttl_seconds: '3600' }, catalog), {
+    category: 'UTILITY', header_text: 'Olá {{customer.name}}', footer_text: null, ttl_seconds: 3600,
+  })
+  assertThrows(() => whatsappSettings({ category: 'AUTH' }, catalog), Error, 'WHATSAPP_CATEGORY_INVALID')
+  assertThrows(() => whatsappSettings({ category: 'UTILITY', header_text: '{{customer.name}} {{appointment.public_code}}' }, catalog), Error, 'WHATSAPP_HEADER_VARIABLE_LIMIT')
+  assertThrows(() => whatsappSettings({ category: 'UTILITY', header_text: 'x'.repeat(61) }, catalog), Error, 'WHATSAPP_HEADER_INVALID')
+  assertThrows(() => whatsappSettings({ category: 'UTILITY', footer_text: 'Oi {{customer.name}}' }, catalog), Error, 'WHATSAPP_FOOTER_VARIABLE')
+  assertThrows(() => whatsappSettings({ category: 'UTILITY', ttl_seconds: 999 }, catalog), Error, 'WHATSAPP_TTL_INVALID')
+  assertThrows(() => whatsappSettings({ category: 'MARKETING', ttl_seconds: 3600 }, catalog), Error, 'WHATSAPP_TTL_INVALID')
 })

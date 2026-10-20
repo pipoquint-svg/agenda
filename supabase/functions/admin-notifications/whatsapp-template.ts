@@ -6,6 +6,50 @@ export type WhatsAppTemplateDefinition = {
   category: WhatsAppCategory
   body_text: string
   body_examples: string[]
+  header_text: string | null
+  header_example: string | null
+  footer_text: string | null
+  ttl_seconds: number | null
+}
+
+export type WhatsAppSettings = {
+  category: WhatsAppCategory
+  header_text: string | null
+  footer_text: string | null
+  ttl_seconds: number | null
+}
+
+/** Validity choices offered to admins; Meta accepts 30 s to 12 h for utility. */
+export const WHATSAPP_TTL_OPTIONS = [600, 1800, 3600, 10800, 21600, 43200]
+const MAX_HEADER_LENGTH = 60
+const MAX_FOOTER_LENGTH = 60
+
+function optionalLine(value: unknown, max: number, code: string): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string') throw new Error(code)
+  const text = value.trim()
+  if (!text) return null
+  if (text.length > max || /[\r\n]/.test(text)) throw new Error(code)
+  return text
+}
+
+/** Validates the WhatsApp-only fields an admin saves on a draft. */
+export function whatsappSettings(value: unknown, catalog: string[]): WhatsAppSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('WHATSAPP_SETTINGS_INVALID')
+  const source = value as Record<string, unknown>
+  const category = String(source.category ?? '').toUpperCase()
+  if (category !== 'UTILITY' && category !== 'MARKETING') throw new Error('WHATSAPP_CATEGORY_INVALID')
+  const header = optionalLine(source.header_text, MAX_HEADER_LENGTH, 'WHATSAPP_HEADER_INVALID')
+  if (header) {
+    const keys = [...header.matchAll(VARIABLE)].map((match) => match[1].trim())
+    if (keys.length > 1) throw new Error('WHATSAPP_HEADER_VARIABLE_LIMIT')
+    if (keys.some((key) => !catalog.includes(key))) throw new Error('WHATSAPP_TEMPLATE_VARIABLE_INVALID')
+  }
+  const footer = optionalLine(source.footer_text, MAX_FOOTER_LENGTH, 'WHATSAPP_FOOTER_INVALID')
+  if (footer?.includes('{{')) throw new Error('WHATSAPP_FOOTER_VARIABLE')
+  const ttl = source.ttl_seconds === null || source.ttl_seconds === undefined || source.ttl_seconds === '' ? null : Number(source.ttl_seconds)
+  if (ttl !== null && (category !== 'UTILITY' || !WHATSAPP_TTL_OPTIONS.includes(ttl))) throw new Error('WHATSAPP_TTL_INVALID')
+  return { category, header_text: header, footer_text: footer, ttl_seconds: ttl }
 }
 
 export type SubmissionStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'FAILED'
@@ -36,6 +80,7 @@ export async function whatsappTemplateDefinition(input: {
   body: string
   catalog: string[]
   examples: Record<string, string>
+  settings?: WhatsAppSettings | null
 }): Promise<WhatsAppTemplateDefinition> {
   const source = input.body.trim()
   if (!source) throw new Error('WHATSAPP_TEMPLATE_BODY_REQUIRED')
@@ -55,15 +100,43 @@ export async function whatsappTemplateDefinition(input: {
     if (!example) throw new Error('WHATSAPP_TEMPLATE_EXAMPLE_MISSING')
     return example.slice(0, MAX_EXAMPLE_LENGTH)
   })
-  const category = whatsappCategory(input.eventKey)
+  const settings = input.settings ?? null
+  const category = settings?.category ?? whatsappCategory(input.eventKey)
+  // The header has its own numbering and accepts a single variable.
+  let headerKey: string | null = null
+  const headerText = settings?.header_text
+    ? settings.header_text.replace(VARIABLE, (_match, rawKey: string) => {
+      const key = rawKey.trim()
+      if (!input.catalog.includes(key)) throw new Error('WHATSAPP_TEMPLATE_VARIABLE_INVALID')
+      if (headerKey !== null) throw new Error('WHATSAPP_HEADER_VARIABLE_LIMIT')
+      headerKey = key
+      return '{{1}}'
+    })
+    : null
+  let headerExample: string | null = null
+  if (headerKey !== null) {
+    headerExample = String(input.examples[headerKey] ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_EXAMPLE_LENGTH)
+    if (!headerExample) throw new Error('WHATSAPP_TEMPLATE_EXAMPLE_MISSING')
+  }
+  const footerText = settings?.footer_text ?? null
+  const ttlSeconds = category === 'UTILITY' ? settings?.ttl_seconds ?? null : null
   const id = input.templateId.replace(/-/g, '').slice(0, 8).toLowerCase()
   const event = input.eventKey.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+  // Body-only drafts keep the fingerprint used before header and footer existed,
+  // so templates already sent to Meta keep their names.
+  const fingerprint = headerText || footerText || ttlSeconds
+    ? [category, headerText ?? '', bodyText, footerText ?? '', ttlSeconds ?? ''].join('\n')
+    : `${category}\n${bodyText}`
   return {
-    name: `agenda_${event}_${id}_${await shortHash(`${category}\n${bodyText}`)}`,
+    name: `agenda_${event}_${id}_${await shortHash(fingerprint)}`,
     language: 'pt_BR',
     category,
     body_text: bodyText,
     body_examples: bodyExamples,
+    header_text: headerText,
+    header_example: headerExample,
+    footer_text: footerText,
+    ttl_seconds: ttlSeconds,
   }
 }
 
