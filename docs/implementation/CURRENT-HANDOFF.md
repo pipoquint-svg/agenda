@@ -1,5 +1,11 @@
 # CURRENT HANDOFF — Agenda
 
+## WhatsApp — envio de templates para aprovação da Meta, 2026-10-20
+
+O número da BlackSheep está conectado e ativo no Dracma Produção (conexão `primary`, origem `DRACMA_AGENDA_OWNED_NUMBER_V1`, webhook migrado do legado com aprovação explícita). Branch `codex/whatsapp-template-submission` em Agenda e BlackSheep; Dracma pipoquint-svg/dracma#717.
+
+`admin-notifications` ganha `SUBMIT_WHATSAPP` e `SYNC_WHATSAPP`: converte o rascunho (`{{customer.name}}` → `{{1}}` com exemplos), deriva o nome Meta do conteúdo (mesmo texto = mesmo template; edição = novo nome), consulta antes de criar e grava `whatsapp_template_submissions`. O GET devolve `whatsapp_submissions` do tenant, sem IDs do provedor. Sem migração. Só o corpo; cabeçalho, rodapé e botões ficam para depois. Nenhuma mensagem é enviada e os rascunhos continuam inativos.
+
 ## WhatsApp — número próprio da BlackSheep (first-party), 2026-10-19
 
 Diagnóstico: o Embedded Signup falha com "229696290960933 não é uma identificação válida" porque a WABA "Black Sheep Estúdio Criativo" (+55 48 9222-6969, já ligada) pertence ao mesmo portfólio do app Meta do Dracma (Pierri Quint Produções Ltda, 229696290960933). Caminho escolhido pelo usuário: conexão first-party com token de usuário do sistema do app Dracma.

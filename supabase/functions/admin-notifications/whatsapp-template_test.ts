@@ -1,0 +1,75 @@
+import { assertEquals, assertMatch, assertNotEquals, assertRejects } from 'jsr:@std/assert@1'
+import { submissionStatus, submissionView, whatsappCategory, whatsappTemplateDefinition } from './whatsapp-template.ts'
+
+const catalog = ['customer.name', 'appointment.public_code', 'appointment.start_at']
+const examples = {
+  'customer.name': 'Teste BlackSheep',
+  'appointment.public_code': 'TESTE-1234',
+  'appointment.start_at': '30/08/2026 14:00',
+}
+const base = {
+  templateId: '1a2b3c4d-0000-4000-8000-000000000000',
+  eventKey: 'APPOINTMENT_APPROVED',
+  catalog,
+  examples,
+}
+
+Deno.test('numbers variables by first use and keeps a sample for each', async () => {
+  const definition = await whatsappTemplateDefinition({
+    ...base,
+    body: 'Olá {{customer.name}}! Reserva {{ appointment.public_code }} em {{appointment.start_at}}. Até logo, {{customer.name}}.',
+  })
+  assertEquals(definition.body_text, 'Olá {{1}}! Reserva {{2}} em {{3}}. Até logo, {{1}}.')
+  assertEquals(definition.body_examples, ['Teste BlackSheep', 'TESTE-1234', '30/08/2026 14:00'])
+  assertEquals(definition.category, 'UTILITY')
+  assertEquals(definition.language, 'pt_BR')
+  assertMatch(definition.name, /^agenda_appointment_approved_1a2b3c4d_[0-9a-f]{8}$/)
+})
+
+Deno.test('the same text keeps its Meta name and an edit changes it', async () => {
+  const first = await whatsappTemplateDefinition({ ...base, body: 'Olá {{customer.name}}, tudo certo.' })
+  const again = await whatsappTemplateDefinition({ ...base, body: 'Olá {{customer.name}}, tudo certo.' })
+  const edited = await whatsappTemplateDefinition({ ...base, body: 'Oi {{customer.name}}, tudo certo.' })
+  assertEquals(first.name, again.name)
+  assertNotEquals(first.name, edited.name)
+})
+
+Deno.test('rejects drafts Meta would refuse', async () => {
+  await assertRejects(() => whatsappTemplateDefinition({ ...base, body: '  ' }), Error, 'WHATSAPP_TEMPLATE_BODY_REQUIRED')
+  await assertRejects(() => whatsappTemplateDefinition({ ...base, body: 'Olá {{cliente}}.' }), Error, 'WHATSAPP_TEMPLATE_VARIABLE_INVALID')
+  await assertRejects(() => whatsappTemplateDefinition({ ...base, body: '{{customer.name}}, confirmado.' }), Error, 'WHATSAPP_TEMPLATE_PARAMETER_EDGE')
+  await assertRejects(() => whatsappTemplateDefinition({ ...base, body: 'Reserva de {{customer.name}}' }), Error, 'WHATSAPP_TEMPLATE_PARAMETER_EDGE')
+  await assertRejects(() => whatsappTemplateDefinition({ ...base, body: 'x'.repeat(1025) }), Error, 'WHATSAPP_TEMPLATE_BODY_TOO_LONG')
+})
+
+Deno.test('classifies birthday and manual messages as marketing', () => {
+  assertEquals(whatsappCategory('BIRTHDAY'), 'MARKETING')
+  assertEquals(whatsappCategory('MANUAL'), 'MARKETING')
+  assertEquals(whatsappCategory('APPOINTMENT_REMINDER'), 'UTILITY')
+})
+
+Deno.test('maps Meta statuses onto submission states', () => {
+  assertEquals(submissionStatus('PENDING'), { status: 'PENDING_REVIEW', errorCode: null })
+  assertEquals(submissionStatus('APPROVED'), { status: 'APPROVED', errorCode: null })
+  assertEquals(submissionStatus('REJECTED'), { status: 'REJECTED', errorCode: null })
+  assertEquals(submissionStatus('PAUSED'), { status: 'FAILED', errorCode: 'META_TEMPLATE_PAUSED' })
+  assertEquals(submissionStatus('NOT_FOUND'), null)
+  assertEquals(submissionStatus('SOMETHING'), { status: 'FAILED', errorCode: 'META_TEMPLATE_STATUS_UNKNOWN' })
+})
+
+Deno.test('flags drafts edited after submission and hides provider ids', () => {
+  const row = {
+    notification_template_id: base.templateId,
+    status: 'REJECTED',
+    provider_error_code: null,
+    provider_error_message: 'INVALID_FORMAT',
+    submitted_at: '2026-10-20T20:00:00Z',
+    approved_at: null,
+    updated_at: '2026-10-20T20:05:00Z',
+  }
+  const view = submissionView(row, '2026-10-20T21:00:00Z')
+  assertEquals(view.changed_since_submission, true)
+  assertEquals(view.rejected_reason, 'INVALID_FORMAT')
+  assertEquals('provider_template_id' in view, false)
+  assertEquals(submissionView(row, '2026-10-20T19:00:00Z').changed_since_submission, false)
+})

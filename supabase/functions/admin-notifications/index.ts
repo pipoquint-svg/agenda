@@ -9,6 +9,13 @@ import {
   renderNotificationMessage,
   type NotificationTemplate,
 } from '../_shared/notification-email.ts'
+import { type AgendaTenant, callDracmaGateway, tenantForAdmin } from '../_shared/dracma-gateway.ts'
+import {
+  type SubmissionRow,
+  submissionStatus,
+  submissionView,
+  whatsappTemplateDefinition,
+} from './whatsapp-template.ts'
 
 const corsHeaders = {
   'access-control-allow-origin': '*',
@@ -115,6 +122,50 @@ function testValues(recipient: string, brandName: string): Record<string, string
   }
 }
 
+const submissionColumns = 'notification_template_id,status,provider_error_code,provider_error_message,submitted_at,approved_at,updated_at'
+
+async function whatsappContext(authUserId: string) {
+  const tenant = await tenantForAdmin(authUserId)
+  if (!tenant) throw new Error('WHATSAPP_TENANT_REQUIRED')
+  const { data, error } = await adminClient().from('whatsapp_tenant_integrations')
+    .select('id').eq('tenant_id', tenant.id).eq('status', 'CONNECTED')
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+  if (error) throw new Error('WHATSAPP_INTEGRATION_LOOKUP_FAILED')
+  if (!data?.id) throw new Error('WHATSAPP_NOT_CONNECTED')
+  return { tenant, integrationId: String(data.id) }
+}
+
+async function saveSubmission(row: Record<string, unknown>) {
+  const { data, error } = await adminClient().from('whatsapp_template_submissions')
+    .upsert({ ...row, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id,notification_template_id' })
+    .select(submissionColumns).single()
+  if (error || !data) throw new Error('WHATSAPP_SUBMISSION_SAVE_FAILED')
+  return data as SubmissionRow
+}
+
+async function updateSubmission(tenantId: string, templateId: string, fields: Record<string, unknown>) {
+  const { data, error } = await adminClient().from('whatsapp_template_submissions')
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq('tenant_id', tenantId).eq('notification_template_id', templateId)
+    .select(submissionColumns).single()
+  if (error || !data) throw new Error('WHATSAPP_SUBMISSION_SAVE_FAILED')
+  return data as SubmissionRow
+}
+
+function variablesIn(body: string) {
+  return [...body.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((match) => match[1].trim())
+}
+
+async function templateDefinition(template: Record<string, unknown>, tenant: AgendaTenant) {
+  return await whatsappTemplateDefinition({
+    templateId: String(template.id),
+    eventKey: String(template.event_key),
+    body: String(template.body_template ?? ''),
+    catalog: variables,
+    examples: testValues('cliente@exemplo.com.br', tenant.name),
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (!['GET', 'POST', 'PUT'].includes(req.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405)
@@ -170,7 +221,18 @@ Deno.serve(async (req) => {
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
+      // WhatsApp approval status per template, for the admin's tenant only.
+      let whatsappSubmissions: ReturnType<typeof submissionView>[] = []
+      const tenant = await tenantForAdmin(admin.authUserId).catch(() => null)
+      if (tenant) {
+        const { data: rows, error: rowsError } = await client.from('whatsapp_template_submissions')
+          .select(submissionColumns).eq('tenant_id', tenant.id)
+        if (rowsError) throw new Error(rowsError.message)
+        const updatedAt = new Map(records(templates.data).map((item) => [String(item.id), item.updated_at ? String(item.updated_at) : null]))
+        whatsappSubmissions = ((rows ?? []) as SubmissionRow[]).map((row) => submissionView(row, updatedAt.get(row.notification_template_id) ?? null))
+      }
       return json({
+        whatsapp_submissions: whatsappSubmissions,
         templates: templates.data ?? [],
         services: records(services.data).map((service) => ({
           id: service.id, name: service.name, operation_scope: service.operation_scope, category_id: service.category_id, is_active: service.is_active,
@@ -192,7 +254,87 @@ Deno.serve(async (req) => {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('NOTIFICATION_PAYLOAD_INVALID')
     const record = body as Record<string, unknown>
 
-    if (req.method === 'POST' && String(record.action ?? '').toUpperCase() === 'TEST') {
+    const action = String(record.action ?? '').toUpperCase()
+    if (req.method === 'POST' && action === 'SUBMIT_WHATSAPP') {
+      const templateId = uuid(record.template_id) as string
+      const { data: template, error: templateError } = await client
+        .from('notification_template_configs')
+        .select('id,event_key,channel,body_template,updated_at')
+        .eq('id', templateId).maybeSingle()
+      if (templateError || !template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      if (template.channel !== 'WHATSAPP') throw new Error('WHATSAPP_TEMPLATE_CHANNEL_INVALID')
+      if (variablesIn(String(template.body_template ?? '')).some((item) => financialVariables.has(item)) && !(await hasAdminPermission(admin.adminId, 'FINANCE_MANAGE'))) {
+        throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
+      }
+      const { tenant, integrationId } = await whatsappContext(admin.authUserId)
+      const definition = await templateDefinition(template, tenant)
+      const base = { tenant_id: tenant.id, integration_id: integrationId, notification_template_id: templateId }
+      try {
+        // Re-sending unchanged text finds the template Meta already has.
+        const lookup = await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId: admin.adminId, payload: { names: [definition.name] } })
+        const existing = records(lookup.templates)[0]
+        const provider = existing && existing.status !== 'NOT_FOUND'
+          ? existing
+          : await callDracmaGateway({ operation: 'SUBMIT_TEMPLATE', tenant, adminId: admin.adminId, payload: definition })
+        const mapped = submissionStatus(provider.status) ?? { status: 'FAILED' as const, errorCode: 'META_TEMPLATE_NOT_FOUND' }
+        const now = new Date().toISOString()
+        const row = await saveSubmission({
+          ...base,
+          provider_template_id: typeof provider.template_id === 'string' && provider.template_id ? provider.template_id : null,
+          status: mapped.status,
+          provider_error_code: mapped.errorCode,
+          provider_error_message: typeof provider.rejected_reason === 'string' ? provider.rejected_reason : null,
+          submitted_at: now,
+          approved_at: mapped.status === 'APPROVED' ? now : null,
+        })
+        return json({ submission: submissionView(row, String(template.updated_at ?? '')), category: definition.category })
+      } catch (submitError) {
+        const code = submitError instanceof Error && /^[A-Z][A-Z0-9_]{2,95}$/.test(submitError.message)
+          ? submitError.message
+          : 'WHATSAPP_SUBMISSION_FAILED'
+        await saveSubmission({ ...base, status: 'FAILED', provider_error_code: code, provider_error_message: null }).catch(() => undefined)
+        throw submitError
+      }
+    }
+
+    if (req.method === 'POST' && action === 'SYNC_WHATSAPP') {
+      const { tenant } = await whatsappContext(admin.authUserId)
+      const { data: rows, error: rowsError } = await client.from('whatsapp_template_submissions')
+        .select(`${submissionColumns},provider_template_id`).eq('tenant_id', tenant.id)
+        .not('provider_template_id', 'is', null).limit(20)
+      if (rowsError) throw new Error(rowsError.message)
+      const submissions = (rows ?? []) as (SubmissionRow & { provider_template_id: string })[]
+      const { data: templateRows, error: templateRowsError } = await client.from('notification_template_configs')
+        .select('id,event_key,body_template,updated_at').in('id', submissions.map((row) => row.notification_template_id))
+      if (templateRowsError) throw new Error(templateRowsError.message)
+      const templatesById = new Map(records(templateRows).map((item) => [String(item.id), item]))
+      // Only unchanged drafts still match the name that was sent to Meta.
+      const tracked: { row: SubmissionRow; name: string; updatedAt: string | null }[] = []
+      for (const row of submissions) {
+        const template = templatesById.get(row.notification_template_id)
+        if (!template || submissionView(row, String(template.updated_at ?? '')).changed_since_submission) continue
+        tracked.push({ row, name: (await templateDefinition(template, tenant)).name, updatedAt: String(template.updated_at ?? '') })
+      }
+      const result = tracked.length
+        ? await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId: admin.adminId, payload: { names: tracked.map((item) => item.name) } })
+        : { templates: [] }
+      const byName = new Map(records(result.templates).map((item) => [String(item.name), item]))
+      const views = []
+      for (const item of tracked) {
+        const provider = byName.get(item.name)
+        const mapped = submissionStatus(provider?.status) ?? { status: 'FAILED' as const, errorCode: 'META_TEMPLATE_NOT_FOUND' }
+        const row = await updateSubmission(tenant.id, item.row.notification_template_id, {
+          status: mapped.status,
+          provider_error_code: mapped.errorCode,
+          provider_error_message: typeof provider?.rejected_reason === 'string' ? provider.rejected_reason : null,
+          approved_at: mapped.status === 'APPROVED' ? (item.row.approved_at ?? new Date().toISOString()) : null,
+        })
+        views.push(submissionView(row, item.updatedAt))
+      }
+      return json({ submissions: views })
+    }
+
+    if (req.method === 'POST' && action === 'TEST') {
       const templateId = uuid(record.template_id) as string
       const { data: template, error: templateError } = await client
         .from('notification_template_configs')
