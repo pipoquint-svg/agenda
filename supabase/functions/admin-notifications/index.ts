@@ -165,7 +165,7 @@ async function loadWhatsAppSettings(templateIds: string[]) {
   const settings = new Map<string, StoredWhatsAppSettings>()
   if (!templateIds.length) return settings
   const { data, error } = await adminClient().from('notification_whatsapp_settings')
-    .select('template_id,category,header_text,footer_text,ttl_seconds,updated_at').in('template_id', templateIds)
+    .select('template_id,category,header_text,footer_text,ttl_seconds,variable_examples,updated_at').in('template_id', templateIds)
   if (error) throw new Error('WHATSAPP_SETTINGS_LOOKUP_FAILED')
   for (const row of records(data)) {
     settings.set(String(row.template_id), {
@@ -173,6 +173,9 @@ async function loadWhatsAppSettings(templateIds: string[]) {
       header_text: typeof row.header_text === 'string' ? row.header_text : null,
       footer_text: typeof row.footer_text === 'string' ? row.footer_text : null,
       ttl_seconds: typeof row.ttl_seconds === 'number' ? row.ttl_seconds : null,
+      variable_examples: row.variable_examples && typeof row.variable_examples === 'object' && !Array.isArray(row.variable_examples)
+        ? Object.fromEntries(Object.entries(row.variable_examples as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+        : {},
       updated_at: row.updated_at ? String(row.updated_at) : null,
     })
   }
@@ -278,6 +281,9 @@ Deno.serve(async (req) => {
           channels,
           audiences,
           variables: canViewFinance ? variables : variables.filter((item) => !financialVariables.has(item)),
+          // Default samples the editor pre-fills for WhatsApp variables.
+          whatsapp_examples: Object.fromEntries(Object.entries(testValues('cliente@exemplo.com.br', 'BlackSheep'))
+            .filter(([key]) => canViewFinance || !financialVariables.has(key))),
         },
       })
     }

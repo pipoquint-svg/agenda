@@ -80,7 +80,7 @@ Deno.test('adds header, footer and validity and renames the template', async () 
   const full = await whatsappTemplateDefinition({
     ...base,
     body,
-    settings: { category: 'UTILITY', header_text: 'Reserva {{appointment.public_code}}', footer_text: 'BlackSheep', ttl_seconds: 3600 },
+    settings: { category: 'UTILITY', header_text: 'Reserva {{appointment.public_code}}', footer_text: 'BlackSheep', ttl_seconds: 3600, variable_examples: {} },
   })
   assertEquals(full.header_text, 'Reserva {{1}}')
   assertEquals(full.header_example, 'TESTE-1234')
@@ -88,7 +88,7 @@ Deno.test('adds header, footer and validity and renames the template', async () 
   assertEquals(full.footer_text, 'BlackSheep')
   assertEquals(full.ttl_seconds, 3600)
   assertNotEquals(full.name, plain.name)
-  const bodyOnly = await whatsappTemplateDefinition({ ...base, body, settings: { category: 'UTILITY', header_text: null, footer_text: null, ttl_seconds: null } })
+  const bodyOnly = await whatsappTemplateDefinition({ ...base, body, settings: { category: 'UTILITY', header_text: null, footer_text: null, ttl_seconds: null, variable_examples: {} } })
   assertEquals(bodyOnly.name, plain.name)
 })
 
@@ -96,7 +96,7 @@ Deno.test('the chosen category wins and marketing drops the validity', async () 
   const definition = await whatsappTemplateDefinition({
     ...base,
     body: 'Olá {{customer.name}}, novidade.',
-    settings: { category: 'MARKETING', header_text: null, footer_text: null, ttl_seconds: 3600 },
+    settings: { category: 'MARKETING', header_text: null, footer_text: null, ttl_seconds: 3600, variable_examples: {} },
   })
   assertEquals(definition.category, 'MARKETING')
   assertEquals(definition.ttl_seconds, null)
@@ -104,7 +104,7 @@ Deno.test('the chosen category wins and marketing drops the validity', async () 
 
 Deno.test('validates the WhatsApp fields an admin saves', () => {
   assertEquals(whatsappSettings({ category: 'utility', header_text: ' Olá {{customer.name}} ', footer_text: '', ttl_seconds: '3600' }, catalog), {
-    category: 'UTILITY', header_text: 'Olá {{customer.name}}', footer_text: null, ttl_seconds: 3600,
+    category: 'UTILITY', header_text: 'Olá {{customer.name}}', footer_text: null, ttl_seconds: 3600, variable_examples: {},
   })
   assertThrows(() => whatsappSettings({ category: 'AUTH' }, catalog), Error, 'WHATSAPP_CATEGORY_INVALID')
   assertThrows(() => whatsappSettings({ category: 'UTILITY', header_text: '{{customer.name}} {{appointment.public_code}}' }, catalog), Error, 'WHATSAPP_HEADER_VARIABLE_LIMIT')
@@ -112,4 +112,16 @@ Deno.test('validates the WhatsApp fields an admin saves', () => {
   assertThrows(() => whatsappSettings({ category: 'UTILITY', footer_text: 'Oi {{customer.name}}' }, catalog), Error, 'WHATSAPP_FOOTER_VARIABLE')
   assertThrows(() => whatsappSettings({ category: 'UTILITY', ttl_seconds: 999 }, catalog), Error, 'WHATSAPP_TTL_INVALID')
   assertThrows(() => whatsappSettings({ category: 'MARKETING', ttl_seconds: 3600 }, catalog), Error, 'WHATSAPP_TTL_INVALID')
+})
+
+Deno.test('uses the samples the admin typed and renames when they change', async () => {
+  const body = 'Olá {{customer.name}}, sua reserva {{appointment.public_code}} está confirmada.'
+  const settings = { category: 'UTILITY' as const, header_text: null, footer_text: null, ttl_seconds: null, variable_examples: { 'customer.name': 'Maria' } }
+  const custom = await whatsappTemplateDefinition({ ...base, body, settings })
+  assertEquals(custom.body_examples, ['Maria', 'TESTE-1234'])
+  const other = await whatsappTemplateDefinition({ ...base, body, settings: { ...settings, variable_examples: { 'customer.name': 'Joana' } } })
+  assertNotEquals(custom.name, other.name)
+  assertEquals(whatsappSettings({ category: 'UTILITY', variable_examples: { 'customer.name': ' Maria ', 'appointment.public_code': '' } }, catalog).variable_examples, { 'customer.name': 'Maria' })
+  assertThrows(() => whatsappSettings({ category: 'UTILITY', variable_examples: { cliente: 'Maria' } }, catalog), Error, 'WHATSAPP_EXAMPLES_INVALID')
+  assertThrows(() => whatsappSettings({ category: 'UTILITY', variable_examples: { 'customer.name': 'a\nb' } }, catalog), Error, 'WHATSAPP_EXAMPLE_INVALID')
 })

@@ -17,6 +17,8 @@ export type WhatsAppSettings = {
   header_text: string | null
   footer_text: string | null
   ttl_seconds: number | null
+  /** Admin-provided sample per variable; missing ones fall back to defaults. */
+  variable_examples: Record<string, string>
 }
 
 /** Validity choices offered to admins; Meta accepts 30 s to 12 h for utility. */
@@ -49,7 +51,21 @@ export function whatsappSettings(value: unknown, catalog: string[]): WhatsAppSet
   if (footer?.includes('{{')) throw new Error('WHATSAPP_FOOTER_VARIABLE')
   const ttl = source.ttl_seconds === null || source.ttl_seconds === undefined || source.ttl_seconds === '' ? null : Number(source.ttl_seconds)
   if (ttl !== null && (category !== 'UTILITY' || !WHATSAPP_TTL_OPTIONS.includes(ttl))) throw new Error('WHATSAPP_TTL_INVALID')
-  return { category, header_text: header, footer_text: footer, ttl_seconds: ttl }
+  return { category, header_text: header, footer_text: footer, ttl_seconds: ttl, variable_examples: variableExamples(source.variable_examples, catalog) }
+}
+
+function variableExamples(value: unknown, catalog: string[]) {
+  if (value === null || value === undefined) return {}
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('WHATSAPP_EXAMPLES_INVALID')
+  const examples: Record<string, string> = {}
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!catalog.includes(key) || typeof raw !== 'string') throw new Error('WHATSAPP_EXAMPLES_INVALID')
+    const example = raw.trim()
+    if (!example) continue
+    if (example.length > MAX_EXAMPLE_LENGTH || /[\r\n\t]/.test(example)) throw new Error('WHATSAPP_EXAMPLE_INVALID')
+    examples[key] = example
+  }
+  return examples
 }
 
 export type SubmissionStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'FAILED'
@@ -82,6 +98,7 @@ export async function whatsappTemplateDefinition(input: {
   examples: Record<string, string>
   settings?: WhatsAppSettings | null
 }): Promise<WhatsAppTemplateDefinition> {
+  const examples = { ...input.examples, ...(input.settings?.variable_examples ?? {}) }
   const source = input.body.trim()
   if (!source) throw new Error('WHATSAPP_TEMPLATE_BODY_REQUIRED')
   const order: string[] = []
@@ -96,7 +113,7 @@ export async function whatsappTemplateDefinition(input: {
     throw new Error('WHATSAPP_TEMPLATE_PARAMETER_EDGE')
   }
   const bodyExamples = order.map((key) => {
-    const example = String(input.examples[key] ?? '').replace(/\s+/g, ' ').trim()
+    const example = String(examples[key] ?? '').replace(/\s+/g, ' ').trim()
     if (!example) throw new Error('WHATSAPP_TEMPLATE_EXAMPLE_MISSING')
     return example.slice(0, MAX_EXAMPLE_LENGTH)
   })
@@ -115,7 +132,7 @@ export async function whatsappTemplateDefinition(input: {
     : null
   let headerExample: string | null = null
   if (headerKey !== null) {
-    headerExample = String(input.examples[headerKey] ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_EXAMPLE_LENGTH)
+    headerExample = String(examples[headerKey] ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_EXAMPLE_LENGTH)
     if (!headerExample) throw new Error('WHATSAPP_TEMPLATE_EXAMPLE_MISSING')
   }
   const footerText = settings?.footer_text ?? null
@@ -124,8 +141,13 @@ export async function whatsappTemplateDefinition(input: {
   const event = input.eventKey.toLowerCase().replace(/[^a-z0-9_]/g, '_')
   // Body-only drafts keep the fingerprint used before header and footer existed,
   // so templates already sent to Meta keep their names.
-  const fingerprint = headerText || footerText || ttlSeconds
-    ? [category, headerText ?? '', bodyText, footerText ?? '', ttlSeconds ?? ''].join('\n')
+  // Custom samples change what Meta reviews, so they also change the name: a
+  // rejected template can then be sent again with better samples.
+  const used = [...order, ...(headerKey ? [headerKey] : [])]
+  const customSamples = used.filter((key) => input.settings?.variable_examples?.[key]).sort()
+    .map((key) => `${key}=${input.settings?.variable_examples[key]}`).join('\n')
+  const fingerprint = headerText || footerText || ttlSeconds || customSamples
+    ? [category, headerText ?? '', bodyText, footerText ?? '', ttlSeconds ?? '', customSamples].join('\n')
     : `${category}\n${bodyText}`
   return {
     name: `agenda_${event}_${id}_${await shortHash(fingerprint)}`,

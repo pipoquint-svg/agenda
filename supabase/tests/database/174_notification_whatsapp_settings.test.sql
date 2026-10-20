@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(7);
+select plan(8);
 
 select has_table('public', 'notification_whatsapp_settings', 'WhatsApp draft fields live beside the notification template');
 select col_is_pk('public', 'notification_whatsapp_settings', 'template_id', 'one settings row per template');
@@ -28,6 +28,14 @@ select throws_ok(
   '23514',
   null,
   'the footer cannot carry variables'
+);
+
+select throws_ok(
+  $$insert into public.notification_whatsapp_settings(template_id, variable_examples)
+    values (gen_random_uuid(), '["Ana"]'::jsonb)$$,
+  '23514',
+  null,
+  'variable samples are keyed by variable'
 );
 
 select * from finish();
