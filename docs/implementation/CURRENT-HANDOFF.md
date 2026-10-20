@@ -1,5 +1,13 @@
 # CURRENT HANDOFF — Agenda
 
+## WhatsApp — número próprio da BlackSheep (first-party), 2026-10-19
+
+Diagnóstico: o Embedded Signup falha com "229696290960933 não é uma identificação válida" porque a WABA "Black Sheep Estúdio Criativo" (+55 48 9222-6969, já ligada) pertence ao mesmo portfólio do app Meta do Dracma (Pierri Quint Produções Ltda, 229696290960933). Caminho escolhido pelo usuário: conexão first-party com token de usuário do sistema do app Dracma.
+
+Branch `codex/whatsapp-first-party-connection` nos três repositórios. Agenda: `admin-dracma-messaging` aceita `CONNECT_OWNED_NUMBER` (sem payload do navegador), repassa `owned_number_available` no status e grava `whatsapp_tenant_integrations`/`whatsapp_tenant_phone_numbers` como `CONNECTED`; o navegador recebe só nome e número mascarado. Dracma: o gateway valida o token, recusa assumir uma WABA servida pelo callback legado, inscreve o webhook V2 e publica/valida/ativa a conexão. BlackSheep: botão "Conectar número da BlackSheep".
+
+Sem deploy, segredo, chamada Meta ou dado de produção alterado. Ordem de publicação: Dracma → Agenda → BlackSheep. Pré-requisito do operador: segredos `META_WA_<ORG>_OWNED_ACCESS_TOKEN` e `META_WA_<ORG>_OWNED_WABA_ID` no Dracma Produção (ver `docs/implementation/AGENDA-WHATSAPP-OWNED-NUMBER.md` no Dracma).
+
 ## 2026-10-17 — rescheduling RPC security hotfix
 
 User prioritized recording the production security correction in GitHub. Isolated
