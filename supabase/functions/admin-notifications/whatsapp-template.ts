@@ -105,7 +105,7 @@ const VARIABLE = /\{\{\s*([^}]+?)\s*\}\}/g
 
 /** Birthday and manual messages promote; everything else follows a booking. */
 export function whatsappCategory(eventKey: string): WhatsAppCategory {
-  return eventKey === 'BIRTHDAY' || eventKey === 'MANUAL' ? 'MARKETING' : 'UTILITY'
+  return eventKey === 'BIRTHDAY' || eventKey === 'MANUAL' || eventKey.startsWith('REWARDS_') ? 'MARKETING' : 'UTILITY'
 }
 
 async function shortHash(value: string) {

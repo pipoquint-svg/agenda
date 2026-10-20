@@ -32,6 +32,8 @@ on:
       - 'supabase/migrations/20261016233000_marketing_campaign_checkout_validity.sql'
       - 'supabase/migrations/20261017220000_public_studio_stats.sql'
       - 'supabase/tests/database/173_public_studio_stats.test.sql'
+      - 'supabase/migrations/20261021030000_rewards_whatsapp_templates.sql'
+      - 'supabase/tests/database/177_rewards_message_templates.test.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
       - 'tests/acl-parity/assert-private-waitlist-item02a-overlay.sh'
@@ -149,7 +151,8 @@ jobs:
             supabase/migrations/20261017220000_public_studio_stats.sql \
             supabase/migrations/20261020230000_notification_whatsapp_settings.sql \
             supabase/migrations/20261021000000_notification_whatsapp_button.sql \
-            supabase/migrations/20261021010000_appointment_change_notifications.sql
+            supabase/migrations/20261021010000_appointment_change_notifications.sql \
+            supabase/migrations/20261021030000_rewards_whatsapp_templates.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -244,7 +247,8 @@ jobs:
             supabase/migrations/20261017220000_public_studio_stats.sql \
             supabase/migrations/20261020230000_notification_whatsapp_settings.sql \
             supabase/migrations/20261021000000_notification_whatsapp_button.sql \
-            supabase/migrations/20261021010000_appointment_change_notifications.sql
+            supabase/migrations/20261021010000_appointment_change_notifications.sql \
+            supabase/migrations/20261021030000_rewards_whatsapp_templates.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
