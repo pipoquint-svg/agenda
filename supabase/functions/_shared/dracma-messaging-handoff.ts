@@ -7,7 +7,9 @@ export type AgendaMessagingOperation =
   | "START_SESSION"
   | "COMPLETE_SESSION"
   | "CANCEL_SESSION"
-  | "CONNECT_OWNED_NUMBER";
+  | "CONNECT_OWNED_NUMBER"
+  | "SUBMIT_TEMPLATE"
+  | "TEMPLATE_STATUS";
 
 export type AgendaMessagingHandoff = {
   contract: typeof DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT;
@@ -29,6 +31,8 @@ const OPERATIONS = new Set<AgendaMessagingOperation>([
   "COMPLETE_SESSION",
   "CANCEL_SESSION",
   "CONNECT_OWNED_NUMBER",
+  "SUBMIT_TEMPLATE",
+  "TEMPLATE_STATUS",
 ]);
 
 function uuid(value: string, code: string) {
