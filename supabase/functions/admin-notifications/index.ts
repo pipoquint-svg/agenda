@@ -163,11 +163,14 @@ function variablesIn(body: string) {
 type StoredWhatsAppSettings = WhatsAppSettings & { updated_at: string | null }
 
 /** WhatsApp-only fields per template id. */
-async function loadWhatsAppSettings(templateIds: string[]) {
+async function loadWhatsAppSettings(templateIds: string[] | null) {
   const settings = new Map<string, StoredWhatsAppSettings>()
-  if (!templateIds.length) return settings
-  const { data, error } = await adminClient().from('notification_whatsapp_settings')
-    .select('template_id,category,header_text,footer_text,ttl_seconds,variable_examples,button_text,button_variable,updated_at').in('template_id', templateIds)
+  if (templateIds && !templateIds.length) return settings
+  // null loads every row: the table holds one small row per WhatsApp draft.
+  let query = adminClient().from('notification_whatsapp_settings')
+    .select('template_id,category,header_text,footer_text,ttl_seconds,variable_examples,button_text,button_variable,updated_at')
+  if (templateIds) query = query.in('template_id', templateIds)
+  const { data, error } = await query
   if (error) throw new Error('WHATSAPP_SETTINGS_LOOKUP_FAILED')
   for (const row of records(data)) {
     settings.set(String(row.template_id), {
@@ -249,20 +252,21 @@ Deno.serve(async (req) => {
         if (error) throw new Error(error.message)
         return json({ versions: data ?? [] })
       }
-      const [templates, services, categories] = await Promise.all([
+      // Everything that does not depend on another answer goes in one round trip.
+      const [templates, services, categories, whatsappByTemplate, tenant] = await Promise.all([
         client.rpc('service_admin_list_notification_templates_v3'),
         // Só os 5 campos usados nos filtros; a função completa de configurações lia
         // campos, faixas, atalhos e políticas de cada serviço para depois descartar.
         client.from('services').select('id,name,operation_scope,category_id,is_active').order('name'),
         client.rpc('service_admin_list_categories'),
+        loadWhatsAppSettings(null),
+        tenantForAdmin(admin.authUserId).catch(() => null),
       ])
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
-      const whatsappByTemplate = await loadWhatsAppSettings(records(templates.data).filter((item) => item.channel === 'WHATSAPP').map((item) => String(item.id)))
       // WhatsApp approval status per template, for the admin's tenant only.
       let whatsappSubmissions: ReturnType<typeof submissionView>[] = []
-      const tenant = await tenantForAdmin(admin.authUserId).catch(() => null)
       if (tenant) {
         const { data: rows, error: rowsError } = await client.from('whatsapp_template_submissions')
           .select(submissionColumns).eq('tenant_id', tenant.id)
