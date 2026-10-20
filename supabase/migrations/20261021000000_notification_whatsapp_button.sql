@@ -9,7 +9,9 @@ alter table public.notification_whatsapp_settings
   add constraint notification_whatsapp_settings_button_check check (
     (button_text is null and button_variable is null)
     or (
-      char_length(button_text) between 1 and 25
+      button_text is not null
+      and button_variable is not null
+      and char_length(button_text) between 1 and 25
       and button_text !~ '\{\{'
       and button_variable in (
         'appointment.manage_url', 'pre_reservation.payment_url', 'balance.payment_url', 'payment.resume_url'
