@@ -7,6 +7,8 @@
 --   REWARDS_WINBACK          90 days since the last rental, coupon to come back
 --   REWARDS_COUPON_ISSUED    a Rewards coupon was released to the customer
 --   REWARDS_COUPON_EXPIRING  the coupon's window to confirm a booking is ending
+--   REWARDS_REFERRAL_CODE    the customer's personal referral code to share
+--   REWARDS_REFERRAL_REWARD  a referred friend's first rental was paid: the referrer's coupon
 
 alter table public.notification_template_configs
   drop constraint notification_template_configs_event_key_check;
@@ -35,7 +37,9 @@ alter table public.notification_template_configs
         'PAYMENT_PENDING_CREATED'::text,
         'REWARDS_WINBACK'::text,
         'REWARDS_COUPON_ISSUED'::text,
-        'REWARDS_COUPON_EXPIRING'::text
+        'REWARDS_COUPON_EXPIRING'::text,
+        'REWARDS_REFERRAL_CODE'::text,
+        'REWARDS_REFERRAL_REWARD'::text
       ]
     )
   );
@@ -46,7 +50,7 @@ alter table public.notification_template_configs
 create table public.marketing_campaign_message_templates (
   campaign_id uuid not null references public.marketing_campaigns(id) on delete cascade,
   event_key text not null
-    check (event_key in ('REWARDS_WINBACK','REWARDS_COUPON_ISSUED','REWARDS_COUPON_EXPIRING')),
+    check (event_key in ('REWARDS_WINBACK','REWARDS_COUPON_ISSUED','REWARDS_COUPON_EXPIRING','REWARDS_REFERRAL_CODE','REWARDS_REFERRAL_REWARD')),
   template_id uuid not null unique references public.notification_template_configs(id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key (campaign_id, event_key)
@@ -79,7 +83,7 @@ declare
   v_after jsonb;
   v_version integer;
 begin
-  if v_event not in ('REWARDS_WINBACK','REWARDS_COUPON_ISSUED','REWARDS_COUPON_EXPIRING') then
+  if v_event not in ('REWARDS_WINBACK','REWARDS_COUPON_ISSUED','REWARDS_COUPON_EXPIRING','REWARDS_REFERRAL_CODE','REWARDS_REFERRAL_REWARD') then
     raise exception using errcode = 'P0001', message = 'NOTIFICATION_EVENT_INVALID';
   end if;
   if not exists (

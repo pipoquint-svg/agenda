@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(14);
+select plan(15);
 
 insert into public.tenants(id, name, slug, status)
 values ('17700000-0000-4000-8000-000000000099', 'Other tenant', 'rewards-177-other', 'ACTIVE');
@@ -79,6 +79,15 @@ select isnt(
   )::text,
   current_setting('agenda.r177.issued'),
   'each event of a campaign has its own draft'
+);
+
+select ok(
+  public.service_admin_upsert_rewards_message_template(
+    '8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f', '17700000-0000-4000-8000-000000000010', 'REWARDS_REFERRAL_REWARD',
+    'Indicação premiada', 'Obrigado, {{customer.name}}! {{referral.referred_name}} locou e você ganhou o cupom {{coupon.code}}.',
+    '["customer.name","referral.referred_name","coupon.code"]'::jsonb, '17700000-0000-4000-8000-000000000002'
+  ) is not null,
+  'referral messages are campaign drafts too'
 );
 
 select throws_ok(

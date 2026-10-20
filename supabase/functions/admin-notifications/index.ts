@@ -48,10 +48,13 @@ const variables = [
 ]
 // Rewards messages (one set per campaign) use their own catalog. They are drafts
 // only: nothing enqueues these events while Rewards delivery (S6) is frozen.
-const rewardsEvents = ['REWARDS_WINBACK', 'REWARDS_COUPON_ISSUED', 'REWARDS_COUPON_EXPIRING']
+const rewardsEvents = [
+  'REWARDS_WINBACK', 'REWARDS_COUPON_ISSUED', 'REWARDS_COUPON_EXPIRING', 'REWARDS_REFERRAL_CODE', 'REWARDS_REFERRAL_REWARD',
+]
 const rewardsVariables = [
   'customer.name', 'customer.last_rental_at', 'campaign.name',
   'coupon.code', 'coupon.discount', 'coupon.expires_at', 'coupon.days_left',
+  'referral.code', 'referral.referred_name',
   'operation.name', 'operation.site_url', 'booking.url',
 ]
 const isRewardsEvent = (eventKey: string) => rewardsEvents.includes(eventKey)
@@ -138,6 +141,8 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'campaign.name': 'Volte ao estúdio',
     'coupon.days_left': '5',
     'booking.url': 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores',
+    'referral.code': 'INDICA-TESTE',
+    'referral.referred_name': 'Fotógrafa Indicada',
   }
 }
 
