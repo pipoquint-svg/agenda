@@ -19,7 +19,7 @@ const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails'
 const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000
 const DEFAULT_NOTIFICATION_FROM_BLACKSHEEP = 'BlackSheep Estúdio Criativo <agenda@blacksheepestudiocriativo.com.br>'
 const LEGACY_MANAGE_PREFIX = 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token='
-const CANONICAL_MANAGE_PREFIX = 'https://www.blacksheepestudiocriativo.com.br/gerenciar-reserva#token='
+export const CANONICAL_MANAGE_PREFIX = 'https://www.blacksheepestudiocriativo.com.br/gerenciar-reserva#token='
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim() ?? ''

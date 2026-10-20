@@ -361,7 +361,10 @@ select is(pg_temp.s05_used('96900000-0000-0000-0000-000000000065'), 2, 'counter 
 select public.release_appointment_coupon_usage('00000000-0000-0000-0000-000000000000'::uuid);
 select is(pg_temp.s05_used('96900000-0000-0000-0000-000000000065'), 2, 'releasing an appointment without coupon is a no-op');
 
-create temporary table s05_jobs_before as select count(*)::integer as n from public.integration_jobs;
+-- The customer cancellation notice (APPOINTMENT_CANCELLED) is enqueued by the
+-- appointment trigger, not by coupon release, so it is left out of this count.
+create temporary table s05_jobs_before as select count(*)::integer as n from public.integration_jobs
+  where coalesce(payload_json->>'event_key', '') <> 'APPOINTMENT_CANCELLED';
 
 update public.appointments set status = 'CANCELLED' where id = (select id from s05 where name = 'invoice');
 select is(pg_temp.s05_state((select id from s05 where name = 'invoice')), 'RELEASED', 'cancellation releases the coupon (existing policy preserved)');
@@ -379,7 +382,7 @@ select ok(not public.service_release_appointment_coupon((select id from s05 wher
   'repeated release reports nothing to release');
 select is(pg_temp.s05_used('96900000-0000-0000-0000-000000000065'), 1,
   'repeated releases do not decrease the counter held by the other active reservation');
-select is((select count(*)::integer from public.integration_jobs), (select n from s05_jobs_before),
+select is((select count(*)::integer from public.integration_jobs where coalesce(payload_json->>'event_key', '') <> 'APPOINTMENT_CANCELLED'), (select n from s05_jobs_before),
   'coupon release enqueues no integration job (no Kommo movement from S0.5 code)');
 
 update public.appointments set status = 'EXPIRED' where id = (select id from s05 where name = 'rejected');

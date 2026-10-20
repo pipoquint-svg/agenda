@@ -23,7 +23,7 @@ function dateTime(value: unknown): string {
   }).format(parsed)
 }
 
-function paymentBaseUrl(): string {
+export function paymentBaseUrl(): string {
   const configured = (Deno.env.get('PREBOOK_PUBLIC_BASE_URL') ?? '').trim().replace(/\/+$/, '')
   if (configured) {
     const parsed = new URL(configured)

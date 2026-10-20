@@ -1,5 +1,9 @@
 # CURRENT HANDOFF — Agenda
 
+## WhatsApp — botão de link nos rascunhos, 2026-10-21
+
+Publicado antes: categoria, validade, cabeçalho, rodapé, exemplos e prévia (agenda#513, migração `20261020230000` aplicada após backup 39510602850; black-sheep#172; dracma#718), e 5 rascunhos de locação criados em produção pela função oficial, inativos. A pedido do usuário, os links longos (remarcação, pré-reserva, saldo, retomar pagamento) vão para um botão de link em vez de encurtador: a parte fixa é o domínio de cada link, calculado pelos mesmos geradores dos links reais (`_shared/customer-link.ts`), e o resto vai como `{{1}}`. Migração `20261021000000` (colunas `button_text`, `button_variable`), pgTAP `175`. O dispatch futuro deve enviar `customerLinkSuffix` como parâmetro do botão.
+
 ## WhatsApp — categoria, validade, cabeçalho e rodapé nos rascunhos, 2026-10-20
 
 O editor de templates (agenda#512, dracma#717, black-sheep#171) está publicado. A pedido do usuário, entram categoria escolhida, validade (só Utilidade, 10 min a 12 h), cabeçalho em texto (até 60, no máximo 1 variável) e rodapé (até 60, sem variáveis), mais prévia estilo WhatsApp. Botões, mídia, carrossel e Flows ficam para depois. Nova tabela fechada `notification_whatsapp_settings` (migração `20261020230000`, pgTAP `174`, overlays de RLS e ACL atualizados). Rascunhos sem os campos novos mantêm o nome Meta já usado. Publicação exige deploy de banco (backup antes) e das funções.

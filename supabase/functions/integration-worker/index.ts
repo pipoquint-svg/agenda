@@ -283,13 +283,20 @@ Deno.serve(async (req) => {
           const reason = typeof job.payload_json?.reason === 'string' ? job.payload_json.reason : 'CONFIRMED'
           const eventKey = typeof job.payload_json?.event_key === 'string' ? job.payload_json.event_key : 'APPOINTMENT_APPROVED'
           const scheduleKey = typeof job.payload_json?.schedule_key === 'string' ? job.payload_json.schedule_key : ''
-          const result = await invokeFunction<{ stale?: boolean; current_version?: number; skipped?: boolean; reason?: string }>('email-send', secret, { appointment_id: job.entity_id, entity_version: job.entity_version, reason, event_key: eventKey, schedule_key: scheduleKey })
+          const result = await invokeFunction<{ stale?: boolean; current_version?: number; skipped?: boolean; reason?: string }>('email-send', secret, {
+            appointment_id: job.entity_id,
+            entity_version: job.entity_version,
+            reason,
+            event_key: eventKey,
+            schedule_key: scheduleKey,
+            previous_start_at: typeof job.payload_json?.previous_start_at === 'string' ? job.payload_json.previous_start_at : null,
+          })
           if (result.stale) {
             await discardStaleJob(client, job, workerId, result.current_version, 'APPOINTMENT_CONFIRMED_MESSAGE_STALE_VERSION_MISSING')
             discardedStale += 1
             continue
           }
-          if (result.skipped === true && result.reason !== 'NOTIFICATION_ALREADY_SENT' && result.reason !== 'APPOINTMENT_NOT_CONFIRMED') {
+          if (result.skipped === true && result.reason !== 'NOTIFICATION_ALREADY_SENT' && result.reason !== 'APPOINTMENT_NOT_CONFIRMED' && result.reason !== 'NOTIFICATION_TEMPLATE_NOT_CONFIGURED') {
             const skipReason = String(result.reason ?? 'UNKNOWN').replace(/[^A-Z0-9_]/gi, '_').slice(0, 100)
             throw new Error(`APPOINTMENT_CONFIRMATION_EMAIL_SKIPPED:${skipReason}`)
           }

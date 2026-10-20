@@ -10,6 +10,7 @@ import {
   type NotificationTemplate,
 } from '../_shared/notification-email.ts'
 import { type AgendaTenant, callDracmaGateway, tenantForAdmin } from '../_shared/dracma-gateway.ts'
+import { customerLinkButton, type CustomerLinkVariable } from '../_shared/customer-link.ts'
 import {
   type SubmissionRow,
   submissionStatus,
@@ -35,7 +36,7 @@ const channels = ['EMAIL', 'GOOGLE_CALENDAR', 'WHATSAPP']
 const audiences = ['CUSTOMER', 'EMPLOYEE']
 const variables = [
   'appointment.public_code', 'appointment.start_at', 'appointment.end_at', 'appointment.duration',
-  'appointment.manage_url',
+  'appointment.manage_url', 'appointment.previous_start_at',
   'customer.name', 'customer.email', 'customer.phone', 'employee.name', 'auth.invite_url', 'service.name', 'service.description',
   'waitlist.name', 'waitlist.email', 'waitlist.whatsapp', 'waitlist.created_at',
   'operation.name', 'operation.email', 'operation.phone', 'operation.address', 'operation.site_url',
@@ -87,6 +88,7 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'appointment.start_at': '30/08/2026 14:00',
     'appointment.end_at': '30/08/2026 15:00',
     'appointment.duration': '60 min',
+    'appointment.previous_start_at': '28/08/2026 10:00',
     'appointment.manage_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=RESCHEDULE',
     'customer.name': 'Teste BlackSheep',
     'customer.email': recipient,
@@ -165,7 +167,7 @@ async function loadWhatsAppSettings(templateIds: string[]) {
   const settings = new Map<string, StoredWhatsAppSettings>()
   if (!templateIds.length) return settings
   const { data, error } = await adminClient().from('notification_whatsapp_settings')
-    .select('template_id,category,header_text,footer_text,ttl_seconds,variable_examples,updated_at').in('template_id', templateIds)
+    .select('template_id,category,header_text,footer_text,ttl_seconds,variable_examples,button_text,button_variable,updated_at').in('template_id', templateIds)
   if (error) throw new Error('WHATSAPP_SETTINGS_LOOKUP_FAILED')
   for (const row of records(data)) {
     settings.set(String(row.template_id), {
@@ -176,6 +178,8 @@ async function loadWhatsAppSettings(templateIds: string[]) {
       variable_examples: row.variable_examples && typeof row.variable_examples === 'object' && !Array.isArray(row.variable_examples)
         ? Object.fromEntries(Object.entries(row.variable_examples as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
         : {},
+      button_text: typeof row.button_text === 'string' ? row.button_text : null,
+      button_variable: typeof row.button_variable === 'string' ? row.button_variable : null,
       updated_at: row.updated_at ? String(row.updated_at) : null,
     })
   }
@@ -196,6 +200,7 @@ async function templateDefinition(template: Record<string, unknown>, tenant: Age
     body: String(template.body_template ?? ''),
     catalog: variables,
     examples: testValues('cliente@exemplo.com.br', tenant.name),
+    buttonLink: (variable) => customerLinkButton(variable as CustomerLinkVariable),
   })
 }
 

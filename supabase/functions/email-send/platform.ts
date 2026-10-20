@@ -201,7 +201,10 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
   const currentVersion = Number(appointment.version)
   if (entityVersion < currentVersion) return jsonResponse({ stale: true, current_version: currentVersion, appointment_id: appointmentId })
   if (entityVersion > currentVersion) throw new Error('ENTITY_VERSION_AHEAD_OF_APPOINTMENT')
-  if (appointment.status !== 'CONFIRMED') return jsonResponse({ stale: false, skipped: true, reason: 'APPOINTMENT_NOT_CONFIRMED' })
+  const eventKey = String(body.event_key ?? 'APPOINTMENT_APPROVED').trim().toUpperCase()
+  // A cancellation notice is the only message sent for a cancelled reservation.
+  const expectedStatus = eventKey === 'APPOINTMENT_CANCELLED' ? 'CANCELLED' : 'CONFIRMED'
+  if (appointment.status !== expectedStatus) return jsonResponse({ stale: false, skipped: true, reason: 'APPOINTMENT_NOT_CONFIRMED' })
   if (!appointment.primary_customer_id) return jsonResponse({ stale: false, skipped: true, reason: 'EMAIL_CUSTOMER_MISSING' })
 
   const [{ data: service, error: serviceError }, { data: customer, error: customerError }] = await Promise.all([
@@ -219,8 +222,21 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
     return jsonResponse({ stale: false, skipped: true, reason: 'EMAIL_RECIPIENT_MISSING_OR_INVALID' })
   }
 
-  const eventKey = String(body.event_key ?? 'APPOINTMENT_APPROVED').trim().toUpperCase()
-  const template = await resolveTemplate(client, eventKey, 'CUSTOMER', appointment.service_id)
+  let template: NotificationTemplate
+  try {
+    template = await resolveTemplate(client, eventKey, 'CUSTOMER', appointment.service_id)
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'NOTIFICATION_TEMPLATE_NOT_FOUND') throw error
+    // Without a reschedule template the customer still gets the updated
+    // confirmation, as before; a missing cancellation template sends nothing.
+    if (eventKey === 'APPOINTMENT_RESCHEDULED') {
+      template = await resolveTemplate(client, 'APPOINTMENT_APPROVED', 'CUSTOMER', appointment.service_id)
+    } else if (eventKey === 'APPOINTMENT_CANCELLED') {
+      return jsonResponse({ stale: false, skipped: true, reason: 'NOTIFICATION_TEMPLATE_NOT_CONFIGURED' })
+    } else {
+      throw error
+    }
+  }
   const scheduleKey = String(body.schedule_key ?? '').trim()
   const providerIdempotencyKey = `notification:${template.id}:${appointmentId}:v${entityVersion}:${eventKey}:${scheduleKey || 'IMMEDIATE'}:EMAIL:CUSTOMER`
   const delivery = await beginNotificationDelivery(client, {
@@ -252,7 +268,7 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
     let manageUrl = ''
     let tokenId: string | null = null
     const requestedVariables = templateVariableKeys(template.variable_schema)
-    if (requestedVariables.has('appointment.manage_url')) {
+    if (requestedVariables.has('appointment.manage_url') && appointment.status === 'CONFIRMED') {
       const requestId = `confirmation-email:${appointmentId}:v${entityVersion}`
       const { data: tokenResult, error: tokenError } = await client.rpc('service_issue_appointment_action_token', {
         p_appointment_id: appointmentId,
@@ -272,6 +288,7 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
       'appointment.end_at': dateTime(appointment.end_at),
       'appointment.duration': `${Math.max(0, Math.round(numeric(appointment.duration_minutes)))} min`,
       'appointment.manage_url': manageUrl,
+      'appointment.previous_start_at': body.previous_start_at ? dateTime(body.previous_start_at) : '',
       'customer.name': String(customer.name ?? ''),
       'customer.email': recipient,
       'customer.phone': String(customer.phone ?? ''),
@@ -309,7 +326,8 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
       if (tokenDeliveryError) console.error('APPOINTMENT_TOKEN_DELIVERY_RECORD_FAILED')
     }
 
-    if (eventKey === 'APPOINTMENT_APPROVED') {
+    // A new date needs its reminders scheduled again for the new version.
+    if (eventKey === 'APPOINTMENT_APPROVED' || eventKey === 'APPOINTMENT_RESCHEDULED') {
       const { error: scheduleError } = await client.rpc('enqueue_scheduled_notification_templates', { p_appointment_id: appointmentId })
       if (scheduleError) console.error('SCHEDULED_NOTIFICATION_ENQUEUE_FAILED')
     }
