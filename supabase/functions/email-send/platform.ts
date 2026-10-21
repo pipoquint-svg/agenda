@@ -3,6 +3,7 @@ import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from '../_shared/email-provider.ts'
 import { maskEmail, normalizedEmail } from '../_shared/transactional-email.ts'
 import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
+import { durationLabel } from '../_shared/duration-label.ts'
 import {
   beginNotificationDelivery,
   markNotificationFailed,
@@ -286,7 +287,7 @@ async function sendAppointmentConfirmation(client: any, body: Record<string, unk
       'appointment.public_code': String(appointment.public_code ?? ''),
       'appointment.start_at': dateTime(appointment.start_at),
       'appointment.end_at': dateTime(appointment.end_at),
-      'appointment.duration': `${Math.max(0, Math.round(numeric(appointment.duration_minutes)))} min`,
+      'appointment.duration': durationLabel(appointment.duration_minutes),
       'appointment.manage_url': manageUrl,
       'appointment.previous_start_at': body.previous_start_at ? dateTime(body.previous_start_at) : '',
       'customer.name': String(customer.name ?? ''),

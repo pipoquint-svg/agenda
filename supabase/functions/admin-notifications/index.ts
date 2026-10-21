@@ -109,7 +109,7 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'appointment.public_code': 'TESTE-1234',
     'appointment.start_at': '30/08/2026 14:00',
     'appointment.end_at': '30/08/2026 15:00',
-    'appointment.duration': '60 min',
+    'appointment.duration': '1h',
     'appointment.previous_start_at': '28/08/2026 10:00',
     'appointment.manage_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=RESCHEDULE',
     'customer.name': 'Teste BlackSheep',
