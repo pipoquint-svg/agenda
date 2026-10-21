@@ -1,4 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { applyPaidClientReschedule } from '../_shared/paid-reschedule.ts'
 import { scheduleImmediateAppointmentIntegrations } from '../_shared/integration-dispatch.ts'
 import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
 import {
@@ -294,6 +295,7 @@ Deno.serve(async (req) => {
       ? applied.appointment_id
       : transaction.appointment_id
     if (normalized === 'APPROVED') {
+      await applyPaidClientReschedule(client, transaction.id)
       scheduleImmediateAppointmentIntegrations(appointmentId, 'MERCADO_PAGO_WEBHOOK')
     }
 
