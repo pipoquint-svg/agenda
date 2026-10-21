@@ -484,6 +484,10 @@ Deno.serve(async (req) => {
         throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
       }
       const { tenant, integrationId } = await whatsappContext(admin.authUserId)
+      // Quem envia modelos para a Meta passa a responder pelos envios automáticos
+      // (autor no Dracma), se ninguém foi definido ainda.
+      await client.from('whatsapp_tenant_integrations').update({ dispatch_admin_id: admin.adminId })
+        .eq('id', integrationId).is('dispatch_admin_id', null)
       const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
       const draftUpdatedAt = latest(String(template.updated_at ?? ''), settings?.updated_at)
       const definition = await templateDefinition(template, tenant, settings)

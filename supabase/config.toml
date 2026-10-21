@@ -82,6 +82,9 @@ verify_jwt = false
 [functions.email-send]
 verify_jwt = false
 
+[functions.whatsapp-send]
+verify_jwt = false
+
 [functions.birthday-email-worker]
 verify_jwt = false
 

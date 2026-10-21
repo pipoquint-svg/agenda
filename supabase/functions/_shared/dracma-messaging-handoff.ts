@@ -12,7 +12,8 @@ export type AgendaMessagingOperation =
   | "TEMPLATE_STATUS"
   | "LIST_TEMPLATES"
   | "DELETE_TEMPLATE"
-  | "SEND_TEST_TEMPLATE";
+  | "SEND_TEST_TEMPLATE"
+  | "SEND_TEMPLATE";
 
 export type AgendaMessagingHandoff = {
   contract: typeof DRACMA_AGENDA_MESSAGING_HANDOFF_CONTRACT;
@@ -39,6 +40,7 @@ const OPERATIONS = new Set<AgendaMessagingOperation>([
   "LIST_TEMPLATES",
   "DELETE_TEMPLATE",
   "SEND_TEST_TEMPLATE",
+  "SEND_TEMPLATE",
 ]);
 
 function uuid(value: string, code: string) {

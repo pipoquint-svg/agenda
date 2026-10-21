@@ -283,6 +283,21 @@ Deno.serve(async (req) => {
           const reason = typeof job.payload_json?.reason === 'string' ? job.payload_json.reason : 'CONFIRMED'
           const eventKey = typeof job.payload_json?.event_key === 'string' ? job.payload_json.event_key : 'APPOINTMENT_APPROVED'
           const scheduleKey = typeof job.payload_json?.schedule_key === 'string' ? job.payload_json.schedule_key : ''
+          // WhatsApp da reserva: tentativa à parte e sem efeito no e-mail. O whatsapp-send
+          // tem as próprias travas (chave de ambiente + nenhum modelo de WhatsApp ativo)
+          // e não duplica envio quando o trabalho é repetido.
+          if (job.job_type === 'APPOINTMENT_CONFIRMED_MESSAGE' && !scheduleKey) {
+            try {
+              await invokeFunction('whatsapp-send', secret, {
+                appointment_id: job.entity_id,
+                entity_version: job.entity_version,
+                event_key: eventKey,
+                previous_start_at: typeof job.payload_json?.previous_start_at === 'string' ? job.payload_json.previous_start_at : null,
+              })
+            } catch (whatsappError) {
+              console.error('integration-worker', 'WHATSAPP_SEND_ATTEMPT_FAILED', whatsappError instanceof Error ? whatsappError.message.slice(0, 120) : 'unknown')
+            }
+          }
           const result = await invokeFunction<{ stale?: boolean; current_version?: number; skipped?: boolean; reason?: string }>('email-send', secret, {
             appointment_id: job.entity_id,
             entity_version: job.entity_version,
