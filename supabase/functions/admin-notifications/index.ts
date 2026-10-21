@@ -21,6 +21,7 @@ import {
   type VersionDeps,
 } from './template-versions.ts'
 import { maskPhone, testParameters, testRecipient } from './test-send.ts'
+import { greetingName, winbackKeys } from './winback.ts'
 import {
   type SubmissionRow,
   submissionStatus,
@@ -712,6 +713,135 @@ Deno.serve(async (req) => {
       })
       console.log('admin-notifications', 'WHATSAPP_TEST_SENT', JSON.stringify({ template: definition.name, to: maskPhone(to), by: admin.adminId }))
       return json({ sent: sent.sent === true, to: maskPhone(to) })
+    }
+
+    // Win-back batch: every customer the campaign rule finds now (N days without renting, no
+    // booking ahead, once per absence) gets the campaign coupon in the approved "Cliente sem
+    // locar" message. dry_run only lists them. A customer without a valid WhatsApp gets nothing.
+    if (req.method === 'POST' && action === 'DISPATCH_REWARDS_WINBACK') {
+      const campaignId = uuid(record.campaign_id) as string
+      const dryRun = record.dry_run !== false
+      const { error: actorError } = await client.rpc('service_admin_assert_marketing_campaign_actor', { p_admin_id: admin.adminId })
+      if (actorError) throw new Error(actorError.message)
+      const { tenant, campaign } = await rewardsCampaign(admin.authUserId, campaignId)
+      if (campaign.state !== 'ACTIVE') throw new Error('REWARDS_CAMPAIGN_NOT_ACTIVE')
+      const { data: link, error: linkError } = await client.from('marketing_campaign_message_templates')
+        .select('template_id').eq('campaign_id', campaignId).eq('event_key', 'REWARDS_WINBACK').maybeSingle()
+      if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+      if (!link) throw new Error('REWARDS_WINBACK_MESSAGE_MISSING')
+      const templateId = String(link.template_id)
+      const { data: template, error: templateError } = await client.from('notification_template_configs')
+        .select('id,event_key,channel,body_template,variable_schema,updated_at').eq('id', templateId).maybeSingle()
+      if (templateError || !template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      const { data: submission } = await client.from('whatsapp_template_submissions')
+        .select('status,provider_template_name,submitted_at').eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle()
+      if (submission?.status !== 'APPROVED' || !submission.provider_template_name) throw new Error('WHATSAPP_TEMPLATE_NOT_APPROVED')
+      const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+      const edited = latest(String(template.updated_at ?? ''), settings?.updated_at)
+      if (edited && submission.submitted_at && edited > String(submission.submitted_at)) throw new Error('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
+
+      const { data: candidates, error: candidatesError } = await client.rpc('service_list_marketing_campaign_candidates', {
+        p_campaign_id: campaignId, p_limit: 1000,
+      })
+      if (candidatesError) throw new Error('REWARDS_CANDIDATES_FAILED')
+      const list = (Array.isArray(candidates) ? candidates : []) as { customer_id: string; last_rental_at: string | null }[]
+      const { data: customerRows, error: customersError } = list.length
+        ? await client.from('customers').select('id,name,phone').in('id', list.map((item) => item.customer_id))
+        : { data: [], error: null }
+      if (customersError) throw new Error('REWARDS_CANDIDATES_FAILED')
+      const customers = new Map(records(customerRows).map((row) => [String(row.id), row]))
+      const recipients = list.flatMap((item) => {
+        const customer = customers.get(item.customer_id)
+        if (!customer) return []
+        try {
+          return [{ ...item, name: String(customer.name ?? ''), phone: testRecipient(customer.phone) }]
+        } catch {
+          return []
+        }
+      })
+      if (dryRun) {
+        return json({
+          eligible: list.length,
+          sendable: recipients.length,
+          without_whatsapp: list.length - recipients.length,
+          recipients: recipients.map((item) => ({ name: greetingName(item.name), phone: maskPhone(item.phone), last_rental_at: couponDateLabel(item.last_rental_at) })),
+        })
+      }
+
+      const { data: integration } = await client.from('whatsapp_tenant_integrations')
+        .select('dispatch_admin_id').eq('tenant_id', tenant.id).eq('status', 'CONNECTED')
+        .not('dispatch_admin_id', 'is', null).order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      if (!integration) throw new Error('WHATSAPP_NOT_CONNECTED')
+      const catalog = [...templateVariableKeys(template.variable_schema), ...(settings?.button_variable ? [settings.button_variable] : [])]
+      const summary = { sent: 0, already_sent: 0, skipped: 0, failed: 0, failures: [] as string[] }
+      for (const item of recipients) {
+        const keys = winbackKeys(campaignId, templateId, item.customer_id, item.last_rental_at)
+        const { data: previous } = await client.from('notification_delivery_logs').select('status,provider_message_id')
+          .eq('idempotency_key', keys.delivery).maybeSingle()
+        if (previous?.status === 'SENT' || previous?.provider_message_id) {
+          summary.already_sent += 1
+          continue
+        }
+        const { data: issued, error: issueError } = await client.rpc('service_issue_marketing_campaign_customer_coupon', {
+          p_campaign_id: campaignId, p_customer_id: item.customer_id, p_idempotency_key: keys.issuance,
+        })
+        if (issueError) {
+          summary.skipped += 1
+          continue
+        }
+        const { data: coupon } = await client.from('coupons').select('code,discount_type,discount_value,valid_until').eq('id', issued.coupon_id).maybeSingle()
+        if (!coupon) {
+          summary.failed += 1
+          continue
+        }
+        const delivery = await beginNotificationDelivery(client, {
+          templateId,
+          eventKey: 'REWARDS_WINBACK',
+          audience: 'CUSTOMER',
+          customerId: item.customer_id,
+          recipient: item.phone,
+          recipientMasked: maskPhone(item.phone),
+          channel: 'WHATSAPP',
+          idempotencyKey: keys.delivery,
+          payloadSnapshot: { template_id: templateId, campaign_id: campaignId, coupon_id: issued.coupon_id, last_rental_at: item.last_rental_at },
+        })
+        if (delivery.alreadySent) {
+          summary.already_sent += 1
+          continue
+        }
+        try {
+          const parameters = whatsappTemplateParameters({
+            body: String(template.body_template ?? ''),
+            catalog,
+            settings,
+            values: {
+              'customer.name': greetingName(item.name),
+              'customer.last_rental_at': couponDateLabel(item.last_rental_at),
+              'campaign.name': String(campaign.public_name ?? campaign.internal_name ?? ''),
+              'coupon.code': String(coupon.code),
+              'coupon.discount': couponDiscountLabel(coupon.discount_type, coupon.discount_value),
+              'coupon.expires_at': couponDateLabel(coupon.valid_until),
+              'coupon.days_left': couponDaysLeft(coupon.valid_until),
+              'booking.url': BOOKING_URL,
+            },
+            buttonSuffix: (variable, url) => customerLinkSuffix(variable as CustomerLinkVariable, url),
+          })
+          const sent = await callDracmaGateway({
+            operation: 'SEND_TEMPLATE',
+            tenant,
+            adminId: String(integration.dispatch_admin_id),
+            payload: { name: submission.provider_template_name, language: 'pt_BR', to: item.phone, ...parameters },
+          })
+          await markNotificationSent(client, delivery.id, typeof sent.message_id === 'string' ? sent.message_id : null)
+          summary.sent += 1
+        } catch (sendError) {
+          await markNotificationFailed(client, delivery.id, sendError)
+          summary.failed += 1
+          summary.failures.push(`${maskPhone(item.phone)}: ${sendError instanceof Error ? sendError.message.slice(0, 60) : 'erro'}`)
+        }
+      }
+      console.log('admin-notifications', 'REWARDS_WINBACK_DISPATCHED', JSON.stringify({ campaign: campaignId, by: admin.adminId, ...summary, failures: summary.failures.length }))
+      return json({ eligible: list.length, without_whatsapp: list.length - recipients.length, ...summary })
     }
 
     // Complete Rewards test: a real single-use coupon of the campaign for the customer with
