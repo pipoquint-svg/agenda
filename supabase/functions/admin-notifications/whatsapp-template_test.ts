@@ -149,3 +149,42 @@ Deno.test('puts a customer link behind a URL button', async () => {
   assertThrows(() => whatsappSettings({ category: 'UTILITY', button_text: 'x'.repeat(26), button_variable: 'appointment.manage_url' }, links), Error, 'WHATSAPP_BUTTON_INVALID')
   assertThrows(() => whatsappSettings({ category: 'UTILITY', button_text: 'Abrir', button_variable: 'customer.email' }, links), Error, 'WHATSAPP_BUTTON_LINK_INVALID')
 })
+
+Deno.test('booking parameters follow the approved numbering and send the link end on the button', async () => {
+  const { whatsappTemplateParameters } = await import('./whatsapp-template.ts')
+  const params = whatsappTemplateParameters({
+    body: 'Olá {{customer.name}}! {{service.name}} em {{appointment.start_at}}. Até logo, {{customer.name}}.',
+    catalog: ['customer.name', 'service.name', 'appointment.start_at', 'appointment.public_code', 'appointment.manage_url'],
+    settings: {
+      category: 'UTILITY',
+      header_text: 'Reserva {{appointment.public_code}}',
+      footer_text: null,
+      ttl_seconds: null,
+      variable_examples: {},
+      button_text: 'Gerenciar reserva',
+      button_variable: 'appointment.manage_url',
+    },
+    values: {
+      'customer.name': 'Ana  Souza',
+      'service.name': 'Locação do estúdio',
+      'appointment.start_at': '25/10/2026 14:00',
+      'appointment.public_code': 'BS7K2Q',
+      'appointment.manage_url': 'https://x.com/reserva/gerenciar?token=abc',
+    },
+    buttonSuffix: (_variable, link) => link.slice('https://x.com/'.length),
+  })
+  assertEquals(params.body_parameters, ['Ana Souza', 'Locação do estúdio', '25/10/2026 14:00'])
+  assertEquals(params.header_parameter, 'BS7K2Q')
+  assertEquals(params.button_parameter, 'reserva/gerenciar?token=abc')
+})
+
+Deno.test('a missing value stops the message instead of sending a blank', async () => {
+  const { whatsappTemplateParameters } = await import('./whatsapp-template.ts')
+  let code = ''
+  try {
+    whatsappTemplateParameters({ body: 'Olá {{customer.name}}', catalog: ['customer.name'], settings: null, values: { 'customer.name': ' ' } })
+  } catch (error) {
+    code = error instanceof Error ? error.message : ''
+  }
+  assertEquals(code, 'WHATSAPP_PARAMETER_MISSING')
+})
