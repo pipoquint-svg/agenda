@@ -122,7 +122,7 @@ select is(
   1, 'in one balance, so a single booking can use all four hours'
 );
 select is(
-  (select row(m.minutes_delta, m.reason)::text from public.hour_package_movements m
+  (select row(m.minutes_delta::integer, m.reason)::text from public.hour_package_movements m
    where m.hour_package_id = (current_setting('agenda.r182.f')::jsonb->>'hour_package_id')::uuid and m.movement_type = 'ADMIN_ADJUSTMENT'),
   row(120, 'REWARDS_REFERRAL')::text, 'the second reward is a recorded top-up'
 );
