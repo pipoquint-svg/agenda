@@ -176,6 +176,79 @@ async function updateSubmission(tenantId: string, templateId: string, fields: Re
   return data as SubmissionRow
 }
 
+type MetaTemplateRef = { name: string | null; id: string | null }
+type TemplateVersions = {
+  status: string
+  provider_template_id: string | null
+  provider_template_name: string | null
+  previous_template_name: string | null
+  previous_template_id: string | null
+}
+const AGENDA_TEMPLATE = /^agenda_[a-z0-9_]{1,500}$/
+
+/** Name of a template on Meta from its id (rows sent before names were stored). */
+async function metaNameForId(tenant: AgendaTenant, adminId: string, id: string) {
+  const list = await callDracmaGateway({ operation: 'LIST_TEMPLATES', tenant, adminId, payload: {} })
+  const match = records(list.templates).find((item) => String(item.template_id) === id)
+  return match ? String(match.name) : null
+}
+
+/**
+ * Deletes one of Agenda's own templates on Meta. A template already gone counts as
+ * deleted; a failure returns false so the caller keeps it for a later retry.
+ */
+async function deleteMetaTemplate(tenant: AgendaTenant, adminId: string, ref: MetaTemplateRef) {
+  if (!ref.name || !AGENDA_TEMPLATE.test(ref.name)) return false
+  try {
+    const lookup = await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId, payload: { names: [ref.name] } })
+    if (records(lookup.templates)[0]?.status === 'NOT_FOUND') return true
+    await callDracmaGateway({
+      operation: 'DELETE_TEMPLATE',
+      tenant,
+      adminId,
+      payload: ref.id ? { name: ref.name, template_id: ref.id } : { name: ref.name },
+    })
+    return true
+  } catch (error) {
+    console.error('admin-notifications', 'WHATSAPP_TEMPLATE_DELETE_FAILED', error instanceof Error ? error.message : 'unknown')
+    return false
+  }
+}
+
+/**
+ * After a draft goes to Meta under a new name: an old version not yet approved is
+ * deleted now; an approved one keeps working until the new one is approved.
+ */
+async function rotateTemplateVersions(
+  tenant: AgendaTenant,
+  adminId: string,
+  existing: TemplateVersions | null,
+  current: { name: string; id: string | null; approved: boolean },
+): Promise<MetaTemplateRef> {
+  let previous: MetaTemplateRef = { name: existing?.previous_template_name ?? null, id: existing?.previous_template_id ?? null }
+  const oldId = existing?.provider_template_id ?? null
+  let oldName = existing?.provider_template_name ?? null
+  const replaced = existing && (oldName ? oldName !== current.name : Boolean(oldId && oldId !== current.id))
+  if (replaced) {
+    if (!oldName && oldId) oldName = await metaNameForId(tenant, adminId, oldId).catch(() => null)
+    if (oldName && oldName !== current.name && AGENDA_TEMPLATE.test(oldName)) {
+      const old = { name: oldName, id: oldId }
+      if (existing.status === 'APPROVED' && !current.approved) {
+        // An older kept version is superseded by this one.
+        if (previous.name && previous.name !== oldName) await deleteMetaTemplate(tenant, adminId, previous)
+        previous = old
+      } else if (!(await deleteMetaTemplate(tenant, adminId, old))) {
+        previous = old
+      }
+    }
+  }
+  if (previous.name === current.name) previous = { name: null, id: null }
+  if (current.approved && previous.name && (await deleteMetaTemplate(tenant, adminId, previous))) {
+    previous = { name: null, id: null }
+  }
+  return previous
+}
+
 function variablesIn(body: string) {
   return [...body.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((match) => match[1].trim())
 }
@@ -433,6 +506,10 @@ Deno.serve(async (req) => {
       const draftUpdatedAt = latest(String(template.updated_at ?? ''), settings?.updated_at)
       const definition = await templateDefinition(template, tenant, settings)
       const base = { tenant_id: tenant.id, integration_id: integrationId, notification_template_id: templateId }
+      const { data: existingRow } = await client.from('whatsapp_template_submissions')
+        .select('status,provider_template_id,provider_template_name,previous_template_name,previous_template_id')
+        .eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle()
+      const versions = (existingRow ?? null) as unknown as TemplateVersions | null
       try {
         // Re-sending unchanged text finds the template Meta already has.
         const lookup = await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId: admin.adminId, payload: { names: [definition.name] } })
@@ -442,9 +519,19 @@ Deno.serve(async (req) => {
           : await callDracmaGateway({ operation: 'SUBMIT_TEMPLATE', tenant, adminId: admin.adminId, payload: definition })
         const mapped = submissionStatus(provider.status) ?? { status: 'FAILED' as const, errorCode: 'META_TEMPLATE_NOT_FOUND' }
         const now = new Date().toISOString()
+        const providerId = typeof provider.template_id === 'string' && provider.template_id ? provider.template_id : null
+        // The previous version leaves Meta now, or once this one is approved.
+        const previous = await rotateTemplateVersions(tenant, admin.adminId, versions, {
+          name: definition.name,
+          id: providerId,
+          approved: mapped.status === 'APPROVED',
+        })
         const row = await saveSubmission({
           ...base,
-          provider_template_id: typeof provider.template_id === 'string' && provider.template_id ? provider.template_id : null,
+          provider_template_id: providerId,
+          provider_template_name: definition.name,
+          previous_template_name: previous.name,
+          previous_template_id: previous.id,
           status: mapped.status,
           provider_error_code: mapped.errorCode,
           provider_error_message: typeof provider.rejected_reason === 'string' ? provider.rejected_reason : null,
@@ -492,6 +579,7 @@ Deno.serve(async (req) => {
         const provider = byName.get(item.name)
         const mapped = submissionStatus(provider?.status) ?? { status: 'FAILED' as const, errorCode: 'META_TEMPLATE_NOT_FOUND' }
         const row = await updateSubmission(tenant.id, item.row.notification_template_id, {
+          provider_template_name: item.name,
           status: mapped.status,
           provider_error_code: mapped.errorCode,
           provider_error_message: typeof provider?.rejected_reason === 'string' ? provider.rejected_reason : null,
@@ -499,7 +587,65 @@ Deno.serve(async (req) => {
         })
         views.push(submissionView(row, item.updatedAt))
       }
+      // A kept version leaves Meta once its replacement is approved.
+      const { data: kept } = await client.from('whatsapp_template_submissions')
+        .select('notification_template_id,status,previous_template_name,previous_template_id')
+        .eq('tenant_id', tenant.id).eq('status', 'APPROVED').not('previous_template_name', 'is', null)
+      for (const row of records(kept)) {
+        const ref = { name: String(row.previous_template_name), id: row.previous_template_id ? String(row.previous_template_id) : null }
+        if (await deleteMetaTemplate(tenant, admin.adminId, ref)) {
+          await updateSubmission(tenant.id, String(row.notification_template_id), { previous_template_name: null, previous_template_id: null })
+        }
+      }
       return json({ submissions: views })
+    }
+
+    if (req.method === 'POST' && (action === 'LIST_META_TEMPLATES' || action === 'DELETE_META_TEMPLATE')) {
+      const { tenant } = await whatsappContext(admin.authUserId)
+      const { data: subs, error: subsError } = await client.from('whatsapp_template_submissions')
+        .select('notification_template_id,status,provider_template_name,previous_template_name,previous_template_id')
+        .eq('tenant_id', tenant.id)
+      if (subsError) throw new Error(subsError.message)
+      const { data: drafts } = await client.from('notification_template_configs')
+        .select('id,event_key').in('id', records(subs).map((row) => String(row.notification_template_id)))
+      const eventById = new Map(records(drafts).map((item) => [String(item.id), String(item.event_key)]))
+      // Which draft uses each name: the current version or the one kept until approval.
+      const usage = new Map<string, { role: 'CURRENT' | 'PREVIOUS'; template_id: string; event_key: string | null }>()
+      for (const row of records(subs)) {
+        const templateId = String(row.notification_template_id)
+        const event = eventById.get(templateId) ?? null
+        if (row.provider_template_name) usage.set(String(row.provider_template_name), { role: 'CURRENT', template_id: templateId, event_key: event })
+        if (row.previous_template_name) usage.set(String(row.previous_template_name), { role: 'PREVIOUS', template_id: templateId, event_key: event })
+      }
+      if (action === 'DELETE_META_TEMPLATE') {
+        const name = String(record.name ?? '')
+        if (!AGENDA_TEMPLATE.test(name)) throw new Error('WHATSAPP_TEMPLATE_NOT_AGENDA_OWNED')
+        const used = usage.get(name)
+        if (used?.role === 'CURRENT') throw new Error('WHATSAPP_TEMPLATE_IN_USE')
+        const kept = records(subs).find((row) => row.previous_template_name === name)
+        const ok = await deleteMetaTemplate(tenant, admin.adminId, {
+          name,
+          id: kept?.previous_template_id ? String(kept.previous_template_id) : null,
+        })
+        if (!ok) throw new Error('WHATSAPP_TEMPLATE_DELETE_FAILED')
+        if (kept) {
+          await updateSubmission(tenant.id, String(kept.notification_template_id), { previous_template_name: null, previous_template_id: null })
+        }
+        return json({ deleted: name })
+      }
+      const list = await callDracmaGateway({ operation: 'LIST_TEMPLATES', tenant, adminId: admin.adminId, payload: {} })
+      return json({
+        templates: records(list.templates).map((item) => ({
+          name: String(item.name),
+          status: String(item.status),
+          category: String(item.category ?? ''),
+          language: String(item.language ?? ''),
+          rejected_reason: typeof item.rejected_reason === 'string' ? item.rejected_reason : null,
+          // Created by Gestão (agenda_*) can be deleted here; others (Kommo) are read-only.
+          managed: AGENDA_TEMPLATE.test(String(item.name)),
+          usage: usage.get(String(item.name)) ?? null,
+        })),
+      })
     }
 
     if (req.method === 'POST' && action === 'TEST') {
@@ -618,6 +764,23 @@ Deno.serve(async (req) => {
     })
     if (error) throw new Error(error.message)
     if (whatsapp) {
+      // A page opened before a field existed does not send it: keep what is saved
+      // instead of wiping it (an old page once removed the confirmation's button).
+      const sent = record.whatsapp as Record<string, unknown>
+      const stored = (await loadWhatsAppSettings([String(data)])).get(String(data))
+      if (stored) {
+        const keep = <K extends keyof WhatsAppSettings>(key: K) => {
+          if (!(key in sent)) whatsapp[key] = stored[key]
+        }
+        keep('header_text')
+        keep('footer_text')
+        keep('ttl_seconds')
+        keep('variable_examples')
+        if (!('button_text' in sent) && !('button_variable' in sent)) {
+          whatsapp.button_text = stored.button_text
+          whatsapp.button_variable = stored.button_variable
+        }
+      }
       const { error: settingsError } = await client.from('notification_whatsapp_settings').upsert({
         template_id: data,
         ...whatsapp,
