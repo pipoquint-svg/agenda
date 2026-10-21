@@ -26,6 +26,10 @@ type DeliveryInput = {
   idempotencyKey: string
   payloadSnapshot?: Record<string, unknown>
   isTest?: boolean
+  /** EMAIL by default; WHATSAPP for booking messages on WhatsApp. */
+  channel?: 'EMAIL' | 'WHATSAPP'
+  /** Masked recipient for channels other than e-mail (e.g. a phone). */
+  recipientMasked?: string
 }
 
 const MAX_CUSTOM_HTML_BYTES = 90_000
@@ -151,7 +155,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
     return { id: String(existing.id), alreadySent: true, providerMessageId: existing.provider_message_id ?? null }
   }
 
-  const recipientMasked = maskRecipient(input.recipient)
+  const recipientMasked = input.recipientMasked ?? maskRecipient(input.recipient)
   if (existing) {
     const { error } = await client.from('notification_delivery_logs').update({
       template_id: input.templateId,
@@ -174,7 +178,7 @@ export async function beginNotificationDelivery(client: any, input: DeliveryInpu
   const { data: inserted, error } = await client.from('notification_delivery_logs').insert({
     template_id: input.templateId,
     event_key: input.eventKey,
-    channel: 'EMAIL',
+    channel: input.channel ?? 'EMAIL',
     audience: input.audience,
     appointment_id: input.appointmentId ?? null,
     customer_id: input.customerId ?? null,

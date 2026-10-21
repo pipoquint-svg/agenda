@@ -245,3 +245,41 @@ export function submissionView(row: SubmissionRow, templateUpdatedAt: string | n
     changed_since_submission: Number.isFinite(submittedAt) && Number.isFinite(editedAt) && editedAt > submittedAt,
   }
 }
+
+/**
+ * Real values for a booking message, in the numbering of the approved template
+ * (same order as whatsappTemplateDefinition). The button gets only the end of the
+ * customer link, as approved.
+ */
+export function whatsappTemplateParameters(input: {
+  body: string
+  catalog: string[]
+  settings: WhatsAppSettings | null
+  values: Record<string, string>
+  buttonSuffix?: (variable: string, link: string) => string
+}) {
+  const value = (key: string) => {
+    if (!input.catalog.includes(key)) throw new Error('WHATSAPP_TEMPLATE_VARIABLE_INVALID')
+    const text = String(input.values[key] ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) throw new Error('WHATSAPP_PARAMETER_MISSING')
+    return text.slice(0, MAX_EXAMPLE_LENGTH)
+  }
+  const order: string[] = []
+  for (const match of input.body.trim().matchAll(VARIABLE)) {
+    const key = match[1].trim()
+    if (!order.includes(key)) order.push(key)
+  }
+  const headerMatch = input.settings?.header_text ? [...input.settings.header_text.matchAll(VARIABLE)][0] : undefined
+  let button: string | null = null
+  if (input.settings?.button_text && input.settings.button_variable) {
+    if (!input.buttonSuffix) throw new Error('WHATSAPP_BUTTON_LINK_UNAVAILABLE')
+    const link = String(input.values[input.settings.button_variable] ?? '').trim()
+    if (!link) throw new Error('WHATSAPP_BUTTON_LINK_MISSING')
+    button = input.buttonSuffix(input.settings.button_variable, link)
+  }
+  return {
+    body_parameters: order.map(value),
+    header_parameter: headerMatch ? value(headerMatch[1].trim()) : null,
+    button_parameter: button,
+  }
+}

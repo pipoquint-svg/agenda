@@ -27,6 +27,8 @@
 -- Rewards WhatsApp templates add one service-only SECURITY DEFINER upsert RPC.
 -- Rewards inactivity/visit triggers add five service-only functions: source kind, last rental,
 -- customer eligibility, candidate list and customer-anchored issuance.
+-- Notification trigger controls add one service-only SECURITY DEFINER RPC that saves only the
+-- trigger (schedule and services) of a template.
 -- Rewards referral adds three service-only functions: same-person check, checkout referral rule
 -- and referral code creation.
 do $$
@@ -543,11 +545,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 505 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=505 actual=%', v_public_function_count;
+  if v_public_function_count <> 506 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=506 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 432 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=432 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 433 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=433 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

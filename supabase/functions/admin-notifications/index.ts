@@ -484,6 +484,10 @@ Deno.serve(async (req) => {
         throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
       }
       const { tenant, integrationId } = await whatsappContext(admin.authUserId)
+      // Quem envia modelos para a Meta passa a responder pelos envios automáticos
+      // (autor no Dracma), se ninguém foi definido ainda.
+      await client.from('whatsapp_tenant_integrations').update({ dispatch_admin_id: admin.adminId })
+        .eq('id', integrationId).is('dispatch_admin_id', null)
       const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
       const draftUpdatedAt = latest(String(template.updated_at ?? ''), settings?.updated_at)
       const definition = await templateDefinition(template, tenant, settings)
@@ -723,6 +727,26 @@ Deno.serve(async (req) => {
 
     if (req.method === 'POST' && action === 'SAVE_REWARDS_TEMPLATE') {
       return json(await saveRewardsTemplate(admin, record), 200)
+    }
+
+    // Só o disparo (quando e para quais serviços): não mexe no texto, em is_active
+    // nem em updated_at, então um modelo de WhatsApp aprovado continua aprovado.
+    if (req.method === 'POST' && action === 'SAVE_TRIGGER') {
+      const templateId = uuid(record.template_id) as string
+      const { data: existing, error: existingError } = await client.from('notification_template_configs')
+        .select('event_key').eq('id', templateId).maybeSingle()
+      if (existingError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+      if (!existing) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      if (isRewardsEvent(String(existing.event_key))) throw new Error('NOTIFICATION_TEMPLATE_IS_REWARDS')
+      const { error } = await client.rpc('service_admin_update_notification_trigger_v1', {
+        p_template_id: templateId,
+        p_schedule_mode: text(record.schedule_mode, true)?.toUpperCase() ?? 'IMMEDIATE',
+        p_schedule_offset_minutes: integer(record.schedule_offset_minutes),
+        p_service_ids: uuidArray(record.service_ids ?? []),
+        p_actor_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json({ id: templateId }, 200)
     }
 
     const eventKey = (text(record.event_key) as string).toUpperCase()
