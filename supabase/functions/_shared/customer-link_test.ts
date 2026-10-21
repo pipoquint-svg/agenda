@@ -22,3 +22,10 @@ Deno.test('payment buttons follow the configured payment sites', () => {
   assertEquals(balance.url, 'https://www.blacksheepestudiocriativo.com.br/{{1}}')
   assertEquals(balance.example.endsWith('/agenda/pagar-saldo#token=' + 'a'.repeat(64)), true)
 })
+
+Deno.test('the Rewards booking button opens the public booking page', () => {
+  const button = customerLinkButton('booking.url')
+  assertEquals(button.url, 'https://www.blacksheepestudiocriativo.com.br/{{1}}')
+  assertEquals(button.example, 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores')
+  assertEquals(customerLinkSuffix('booking.url', 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores'), 'agenda-e-valores')
+})

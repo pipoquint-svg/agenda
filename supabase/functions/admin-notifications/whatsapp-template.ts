@@ -33,6 +33,7 @@ export const WHATSAPP_BUTTON_VARIABLES = [
   'pre_reservation.payment_url',
   'balance.payment_url',
   'payment.resume_url',
+  'booking.url',
 ]
 const MAX_BUTTON_TEXT_LENGTH = 25
 
@@ -105,7 +106,7 @@ const VARIABLE = /\{\{\s*([^}]+?)\s*\}\}/g
 
 /** Birthday and manual messages promote; everything else follows a booking. */
 export function whatsappCategory(eventKey: string): WhatsAppCategory {
-  return eventKey === 'BIRTHDAY' || eventKey === 'MANUAL' ? 'MARKETING' : 'UTILITY'
+  return eventKey === 'BIRTHDAY' || eventKey === 'MANUAL' || eventKey.startsWith('REWARDS_') ? 'MARKETING' : 'UTILITY'
 }
 
 async function shortHash(value: string) {
