@@ -46,3 +46,7 @@ Delivery stays frozen: nothing issues coupons or sends messages until it is expl
 - **The checkout rule:** `coupon_referral_violation` runs in both checkout guards: the online hold and the reservation made in Gestão. It refuses the referrer (same customer, phone or CPF/CNPJ; e-mails are already unique) and anyone with another rental (done, booked or being paid) in the Agenda or Amelia. The reservation using the code does not count against the friend.
 - **The reward:** the `REFERRAL_FIRST_RENTAL` campaign's own discount. It is issued through S4 from the friend's realized and paid first rental, to the referrer. One reward per referred rental, capped per month (`trigger_rules.monthly_cap`, 1-50, default 5, São Paulo calendar month).
 - Codes are recorded in `marketing_referral_codes` with an audit event `REFERRAL_CODE_CREATED`.
+
+## Editing and deleting campaigns (2026-10-21)
+- **Edit:** the name, public name and description change in place. A new offer (trigger, discount, services, validity) becomes a new version; earlier versions stay as history. The offer of an active or scheduled campaign cannot change: pause it first. A paused campaign keeps its published version until it is resumed, which publishes the new one.
+- **Delete:** a draft that was never activated, issued nothing, has no referral code and sent no message to Meta is removed, together with its message drafts; a snapshot stays in `audit_logs`. Any other campaign is archived, so coupons already issued keep working and the history is preserved.
