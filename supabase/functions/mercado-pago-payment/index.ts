@@ -1,4 +1,5 @@
 import { adminClient } from '../_shared/supabase.ts'
+import { applyPaidClientReschedule } from '../_shared/paid-reschedule.ts'
 import { enforceDistributedPublicRateLimit } from '../_shared/public-rate-limit.ts'
 import { recordOpsEdgeFailure } from '../_shared/ops-alerts.ts'
 import { mercadoPagoRuntime } from '../_shared/mercado-pago-runtime.ts'
@@ -351,6 +352,7 @@ async function validateAndApplyProviderOrder(input: {
   })
   if (applyError) throw new Error('PAYMENT_STATUS_APPLY_FAILED')
 
+  if (normalized === 'APPROVED') await applyPaidClientReschedule(client, input.transactionId)
   await tryImmediateConfirmationEmail(client, input.appointmentId, normalized)
   return { snapshot, state: applied }
 }

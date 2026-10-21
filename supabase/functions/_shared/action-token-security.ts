@@ -59,6 +59,9 @@ export function mapActionAccessError(raw: string): ActionAccessErrorMapping {
     })
     return { code: 'RESCHEDULE_REQUIRES_ASSISTANCE', status: 409 }
   }
+  if (raw.includes('RESCHEDULE_DURATION_')) return { code: 'RESCHEDULE_DURATION_NOT_ALLOWED', status: 400 }
+  if (raw.includes('HOUR_PACKAGE_INSUFFICIENT_BALANCE')) return { code: 'HOUR_PACKAGE_INSUFFICIENT_BALANCE', status: 409 }
+  if (raw.includes('SLOT_NO_LONGER_AVAILABLE')) return { code: 'SLOT_NO_LONGER_AVAILABLE', status: 409 }
   if (raw.includes('RESCHEDULE_DATE_INVALID') || raw.includes('RESCHEDULE_TIME_INVALID')) {
     return { code: 'ACTION_REQUEST_INVALID', status: 400 }
   }

@@ -118,6 +118,30 @@ function uuid(value: unknown): string {
   return next
 }
 
+/** Duração pedida em blocos de 30 min; ausente = manter a duração da reserva. */
+function durationBlocks(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null
+  const blocks = Number(value)
+  if (!Number.isInteger(blocks) || blocks < 1 || blocks > 96) throw new Error('RESCHEDULE_DURATION_INVALID')
+  return blocks
+}
+
+/** Durações oferecidas para ampliar: da atual até o máximo do serviço (nunca menos). */
+async function durationOptions(client: ReturnType<typeof adminClient>, appointmentId: string) {
+  const { data: appointment } = await client.from('appointments')
+    .select('service_id,duration_blocks').eq('id', appointmentId).maybeSingle()
+  const current = Number(appointment?.duration_blocks)
+  if (!appointment?.service_id || !Number.isInteger(current) || current < 1) return null
+  const { data: service } = await client.from('services')
+    .select('duration_mode,booking_block_minutes,maximum_booking_blocks').eq('id', appointment.service_id).maybeSingle()
+  const blockMinutes = Number(service?.booking_block_minutes)
+  if (service?.duration_mode !== 'BLOCKS' || !Number.isInteger(blockMinutes) || blockMinutes < 1) return null
+  const max = Math.max(current, Number(service.maximum_booking_blocks) || current)
+  const options = []
+  for (let blocks = current; blocks <= max; blocks += 1) options.push({ blocks, minutes: blocks * blockMinutes })
+  return { current_blocks: current, block_minutes: blockMinutes, options }
+}
+
 function numeric(value: unknown): number {
   const next = Number(value ?? 0)
   return Number.isFinite(next) ? Math.round(next * 100) / 100 : 0
@@ -402,6 +426,8 @@ Deno.serve(async (req) => {
           : null
       }
 
+      const duration = scope === 'RESCHEDULE' ? await durationOptions(client, appointmentId) : null
+
       await minimumDelay(startedAt)
       return json({
         data: {
@@ -411,6 +437,7 @@ Deno.serve(async (req) => {
           accessed_at: accessedAt,
           warning: PERSONAL_LINK_WARNING,
           summary,
+          duration,
         },
       })
     }
@@ -449,10 +476,10 @@ Deno.serve(async (req) => {
 
     if (operation === 'RESCHEDULE_SLOTS') {
       const date = localDate(body.local_date)
-      const { data: slots, error: slotsError } = await client.rpc('service_admin_list_reschedule_slots', {
-        p_appointment_id: appointmentId,
-        p_local_date: date,
-      })
+      const blocks = durationBlocks(body.duration_blocks)
+      const { data: slots, error: slotsError } = await client.rpc('service_admin_list_reschedule_slots', blocks === null
+        ? { p_appointment_id: appointmentId, p_local_date: date }
+        : { p_appointment_id: appointmentId, p_local_date: date, p_duration_blocks: blocks })
       if (slotsError) throw new Error(slotsError.message)
       await minimumDelay(startedAt)
       return json({
@@ -470,12 +497,14 @@ Deno.serve(async (req) => {
 
     if (operation === 'RESCHEDULE_CREATE_HOLD') {
       const requestedStartAt = isoDateTime(body.requested_start_at)
+      const blocks = durationBlocks(body.duration_blocks)
       const { data: created, error: createError } = await client.rpc('service_admin_create_reschedule_hold', {
         p_appointment_id: appointmentId,
         p_requested_start_at: requestedStartAt,
         p_requested_at: accessedAt,
         p_change_origin: 'CLIENT',
         p_admin_id: null,
+        ...(blocks === null ? {} : { p_duration_blocks: blocks }),
       })
       if (createError) throw new Error(createError.message)
       const proposal = created && typeof created === 'object' ? created as Record<string, unknown> : {}
@@ -494,6 +523,16 @@ Deno.serve(async (req) => {
             penalty_amount: numeric(proposal.penalty_retained),
             difference_due: differenceDue,
             excess_amount: numeric(proposal.excess_amount),
+          },
+          duration: proposal.duration_blocks === undefined ? null : {
+            blocks: proposal.duration_blocks,
+            old_blocks: proposal.old_duration_blocks,
+            minutes: proposal.duration_minutes,
+            extension: proposal.extension === true,
+            extension_only: proposal.extension_only === true,
+            increment: numeric(proposal.extension_increment),
+            minimum_payment: numeric(proposal.extension_minimum_payment),
+            full_payment: numeric(proposal.extension_full_payment),
           },
         },
       })
@@ -588,6 +627,14 @@ Deno.serve(async (req) => {
 
     if (body.confirmed !== true) throw new Error('RESCHEDULE_CONFIRMATION_REQUIRED')
     const policyActionId = uuid(body.policy_action_id)
+    // Pago pelo link: a remarcação já foi aplicada quando o pagamento foi aprovado.
+    const { data: alreadyApplied } = await client.from('appointment_policy_actions')
+      .select('id,status').eq('id', policyActionId).eq('appointment_id', appointmentId).eq('change_origin', 'CLIENT')
+      .eq('status', 'APPLIED').maybeSingle()
+    if (alreadyApplied) {
+      await minimumDelay(startedAt)
+      return json({ data: { status: 'APPLIED', policy_action_id: policyActionId, already_applied: true } })
+    }
     const { data: requirements, error: requirementsError } = await client.rpc('service_client_reschedule_requirements', {
       p_token_id: tokenId,
       p_policy_action_id: policyActionId,
