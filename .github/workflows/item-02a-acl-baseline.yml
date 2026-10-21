@@ -166,7 +166,8 @@ jobs:
             supabase/migrations/20261021040000_whatsapp_template_versions.sql \
             supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql \
             supabase/migrations/20261021070000_whatsapp_customer_dispatch.sql \
-            supabase/migrations/20261021080000_whatsapp_dispatch_go_live.sql
+            supabase/migrations/20261021080000_whatsapp_dispatch_go_live.sql \
+            supabase/migrations/20261021090000_notification_trigger_controls.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -267,7 +268,8 @@ jobs:
             supabase/migrations/20261021040000_whatsapp_template_versions.sql \
             supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql \
             supabase/migrations/20261021070000_whatsapp_customer_dispatch.sql \
-            supabase/migrations/20261021080000_whatsapp_dispatch_go_live.sql
+            supabase/migrations/20261021080000_whatsapp_dispatch_go_live.sql \
+            supabase/migrations/20261021090000_notification_trigger_controls.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
