@@ -729,6 +729,38 @@ Deno.serve(async (req) => {
       return json(await saveRewardsTemplate(admin, record), 200)
     }
 
+    // Liga ou desliga o envio de um modelo de WhatsApp. Ligar só vale para o texto
+    // que a Meta aprovou e não mexe em updated_at (é o que o whatsapp-send compara).
+    if (req.method === 'POST' && action === 'SET_WHATSAPP_ACTIVE') {
+      const templateId = uuid(record.template_id) as string
+      const active = record.is_active === true
+      const { data: template, error: templateError } = await client.from('notification_template_configs')
+        .select('id,event_key,channel,is_active,updated_at').eq('id', templateId).maybeSingle()
+      if (templateError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+      if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      if (template.channel !== 'WHATSAPP') throw new Error('NOTIFICATION_CHANNEL_INVALID')
+      if (isRewardsEvent(String(template.event_key))) throw new Error('NOTIFICATION_TEMPLATE_IS_REWARDS')
+      if (active) {
+        const { tenant } = await whatsappContext(admin.authUserId)
+        const { data: submission, error: submissionError } = await client.from('whatsapp_template_submissions')
+          .select('status,submitted_at').eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle()
+        if (submissionError) throw new Error('WHATSAPP_SUBMISSION_LOOKUP_FAILED')
+        if (submission?.status !== 'APPROVED') throw new Error('WHATSAPP_TEMPLATE_NOT_APPROVED')
+        const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+        const edited = latest(String(template.updated_at ?? ''), settings?.updated_at)
+        if (edited && submission.submitted_at && edited > String(submission.submitted_at)) throw new Error('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
+      }
+      const { error: updateError } = await client.from('notification_template_configs')
+        .update({ is_active: active, updated_by_admin_id: admin.adminId }).eq('id', templateId)
+      if (updateError) throw new Error(updateError.message.includes('whatsapp_dispatchable_events') ? 'WHATSAPP_EVENT_NOT_DISPATCHABLE' : 'NOTIFICATION_TEMPLATE_UPDATE_FAILED')
+      await client.from('audit_logs').insert({
+        admin_user_id: admin.adminId, entity_type: 'NOTIFICATION_TEMPLATE', entity_id: templateId,
+        action: active ? 'WHATSAPP_ACTIVATE' : 'WHATSAPP_DEACTIVATE',
+        before_json: { is_active: template.is_active }, after_json: { is_active: active }, origin: 'ADMIN',
+      })
+      return json({ id: templateId, is_active: active }, 200)
+    }
+
     // Só o disparo (quando e para quais serviços): não mexe no texto, em is_active
     // nem em updated_at, então um modelo de WhatsApp aprovado continua aprovado.
     if (req.method === 'POST' && action === 'SAVE_TRIGGER') {

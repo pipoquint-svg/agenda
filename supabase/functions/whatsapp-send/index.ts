@@ -1,17 +1,19 @@
 /**
- * WhatsApp da reserva para a cliente (confirmação, remarcação, cancelamento).
+ * WhatsApp da reserva para a cliente: confirmação, remarcação e cancelamento no
+ * momento do evento, e mensagens com prazo (por exemplo a cobrança de saldo antes do
+ * término), que chegam pelo agendamento com schedule_key e template_id.
  * Duas travas independentes, ambas precisam estar liberadas para enviar:
  *   1) WHATSAPP_CUSTOMER_DISPATCH_ENABLED=true no ambiente;
- *   2) um modelo de WhatsApp ATIVO para o evento e o serviço (a constraint
- *      notification_template_configs_whatsapp_locked impede ativar enquanto existir).
+ *   2) um modelo de WhatsApp ATIVO para o evento e o serviço.
  * Fora isso, só envia modelo aprovado e sem alteração desde a aprovação, para a
- * operação BlackSheep (dona do número conectado), uma vez por reserva/versão/evento.
+ * operação BlackSheep (dona do número conectado), uma vez por reserva/versão/evento/prazo.
  */
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { callDracmaGateway } from '../_shared/dracma-gateway.ts'
 import { durationLabel } from '../_shared/duration-label.ts'
 import { customerLinkSuffix, type CustomerLinkVariable } from '../_shared/customer-link.ts'
+import { buildBalancePaymentUrl } from '../_shared/balance-payment-link.ts'
 import {
   beginNotificationDelivery,
   markNotificationFailed,
@@ -22,6 +24,9 @@ import { type WhatsAppSettings, whatsappTemplateParameters } from '../admin-noti
 import { maskPhone, testRecipient } from '../admin-notifications/test-send.ts'
 
 const SCOPE = 'BLACKSHEEP'
+const IMMEDIATE_EVENTS = ['APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED']
+// Só por agendamento (prazo antes/depois do início ou do término).
+const SCHEDULED_EVENTS = [...IMMEDIATE_EVENTS, 'RENTAL_BALANCE_DUE']
 
 function requireInternal(req: Request) {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')
@@ -56,7 +61,8 @@ async function send(body: Record<string, unknown>) {
   const eventKey = String(body.event_key ?? 'APPOINTMENT_APPROVED').trim().toUpperCase()
   if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
   if (!Number.isInteger(entityVersion) || entityVersion < 1) throw new Error('ENTITY_VERSION_REQUIRED')
-  if (!['APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED'].includes(eventKey)) {
+  const scheduleKey = String(body.schedule_key ?? '').trim()
+  if (!(scheduleKey ? SCHEDULED_EVENTS : IMMEDIATE_EVENTS).includes(eventKey)) {
     return skip('WHATSAPP_EVENT_NOT_SUPPORTED')
   }
 
@@ -86,16 +92,54 @@ async function send(body: Record<string, unknown>) {
   }
 
   // Trava 2: só um modelo de WhatsApp ATIVO entra aqui.
-  const { data: rows, error: resolveError } = await client.rpc('resolve_notification_template_v2', {
-    p_event_key: eventKey,
-    p_channel: 'WHATSAPP',
-    p_audience: 'CUSTOMER',
-    p_service_id: appointment.service_id,
-  })
-  if (resolveError) throw new Error('NOTIFICATION_TEMPLATE_RESOLUTION_FAILED')
-  const template = (Array.isArray(rows) ? rows[0] : null) as Record<string, unknown> | null
-  if (!template?.id) return skip('WHATSAPP_TEMPLATE_NOT_ACTIVE')
-  const templateId = String(template.id)
+  let templateId: string
+  if (scheduleKey) {
+    // Agendado: o modelo é o do agendamento, e o prazo ainda precisa ser o mesmo.
+    const scheduledId = String(body.template_id ?? '').trim()
+    const { data: scheduled, error: scheduledError } = await client.from('notification_template_configs')
+      .select('id,event_key,channel,audience,operation_scope,is_active,schedule_mode,schedule_offset_minutes')
+      .eq('id', scheduledId).maybeSingle()
+    if (scheduledError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+    if (!scheduled || scheduled.channel !== 'WHATSAPP' || scheduled.audience !== 'CUSTOMER' || scheduled.event_key !== eventKey) {
+      return skip('WHATSAPP_TEMPLATE_NOT_FOUND')
+    }
+    if (scheduled.is_active !== true) return skip('WHATSAPP_TEMPLATE_NOT_ACTIVE')
+    if (scheduled.operation_scope && scheduled.operation_scope !== SCOPE) return skip('WHATSAPP_SCOPE_NOT_CONNECTED')
+    const currentKey = `${scheduled.id}:${entityVersion}:${scheduled.schedule_mode}:${scheduled.schedule_offset_minutes}`
+    if (scheduleKey !== currentKey) return skip('WHATSAPP_SCHEDULE_CHANGED')
+    const { data: targets, error: targetsError } = await client.from('notification_template_services')
+      .select('service_id').eq('template_id', scheduledId)
+    if (targetsError) throw new Error('NOTIFICATION_TEMPLATE_SERVICES_LOOKUP_FAILED')
+    if ((targets ?? []).length > 0 && !(targets ?? []).some((row: { service_id: string }) => row.service_id === appointment.service_id)) {
+      return skip('WHATSAPP_SERVICE_NOT_TARGETED')
+    }
+    templateId = scheduledId
+  } else {
+    const { data: rows, error: resolveError } = await client.rpc('resolve_notification_template_v2', {
+      p_event_key: eventKey,
+      p_channel: 'WHATSAPP',
+      p_audience: 'CUSTOMER',
+      p_service_id: appointment.service_id,
+    })
+    if (resolveError) throw new Error('NOTIFICATION_TEMPLATE_RESOLUTION_FAILED')
+    const template = (Array.isArray(rows) ? rows[0] : null) as Record<string, unknown> | null
+    if (!template?.id) return skip('WHATSAPP_TEMPLATE_NOT_ACTIVE')
+    templateId = String(template.id)
+  }
+
+  // Cobrança de saldo: só com cobrança pendente, dentro do prazo e com saldo em aberto.
+  let balanceCollection: { id: string } | null = null
+  if (eventKey === 'RENTAL_BALANCE_DUE') {
+    const { data: collection, error: collectionError } = await client.from('appointment_balance_collections')
+      .select('id,status,expires_at').eq('appointment_id', appointmentId).eq('status', 'PENDING')
+      .order('sequence', { ascending: false }).limit(1).maybeSingle()
+    if (collectionError) throw new Error('BALANCE_COLLECTION_LOOKUP_FAILED')
+    if (!collection || new Date(String(collection.expires_at)).getTime() <= Date.now()) return skip('BALANCE_COLLECTION_NOT_PENDING')
+    const { data: summary, error: summaryError } = await client.rpc('get_appointment_financial_summary', { p_appointment_id: appointmentId })
+    if (summaryError) throw new Error('FINANCIAL_SUMMARY_FAILED')
+    if (numeric(summary?.contract_balance) <= 0.005) return skip('BALANCE_ALREADY_PAID')
+    balanceCollection = { id: String(collection.id) }
+  }
 
   const { data: integration } = await client.from('whatsapp_tenant_integrations')
     .select('tenant_id,dispatch_admin_id,tenants(id,name)').eq('status', 'CONNECTED')
@@ -117,7 +161,7 @@ async function send(body: Record<string, unknown>) {
   const edited = latest(String(fullTemplate?.updated_at ?? ''), settingsRow?.updated_at ? String(settingsRow.updated_at) : null)
   if (edited && submission.submitted_at && edited > String(submission.submitted_at)) return skip('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
 
-  const idempotencyKey = `notification:${templateId}:${appointmentId}:v${entityVersion}:${eventKey}:IMMEDIATE:WHATSAPP:CUSTOMER`
+  const idempotencyKey = `notification:${templateId}:${appointmentId}:v${entityVersion}:${eventKey}:${scheduleKey || 'IMMEDIATE'}:WHATSAPP:CUSTOMER`
   const delivery = await beginNotificationDelivery(client, {
     templateId,
     eventKey,
@@ -128,7 +172,7 @@ async function send(body: Record<string, unknown>) {
     recipientMasked: maskPhone(phone),
     channel: 'WHATSAPP',
     idempotencyKey,
-    payloadSnapshot: { template_id: templateId, appointment_id: appointmentId, entity_version: entityVersion, operation_scope: SCOPE },
+    payloadSnapshot: { template_id: templateId, appointment_id: appointmentId, entity_version: entityVersion, operation_scope: SCOPE, schedule_key: scheduleKey || null },
   })
   if (delivery.alreadySent) return skip('NOTIFICATION_ALREADY_SENT')
 
@@ -155,7 +199,20 @@ async function send(body: Record<string, unknown>) {
       tokenId = String(token.token_id)
       manageUrl = `https://www.blacksheepestudiocriativo.com.br/reserva/gerenciar?token=${encodeURIComponent(String(token.access_token))}&scope=RESCHEDULE`
     }
+    const balance: Record<string, string> = {}
+    if (balanceCollection) {
+      const { data: tokenEnvelope, error: tokenError } = await client.rpc('service_issue_balance_collection_payment_token', {
+        p_collection_id: balanceCollection.id,
+      })
+      const accessToken = typeof tokenEnvelope?.access_token === 'string' ? tokenEnvelope.access_token : ''
+      if (tokenError || !/^[0-9a-f]{64}$/i.test(accessToken)) throw new Error('BALANCE_PAYMENT_TOKEN_ISSUE_FAILED')
+      const baseUrl = Deno.env.get('PUBLIC_BOOKING_BASE_URL')?.trim().replace(/\/$/, '') ?? ''
+      balance['balance.amount'] = money(tokenEnvelope.amount)
+      balance['balance.expires_at'] = dateTime(tokenEnvelope.expires_at)
+      balance['balance.payment_url'] = buildBalancePaymentUrl(baseUrl, accessToken)
+    }
     const values: Record<string, string> = {
+      ...balance,
       'appointment.public_code': String(appointment.public_code ?? ''),
       'appointment.start_at': dateTime(appointment.start_at),
       'appointment.end_at': dateTime(appointment.end_at),
