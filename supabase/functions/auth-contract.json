@@ -2,11 +2,11 @@
   "schema_version": 1,
   "project_ref": "sbexdggbwqvyhbkatucs",
   "production_baseline": {
-    "captured_on": "2026-09-12",
-    "active_total": 79,
-    "verify_jwt_false": 61,
+    "captured_on": "2026-10-21",
+    "active_total": 80,
+    "verify_jwt_false": 62,
     "verify_jwt_true": 18,
-    "versioned_active": 74,
+    "versioned_active": 75,
     "production_orphans": 5,
     "versioned_inactive": 12
   },
@@ -92,7 +92,8 @@
       "infinitepay-webhook-worker",
       "integration-worker",
       "kommo-sync",
-      "mercado-pago-reconcile"
+      "mercado-pago-reconcile",
+      "whatsapp-send"
     ],
     "mercado_pago_signature": [
       "mercado-pago-webhook"
