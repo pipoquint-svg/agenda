@@ -42,6 +42,7 @@ on:
       - 'supabase/tests/database/179_rewards_referral.test.sql'
       - 'supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql'
       - 'supabase/migrations/20261021171500_rewards_coupon_dispatch.sql'
+      - 'supabase/migrations/20261021233000_rewards_test_coupon.sql'
       - 'supabase/tests/database/177_rewards_message_templates.test.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
@@ -178,7 +179,8 @@ jobs:
             supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql \
             supabase/migrations/20261021140000_fix_whatsapp_dispatch_admin.sql \
             supabase/migrations/20261021171500_rewards_coupon_dispatch.sql \
-            supabase/migrations/20261021220000_reschedule_extend_duration.sql
+            supabase/migrations/20261021220000_reschedule_extend_duration.sql \
+            supabase/migrations/20261021233000_rewards_test_coupon.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -287,7 +289,8 @@ jobs:
             supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql \
             supabase/migrations/20261021140000_fix_whatsapp_dispatch_admin.sql \
             supabase/migrations/20261021171500_rewards_coupon_dispatch.sql \
-            supabase/migrations/20261021220000_reschedule_extend_duration.sql
+            supabase/migrations/20261021220000_reschedule_extend_duration.sql \
+            supabase/migrations/20261021233000_rewards_test_coupon.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
