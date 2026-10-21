@@ -743,6 +743,8 @@ Deno.serve(async (req) => {
         p_campaign_id: link.campaign_id,
         p_phone: to,
         p_admin_id: admin.adminId,
+        // The reminder talks about a coupon the customer already has: it never creates one.
+        p_reuse_existing: link.event_key === 'REWARDS_COUPON_EXPIRING',
       })
       if (couponError) throw new Error(couponError.message)
       // Real values for the customer and the coupon; anything else keeps the approved sample.
@@ -771,7 +773,7 @@ Deno.serve(async (req) => {
         payload: { name: definition.name, language: definition.language, to, ...parameters },
       })
       console.log('admin-notifications', 'REWARDS_COMPLETE_TEST_SENT', JSON.stringify({ template: definition.name, to: maskPhone(to), coupon: coupon.coupon_id, by: admin.adminId }))
-      return json({ sent: sent.sent === true, to: maskPhone(to), coupon_code: coupon.code, customer_name: coupon.customer_name })
+      return json({ sent: sent.sent === true, to: maskPhone(to), coupon_code: coupon.code, customer_name: coupon.customer_name, reused: coupon.reused === true })
     }
 
     if (req.method === 'POST' && action === 'TEST') {

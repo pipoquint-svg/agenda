@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(10);
+select plan(14);
 
 insert into auth.users(id, email, created_at, updated_at) values
   ('18300000-0000-4000-8000-000000000001', 'r183-owner@example.test', now(), now()),
@@ -25,9 +25,9 @@ select set_config('r183.c', (public.service_admin_create_marketing_campaign(
   '18300000-0000-4000-8000-000000000002', gen_random_uuid())->>'campaign_id'), true);
 
 select ok(
-  has_function_privilege('service_role', 'public.service_admin_issue_rewards_test_coupon(uuid,uuid,text,uuid)', 'EXECUTE')
-  and not has_function_privilege('anon', 'public.service_admin_issue_rewards_test_coupon(uuid,uuid,text,uuid)', 'EXECUTE')
-  and not has_function_privilege('authenticated', 'public.service_admin_issue_rewards_test_coupon(uuid,uuid,text,uuid)', 'EXECUTE'),
+  has_function_privilege('service_role', 'public.service_admin_issue_rewards_test_coupon(uuid,uuid,text,uuid,boolean)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.service_admin_issue_rewards_test_coupon(uuid,uuid,text,uuid,boolean)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.service_admin_issue_rewards_test_coupon(uuid,uuid,text,uuid,boolean)', 'EXECUTE'),
   'only the trusted backend issues test coupons'
 );
 select set_config('r183.t', public.service_admin_issue_rewards_test_coupon(
@@ -50,6 +50,17 @@ select throws_ok($$select public.service_admin_issue_rewards_test_coupon('8fba3c
   'P0001', 'REWARDS_TEST_CUSTOMER_AMBIGUOUS', 'two records with the same phone are refused');
 select throws_ok($$select public.service_admin_issue_rewards_test_coupon('8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f', current_setting('r183.c')::uuid, '5548981830001', '18300000-0000-4000-8000-000000000004')$$,
   '42501', 'MARKETING_CAMPAIGN_ADMIN_PERMISSION_DENIED', 'only OWNER and ADMIN');
+
+-- The reminder reuses the coupon the customer already has.
+select throws_ok($$select public.service_admin_issue_rewards_test_coupon('8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f', current_setting('r183.c')::uuid, '48981830002', '18300000-0000-4000-8000-000000000002', true)$$,
+  'P0001', 'REWARDS_TEST_CUSTOMER_AMBIGUOUS', 'the reminder still needs exactly one customer');
+select set_config('r183.r', public.service_admin_issue_rewards_test_coupon(
+  '8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f', current_setting('r183.c')::uuid, '5548981830001', '18300000-0000-4000-8000-000000000002', true)::text, true);
+select is(current_setting('r183.r')::jsonb->>'coupon_id', current_setting('r183.t')::jsonb->>'coupon_id', 'the reminder test reuses the same coupon');
+select is((select count(*)::integer from public.coupons where customer_id = '18300000-0000-4000-8000-0000000000a1'), 1, 'no new coupon for a reminder');
+update public.coupons set used_count = 1 where id = (current_setting('r183.t')::jsonb->>'coupon_id')::uuid;
+select throws_ok($$select public.service_admin_issue_rewards_test_coupon('8fba3c57-c0e6-4a37-b7d3-4cf41e5fb65f', current_setting('r183.c')::uuid, '5548981830001', '18300000-0000-4000-8000-000000000002', true)$$,
+  'P0001', 'REWARDS_TEST_NO_COUPON_TO_REMIND', 'a used coupon has nothing to remind');
 
 select * from finish();
 rollback;
