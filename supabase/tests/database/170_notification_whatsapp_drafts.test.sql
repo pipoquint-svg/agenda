@@ -64,13 +64,14 @@ select ok(
   'WhatsApp draft cannot become dispatchable in this slice'
 );
 
-select throws_ok(
+-- Since 20261021080000_whatsapp_dispatch_go_live the database no longer blocks an
+-- active WhatsApp template: activation is done there only for templates approved by
+-- Meta, and whatsapp-send re-checks approval and WHATSAPP_CUSTOMER_DISPATCH_ENABLED.
+select lives_ok(
   $$update public.notification_template_configs
       set is_active = true
     where id = (select id from whatsapp_draft)$$,
-  '23514',
-  'new row for relation "notification_template_configs" violates check constraint "notification_template_configs_whatsapp_draft_check"',
-  'database invariant rejects direct WhatsApp activation'
+  'database allows activating a WhatsApp template after go-live'
 );
 
 select * from finish();
