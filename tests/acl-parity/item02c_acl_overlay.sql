@@ -29,6 +29,8 @@
 -- customer eligibility, candidate list and customer-anchored issuance.
 -- Notification trigger controls add one service-only SECURITY DEFINER RPC that saves only the
 -- trigger (schedule and services) of a template.
+-- Rewards referral adds three service-only functions: same-person check, checkout referral rule
+-- and referral code creation.
 do $$
 declare
   v_identity text;
@@ -543,11 +545,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 503 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=503 actual=%', v_public_function_count;
+  if v_public_function_count <> 506 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=506 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 430 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=430 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 433 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=433 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
