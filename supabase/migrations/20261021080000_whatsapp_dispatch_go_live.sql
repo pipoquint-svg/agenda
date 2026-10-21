@@ -1,7 +1,8 @@
 -- Libera o envio de WhatsApp para clientes (decisão do usuário em 2026-10-21).
 --   * remove a trava notification_template_configs_whatsapp_locked e a regra antiga
 --     notification_template_configs_whatsapp_draft_check (mesma condição, da época
---     em que WhatsApp só podia ser rascunho);
+--     em que WhatsApp só podia ser rascunho), trocando-as por uma regra que só deixa
+--     ativar WhatsApp nos eventos de reserva que o whatsapp-send atende;
 --   * define quem responde pelos envios automáticos no Dracma quando ainda não há
 --     ninguém: o único OWNER ativo do tenant da integração (nunca adivinha se houver
 --     mais de um);
@@ -13,6 +14,15 @@ alter table public.notification_template_configs
   drop constraint if exists notification_template_configs_whatsapp_locked;
 alter table public.notification_template_configs
   drop constraint if exists notification_template_configs_whatsapp_draft_check;
+-- No lugar delas, só os eventos que o whatsapp-send atende podem ter modelo de
+-- WhatsApp ativo; Rewards e os demais continuam sempre inativos.
+alter table public.notification_template_configs
+  add constraint notification_template_configs_whatsapp_dispatchable_events
+  check (
+    channel <> 'WHATSAPP'
+    or is_active = false
+    or event_key in ('APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED')
+  );
 
 update public.whatsapp_tenant_integrations i
 set dispatch_admin_id = owners.user_id
