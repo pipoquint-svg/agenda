@@ -1,3 +1,4 @@
+import { durationLabel } from './duration-label.ts'
 import { notificationSenderForScope, sendEmailWithProvider, type EmailProviderPayload } from './email-provider.ts'
 import { isRecipientAllowed, isScopeEnabled, maskEmail, normalizedEmail } from './transactional-email.ts'
 import {
@@ -145,7 +146,7 @@ export async function sendPaymentResumeEmail(
       'service.name': String(appointment.service_name_snapshot ?? service.name ?? ''),
       'appointment.public_code': String(appointment.public_code ?? ''),
       'appointment.start_at': dateTime(appointment.start_at),
-      'appointment.duration': `${Math.max(0, Math.round(Number(appointment.duration_minutes ?? 0)))} min`,
+      'appointment.duration': durationLabel(appointment.duration_minutes),
       'payment.expires_at': dateTime(appointment.hold_expires_at),
       'payment.resume_url': resumeUrl,
     }
