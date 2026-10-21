@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(15);
+select plan(16);
 
 insert into public.tenants(id, name, slug, status)
 values ('17700000-0000-4000-8000-000000000099', 'Other tenant', 'rewards-177-other', 'ACTIVE');
@@ -120,6 +120,12 @@ select is(
   (select count(*)::integer from public.integration_jobs where payload_json->>'event_key' like 'REWARDS_%'),
   0,
   'no delivery job exists for Rewards events'
+);
+
+select lives_ok(
+  $$insert into public.notification_whatsapp_settings(template_id, category, button_text, button_variable)
+    values (current_setting('agenda.r177.issued')::uuid, 'MARKETING', 'Reservar com cupom', 'booking.url')$$,
+  'a Rewards draft may carry a button to the booking page'
 );
 
 select * from finish();

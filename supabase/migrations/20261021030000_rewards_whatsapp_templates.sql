@@ -44,6 +44,24 @@ alter table public.notification_template_configs
     )
   );
 
+-- Rewards messages may carry a button to the public booking page.
+alter table public.notification_whatsapp_settings
+  drop constraint notification_whatsapp_settings_button_check;
+
+alter table public.notification_whatsapp_settings
+  add constraint notification_whatsapp_settings_button_check check (
+    (button_text is null and button_variable is null)
+    or (
+      button_text is not null
+      and button_variable is not null
+      and char_length(button_text) between 1 and 25
+      and button_text !~ '\{\{'
+      and button_variable in (
+        'appointment.manage_url', 'pre_reservation.payment_url', 'balance.payment_url', 'payment.resume_url', 'booking.url'
+      )
+    )
+  );
+
 -- One template per campaign and event. The template itself lives in
 -- notification_template_configs, so versions, WhatsApp fields and Meta
 -- submissions reuse the rental notification machinery.

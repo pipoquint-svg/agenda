@@ -33,6 +33,7 @@ export const WHATSAPP_BUTTON_VARIABLES = [
   'pre_reservation.payment_url',
   'balance.payment_url',
   'payment.resume_url',
+  'booking.url',
 ]
 const MAX_BUTTON_TEXT_LENGTH = 25
 
