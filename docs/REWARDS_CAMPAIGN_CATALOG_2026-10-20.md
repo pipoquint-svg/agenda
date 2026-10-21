@@ -6,9 +6,9 @@ Product decisions taken by the owner while building the Rewards WhatsApp editor 
 
 | Campaign | Rule | Messages (one set per campaign) | Engine status |
 |---|---|---|---|
-| Coupon after each rental | Every completed and paid rental releases a coupon valid for 30 days to confirm a new booking. This also covers the second rental. | `REWARDS_COUPON_ISSUED`, `REWARDS_COUPON_EXPIRING` | Trigger `RENTAL_COMPLETED_FINANCIALLY_CLEARED` implemented (S3) |
-| Come back after 90 days | A customer with no rental for 90 days receives a 30-day coupon. | `REWARDS_WINBACK`, `REWARDS_COUPON_EXPIRING` | Trigger kind `INACTIVITY` exists in the schema; evaluation not implemented |
-| After the free visit | Whoever completed the free studio visit receives a 30-day coupon. | The campaign's own `REWARDS_COUPON_ISSUED` text, `REWARDS_COUPON_EXPIRING` | New trigger needed (visit completed) |
+| Coupon after each rental | Every completed and paid rental releases a coupon valid for 30 days to confirm a new booking. This also covers the second rental. | `REWARDS_COUPON_ISSUED`, `REWARDS_COUPON_EXPIRING` | Implemented (S3; realized rule and legacy fallback since 2026-10-21) |
+| Come back after 90 days | A customer with no rental for 90 days receives a 30-day coupon. | `REWARDS_WINBACK`, `REWARDS_COUPON_EXPIRING` | Implemented 2026-10-21: customer-anchored evaluator, candidate list, issuance |
+| After the free visit | Whoever completed the free studio visit receives a 30-day coupon. | The campaign's own `REWARDS_COUPON_ISSUED` text, `REWARDS_COUPON_EXPIRING` | Implemented 2026-10-21: `FREE_VISIT_COMPLETED` |
 | Referral | See below. | `REWARDS_REFERRAL_CODE`, `REWARDS_REFERRAL_REWARD` | New: personal code + attribution + reward trigger |
 
 Not now: off-season or idle-slot coupons, upgrade to half day, loyalty by accumulated hours.
@@ -26,3 +26,17 @@ Guards for the engine PR:
 
 ## Message variables
 `customer.name`, `customer.last_rental_at`, `campaign.name`, `coupon.code`, `coupon.discount`, `coupon.expires_at`, `coupon.days_left`, `referral.code`, `referral.referred_name`, `operation.name`, `operation.site_url`, `booking.url`.
+
+## Engine rules (decisions of 2026-10-21)
+- **Realized** means COMPLETED, or CONFIRMED with its scheduled end in the past (same rule as finance). Production never marks reservations COMPLETED today, so the rental trigger uses this rule too.
+- **Reservations without the S3 snapshot** (almost all before 2026-10-16) are classified by the service as registered today. Free visits (`booking_product_type = FREE_VISIT`) are never rentals.
+- **Come back after 90 days** is anchored on the customer:
+  - the last rental is the latest realized BlackSheep rental in the Agenda or in the linked Amelia history (`matched_customer_id`);
+  - no coupon if the customer has a booking ahead or is anonymized;
+  - one coupon per absence.
+
+  The absence window comes from `trigger_rules.inactivity_days`: 30 to 365, default 90.
+- **After the visit:** the visit must be realized and the customer must never have rented; one coupon per customer and campaign.
+- `service_list_marketing_campaign_candidates` lists who would receive the coupon now. It is read-only and no job calls it yet.
+
+Delivery stays frozen: nothing issues coupons or sends messages until it is explicitly released.

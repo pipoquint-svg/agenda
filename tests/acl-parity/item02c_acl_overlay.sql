@@ -25,6 +25,8 @@
 -- Public studio stats adds one SECURITY DEFINER aggregate RPC for the home page,
 -- executable by anon, authenticated and service_role; it returns three counts only.
 -- Rewards WhatsApp templates add one service-only SECURITY DEFINER upsert RPC.
+-- Rewards inactivity/visit triggers add five service-only functions: source kind, last rental,
+-- customer eligibility, candidate list and customer-anchored issuance.
 do $$
 declare
   v_identity text;
@@ -539,11 +541,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 497 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=497 actual=%', v_public_function_count;
+  if v_public_function_count <> 502 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=502 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 424 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=424 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 429 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=429 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

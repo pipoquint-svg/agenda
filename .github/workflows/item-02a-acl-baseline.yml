@@ -33,6 +33,10 @@ on:
       - 'supabase/migrations/20261017220000_public_studio_stats.sql'
       - 'supabase/tests/database/173_public_studio_stats.test.sql'
       - 'supabase/migrations/20261021030000_rewards_whatsapp_templates.sql'
+      - 'supabase/migrations/20261021060000_rewards_inactivity_visit_triggers.sql'
+      - 'supabase/tests/database/178_rewards_inactivity_visit_triggers.test.sql'
+      - 'supabase/migrations/20261021040000_whatsapp_template_versions.sql'
+      - 'supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql'
       - 'supabase/tests/database/177_rewards_message_templates.test.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
@@ -156,7 +160,10 @@ jobs:
             supabase/migrations/20261020230000_notification_whatsapp_settings.sql \
             supabase/migrations/20261021000000_notification_whatsapp_button.sql \
             supabase/migrations/20261021010000_appointment_change_notifications.sql \
-            supabase/migrations/20261021030000_rewards_whatsapp_templates.sql
+            supabase/migrations/20261021030000_rewards_whatsapp_templates.sql \
+            supabase/migrations/20261021060000_rewards_inactivity_visit_triggers.sql \
+            supabase/migrations/20261021040000_whatsapp_template_versions.sql \
+            supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -252,7 +259,10 @@ jobs:
             supabase/migrations/20261020230000_notification_whatsapp_settings.sql \
             supabase/migrations/20261021000000_notification_whatsapp_button.sql \
             supabase/migrations/20261021010000_appointment_change_notifications.sql \
-            supabase/migrations/20261021030000_rewards_whatsapp_templates.sql
+            supabase/migrations/20261021030000_rewards_whatsapp_templates.sql \
+            supabase/migrations/20261021060000_rewards_inactivity_visit_triggers.sql \
+            supabase/migrations/20261021040000_whatsapp_template_versions.sql \
+            supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
