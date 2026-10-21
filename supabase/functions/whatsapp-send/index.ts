@@ -10,6 +10,7 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { callDracmaGateway } from '../_shared/dracma-gateway.ts'
+import { durationLabel } from '../_shared/duration-label.ts'
 import { customerLinkSuffix, type CustomerLinkVariable } from '../_shared/customer-link.ts'
 import {
   beginNotificationDelivery,
@@ -158,7 +159,7 @@ async function send(body: Record<string, unknown>) {
       'appointment.public_code': String(appointment.public_code ?? ''),
       'appointment.start_at': dateTime(appointment.start_at),
       'appointment.end_at': dateTime(appointment.end_at),
-      'appointment.duration': `${Math.max(0, Math.round(numeric(appointment.duration_minutes)))} min`,
+      'appointment.duration': durationLabel(appointment.duration_minutes),
       'appointment.manage_url': manageUrl,
       'appointment.previous_start_at': body.previous_start_at ? dateTime(body.previous_start_at) : '',
       'customer.name': String(customer.name ?? ''),
