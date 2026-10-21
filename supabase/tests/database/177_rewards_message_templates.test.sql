@@ -112,9 +112,10 @@ select throws_ok(
   'the rental editor path cannot create Rewards drafts'
 );
 select throws_ok(
-  $$update public.notification_template_configs set is_active = true where id = current_setting('agenda.r177.issued')::uuid$$,
+  $$update public.notification_template_configs set is_active = true where id = (select template_id from public.marketing_campaign_message_templates
+    where campaign_id = '17700000-0000-4000-8000-000000000010' and event_key = 'REWARDS_WINBACK')$$,
   '23514', null,
-  'a Rewards WhatsApp draft can never be activated'
+  'a Rewards WhatsApp draft other than the coupon message (scheduled since 2026-10-21) can never be activated'
 );
 select is(
   (select count(*)::integer from public.integration_jobs where payload_json->>'event_key' like 'REWARDS_%'),

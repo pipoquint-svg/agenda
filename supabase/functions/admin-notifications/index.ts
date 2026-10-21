@@ -302,7 +302,7 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
   const templateIds = records(links).map((row) => String(row.template_id))
   const { data: rows, error: rowsError } = templateIds.length
     ? await client.from('notification_template_configs')
-      .select('id,event_key,channel,audience,operation_scope,title_template,body_template,is_active,variable_schema,updated_at')
+      .select('id,event_key,channel,audience,operation_scope,title_template,body_template,is_active,variable_schema,updated_at,schedule_mode,schedule_offset_minutes')
       .in('id', templateIds)
     : { data: [], error: null }
   if (rowsError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
@@ -334,6 +334,22 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
         .filter(([key]) => visibleVariables.includes(key))),
     },
   }
+}
+
+/** A "Cupom Rewards liberado" message of a campaign of the admin's tenant. */
+async function rewardsCouponTemplate(authUserId: string, templateId: string) {
+  const client = adminClient()
+  const { data: link, error: linkError } = await client.from('marketing_campaign_message_templates')
+    .select('campaign_id,event_key').eq('template_id', templateId).maybeSingle()
+  if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  if (!link) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+  if (link.event_key !== 'REWARDS_COUPON_ISSUED') throw new Error('REWARDS_TRIGGER_NOT_SUPPORTED')
+  const { tenant } = await rewardsCampaign(authUserId, String(link.campaign_id))
+  const { data: template, error } = await client.from('notification_template_configs')
+    .select('id,is_active,schedule_mode,updated_at').eq('id', templateId).maybeSingle()
+  if (error) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+  if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+  return { tenantId: tenant.id, is_active: template.is_active === true, schedule_mode: template.schedule_mode, updated_at: String(template.updated_at ?? '') }
 }
 
 async function saveRewardsTemplate(admin: { adminId: string; authUserId: string }, record: Record<string, unknown>) {
@@ -727,6 +743,46 @@ Deno.serve(async (req) => {
 
     if (req.method === 'POST' && action === 'SAVE_REWARDS_TEMPLATE') {
       return json(await saveRewardsTemplate(admin, record), 200)
+    }
+
+    // Rewards "Cupom Rewards liberado": when it goes out (N minutes after the reservation
+    // ends) and whether it is on. Same rules as the reservation messages.
+    if (req.method === 'POST' && (action === 'SAVE_REWARDS_TRIGGER' || action === 'SET_REWARDS_ACTIVE')) {
+      const templateId = uuid(record.template_id) as string
+      const template = await rewardsCouponTemplate(admin.authUserId, templateId)
+      if (action === 'SAVE_REWARDS_TRIGGER') {
+        const offset = integer(record.schedule_offset_minutes)
+        if (offset === null || offset < 1 || offset > 1440) throw new Error('NOTIFICATION_SCHEDULE_OFFSET_INVALID')
+        const { error } = await client.rpc('service_admin_update_notification_trigger_v1', {
+          p_template_id: templateId,
+          p_schedule_mode: 'AFTER_END',
+          p_schedule_offset_minutes: offset,
+          p_service_ids: [],
+          p_actor_admin_id: admin.adminId,
+        })
+        if (error) throw new Error(error.message)
+        return json({ id: templateId, schedule_mode: 'AFTER_END', schedule_offset_minutes: offset }, 200)
+      }
+      const active = record.is_active === true
+      if (active) {
+        if (template.schedule_mode !== 'AFTER_END') throw new Error('REWARDS_TRIGGER_REQUIRED')
+        const { data: submission, error: submissionError } = await client.from('whatsapp_template_submissions')
+          .select('status,submitted_at').eq('tenant_id', template.tenantId).eq('notification_template_id', templateId).maybeSingle()
+        if (submissionError) throw new Error('WHATSAPP_SUBMISSION_LOOKUP_FAILED')
+        if (submission?.status !== 'APPROVED') throw new Error('WHATSAPP_TEMPLATE_NOT_APPROVED')
+        const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+        const edited = latest(template.updated_at, settings?.updated_at)
+        if (edited && submission.submitted_at && edited > String(submission.submitted_at)) throw new Error('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
+      }
+      const { error: updateError } = await client.from('notification_template_configs')
+        .update({ is_active: active, updated_by_admin_id: admin.adminId }).eq('id', templateId)
+      if (updateError) throw new Error('NOTIFICATION_TEMPLATE_UPDATE_FAILED')
+      await client.from('audit_logs').insert({
+        admin_user_id: admin.adminId, entity_type: 'NOTIFICATION_TEMPLATE', entity_id: templateId,
+        action: active ? 'WHATSAPP_ACTIVATE' : 'WHATSAPP_DEACTIVATE',
+        before_json: { is_active: template.is_active }, after_json: { is_active: active }, origin: 'ADMIN',
+      })
+      return json({ id: templateId, is_active: active }, 200)
     }
 
     // Liga ou desliga o envio de um modelo de WhatsApp. Ligar só vale para o texto

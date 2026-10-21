@@ -50,3 +50,12 @@ Delivery stays frozen: nothing issues coupons or sends messages until it is expl
 ## Editing and deleting campaigns (2026-10-21)
 - **Edit:** the name, public name and description change in place. A new offer (trigger, discount, services, validity) becomes a new version; earlier versions stay as history. The offer of an active or scheduled campaign cannot change: pause it first. A paused campaign keeps its published version until it is resumed, which publishes the new one.
 - **Delete:** a draft that was never activated, issued nothing, has no referral code and sent no message to Meta is removed, together with its message drafts; a snapshot stays in `audit_logs`. Any other campaign is archived, so coupons already issued keep working and the history is preserved.
+
+## Coupon dispatch after the reservation (2026-10-21)
+The "Cupom Rewards liberado" message uses the same scheduled path as the rental balance message:
+- **When:** N minutes after the reservation ends (`AFTER_END`, 1 to 1440 minutes), set on the message in Gestão. No other Rewards message has a reservation trigger.
+- **What happens:** `whatsapp-send` checks everything that could stop the message (message on, approved by Meta and unchanged, campaign active, valid phone, WhatsApp connected). Then it issues the campaign coupon (S4, one per campaign and reservation) and sends it in the same step. No message, no coupon.
+- **Unpaid:** the message waits. When a reservation that already ended becomes PAID within 7 days, it is queued again right away.
+- **Changed reservations:** a change does not matter. Issuance and delivery are keyed on the reservation, not its version; a moved reservation is sent after its new end.
+- **Campaigns:** only campaigns given by a reservation (after each rental, after the visit). Win-back and referral are not sent this way yet.
+- **Switches:** the message's on/off switch in Gestão, the campaign state, and `WHATSAPP_CUSTOMER_DISPATCH_ENABLED`.

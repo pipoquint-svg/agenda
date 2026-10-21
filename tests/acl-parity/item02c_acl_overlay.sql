@@ -32,6 +32,7 @@
 -- Rewards referral adds three service-only functions: same-person check, checkout referral rule
 -- and referral code creation.
 -- Campaign edit and delete add two service-only admin actions.
+-- Rewards coupon dispatch adds one trigger function with no EXECUTE grant.
 do $$
 declare
   v_identity text;
@@ -546,8 +547,8 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 508 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=508 actual=%', v_public_function_count;
+  if v_public_function_count <> 509 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=509 actual=%', v_public_function_count;
   end if;
   if v_service_role_execute_count <> 435 then
     raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=435 actual=%', v_service_role_execute_count;

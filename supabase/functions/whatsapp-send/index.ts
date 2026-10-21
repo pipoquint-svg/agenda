@@ -22,6 +22,18 @@ import {
 } from '../_shared/notification-email.ts'
 import { type WhatsAppSettings, whatsappTemplateParameters } from '../admin-notifications/whatsapp-template.ts'
 import { maskPhone, testRecipient } from '../admin-notifications/test-send.ts'
+import { BOOKING_URL } from '../_shared/customer-link.ts'
+import {
+  APPOINTMENT_TRIGGERS,
+  couponDateLabel,
+  couponDaysLeft,
+  couponDiscountLabel,
+  issuanceKey,
+  REWARDS_COUPON_EVENT,
+  rewardsDeliveryKey,
+  rewardsScheduleMatches,
+  rewardsSkipReason,
+} from './rewards.ts'
 
 const SCOPE = 'BLACKSHEEP'
 const IMMEDIATE_EVENTS = ['APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED']
@@ -51,6 +63,142 @@ function dateTime(value: unknown) {
 const latest = (...values: (string | null | undefined)[]) =>
   values.filter((v): v is string => !!v).sort().at(-1) ?? null
 
+/**
+ * Rewards coupon message: everything that could stop the message is checked first, then
+ * the coupon is issued (S4, once per campaign and reservation) and sent with it. No message,
+ * no coupon. Unpaid reservations wait for the payment trigger.
+ */
+async function sendRewardsCoupon(appointmentId: string, scheduleKey: string, templateId: string) {
+  const client = adminClient()
+  if (!scheduleKey || !templateId) return skip('WHATSAPP_EVENT_NOT_SUPPORTED')
+  const { data: template, error: templateError } = await client.from('notification_template_configs')
+    .select('id,event_key,channel,audience,is_active,schedule_mode,schedule_offset_minutes,body_template,variable_schema,updated_at')
+    .eq('id', templateId).maybeSingle()
+  if (templateError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+  if (!template || template.channel !== 'WHATSAPP' || template.audience !== 'CUSTOMER' || template.event_key !== REWARDS_COUPON_EVENT) {
+    return skip('WHATSAPP_TEMPLATE_NOT_FOUND')
+  }
+  if (template.is_active !== true) return skip('WHATSAPP_TEMPLATE_NOT_ACTIVE')
+  if (!rewardsScheduleMatches(scheduleKey, template)) return skip('WHATSAPP_SCHEDULE_CHANGED')
+
+  const { data: link, error: linkError } = await client.from('marketing_campaign_message_templates')
+    .select('campaign_id').eq('template_id', templateId).maybeSingle()
+  if (linkError) throw new Error('REWARDS_TEMPLATE_CAMPAIGN_LOOKUP_FAILED')
+  if (!link) return skip('REWARDS_CAMPAIGN_NOT_FOUND')
+  const campaignId = String(link.campaign_id)
+  const { data: campaign, error: campaignError } = await client.from('marketing_campaigns')
+    .select('id,internal_name,public_name,state,active_version_id').eq('id', campaignId).maybeSingle()
+  if (campaignError) throw new Error('REWARDS_CAMPAIGN_LOOKUP_FAILED')
+  if (!campaign || campaign.state !== 'ACTIVE' || !campaign.active_version_id) return skip('REWARDS_CAMPAIGN_NOT_ACTIVE')
+  const { data: version, error: versionError } = await client.from('marketing_campaign_versions')
+    .select('trigger_kind').eq('id', campaign.active_version_id).maybeSingle()
+  if (versionError) throw new Error('REWARDS_CAMPAIGN_LOOKUP_FAILED')
+  if (!APPOINTMENT_TRIGGERS.includes(String(version?.trigger_kind ?? ''))) return skip('REWARDS_TRIGGER_NOT_APPOINTMENT_BASED')
+
+  const { data: appointment, error: appointmentError } = await client.from('appointments')
+    .select('id,service_id,primary_customer_id,status,end_at').eq('id', appointmentId).maybeSingle()
+  if (appointmentError) throw new Error('APPOINTMENT_LOOKUP_FAILED')
+  if (!appointment) throw new Error('APPOINTMENT_NOT_FOUND')
+  if (!['CONFIRMED', 'COMPLETED'].includes(String(appointment.status))) return skip('APPOINTMENT_STATUS_CHANGED')
+  if (!appointment.primary_customer_id) return skip('WHATSAPP_CUSTOMER_MISSING')
+  const [{ data: service }, { data: customer }] = await Promise.all([
+    client.from('services').select('operation_scope').eq('id', appointment.service_id).maybeSingle(),
+    client.from('customers').select('id,name,phone').eq('id', appointment.primary_customer_id).maybeSingle(),
+  ])
+  if (!service || !customer) throw new Error('APPOINTMENT_CONTEXT_LOOKUP_FAILED')
+  if (String(service.operation_scope ?? '').toUpperCase() !== SCOPE) return skip('WHATSAPP_SCOPE_NOT_CONNECTED')
+  let phone: string
+  try {
+    phone = testRecipient(customer.phone)
+  } catch {
+    return skip('WHATSAPP_RECIPIENT_MISSING_OR_INVALID')
+  }
+
+  const { data: integration } = await client.from('whatsapp_tenant_integrations')
+    .select('tenant_id,dispatch_admin_id,tenants(id,name)').eq('status', 'CONNECTED')
+    .not('dispatch_admin_id', 'is', null).order('updated_at', { ascending: false }).limit(1).maybeSingle()
+  const tenantRow = (integration as { tenants?: { id: string; name: string } } | null)?.tenants
+  if (!integration || !tenantRow) return skip('WHATSAPP_NOT_CONNECTED')
+  const tenant = { id: String(tenantRow.id), name: String(tenantRow.name) }
+  const [{ data: submission }, { data: settingsRow }] = await Promise.all([
+    client.from('whatsapp_template_submissions').select('status,provider_template_name,submitted_at')
+      .eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle(),
+    client.from('notification_whatsapp_settings')
+      .select('category,header_text,footer_text,ttl_seconds,variable_examples,button_text,button_variable,updated_at')
+      .eq('template_id', templateId).maybeSingle(),
+  ])
+  if (submission?.status !== 'APPROVED' || !submission.provider_template_name) return skip('WHATSAPP_TEMPLATE_NOT_APPROVED')
+  const edited = latest(String(template.updated_at ?? ''), settingsRow?.updated_at ? String(settingsRow.updated_at) : null)
+  if (edited && submission.submitted_at && edited > String(submission.submitted_at)) return skip('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
+
+  const { data: previous } = await client.from('notification_delivery_logs').select('status,provider_message_id')
+    .eq('idempotency_key', rewardsDeliveryKey(templateId, appointmentId)).maybeSingle()
+  if (previous?.status === 'SENT' || previous?.provider_message_id) return skip('NOTIFICATION_ALREADY_SENT')
+
+  // The message can go out: issue the coupon (a retry gets the same coupon back).
+  const { data: issued, error: issueError } = await client.rpc('service_issue_marketing_campaign_coupon', {
+    p_campaign_id: campaignId,
+    p_source_appointment_id: appointmentId,
+    p_idempotency_key: issuanceKey(campaignId, appointmentId),
+  })
+  if (issueError) {
+    if (issueError.message === 'MARKETING_CAMPAIGN_ISSUANCE_INELIGIBLE') return skip(rewardsSkipReason(String(issueError.details ?? '')))
+    throw new Error('REWARDS_COUPON_ISSUE_FAILED')
+  }
+  if (String(issued?.customer_id ?? '') !== String(customer.id)) throw new Error('REWARDS_COUPON_CUSTOMER_MISMATCH')
+  const { data: coupon, error: couponError } = await client.from('coupons')
+    .select('code,discount_type,discount_value,valid_until').eq('id', issued.coupon_id).maybeSingle()
+  if (couponError || !coupon) throw new Error('REWARDS_COUPON_LOOKUP_FAILED')
+
+  const delivery = await beginNotificationDelivery(client, {
+    templateId,
+    eventKey: REWARDS_COUPON_EVENT,
+    audience: 'CUSTOMER',
+    appointmentId,
+    customerId: String(customer.id),
+    recipient: phone,
+    recipientMasked: maskPhone(phone),
+    channel: 'WHATSAPP',
+    idempotencyKey: rewardsDeliveryKey(templateId, appointmentId),
+    payloadSnapshot: { template_id: templateId, appointment_id: appointmentId, campaign_id: campaignId, coupon_id: issued.coupon_id, schedule_key: scheduleKey },
+  })
+  if (delivery.alreadySent) return skip('NOTIFICATION_ALREADY_SENT')
+  try {
+    const catalog = [...templateVariableKeys(template.variable_schema)]
+    const settings = settingsRow as unknown as WhatsAppSettings | null
+    const values: Record<string, string> = {
+      'customer.name': String(customer.name ?? ''),
+      'customer.last_rental_at': couponDateLabel(appointment.end_at),
+      'campaign.name': String(campaign.public_name || campaign.internal_name || ''),
+      'coupon.code': String(coupon.code),
+      'coupon.discount': couponDiscountLabel(coupon.discount_type, coupon.discount_value),
+      'coupon.expires_at': couponDateLabel(coupon.valid_until),
+      'coupon.days_left': couponDaysLeft(coupon.valid_until),
+      'operation.name': 'BlackSheep Estúdio Criativo',
+      'operation.site_url': 'https://www.blacksheepestudiocriativo.com.br',
+      'booking.url': BOOKING_URL,
+    }
+    const parameters = whatsappTemplateParameters({
+      body: String(template.body_template ?? ''),
+      catalog: [...catalog, ...(settings?.button_variable ? [settings.button_variable] : [])],
+      settings,
+      values,
+      buttonSuffix: (variable, url) => customerLinkSuffix(variable as CustomerLinkVariable, url),
+    })
+    const sent = await callDracmaGateway({
+      operation: 'SEND_TEMPLATE',
+      tenant,
+      adminId: String(integration.dispatch_admin_id),
+      payload: { name: submission.provider_template_name, language: 'pt_BR', to: phone, ...parameters },
+    })
+    await markNotificationSent(client, delivery.id, typeof sent.message_id === 'string' ? sent.message_id : null)
+    return jsonResponse({ skipped: false, event_key: REWARDS_COUPON_EVENT, recipient_masked: maskPhone(phone), template_id: templateId, coupon_id: issued.coupon_id })
+  } catch (error) {
+    await markNotificationFailed(client, delivery.id, error)
+    throw error
+  }
+}
+
 async function send(body: Record<string, unknown>) {
   if ((Deno.env.get('WHATSAPP_CUSTOMER_DISPATCH_ENABLED') ?? '').trim().toLowerCase() !== 'true') {
     return skip('WHATSAPP_DISPATCH_DISABLED')
@@ -62,6 +210,7 @@ async function send(body: Record<string, unknown>) {
   if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
   if (!Number.isInteger(entityVersion) || entityVersion < 1) throw new Error('ENTITY_VERSION_REQUIRED')
   const scheduleKey = String(body.schedule_key ?? '').trim()
+  if (eventKey === REWARDS_COUPON_EVENT) return await sendRewardsCoupon(appointmentId, scheduleKey, String(body.template_id ?? '').trim())
   if (!(scheduleKey ? SCHEDULED_EVENTS : IMMEDIATE_EVENTS).includes(eventKey)) {
     return skip('WHATSAPP_EVENT_NOT_SUPPORTED')
   }
