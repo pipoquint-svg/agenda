@@ -173,6 +173,7 @@ jobs:
             supabase/migrations/20261021090000_notification_trigger_controls.sql \
             supabase/migrations/20261021100000_rewards_referral.sql \
             supabase/migrations/20261021110000_whatsapp_scheduled_dispatch.sql \
+            supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql \
             supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql
           do
             filename="$(basename "$migration")"
@@ -278,6 +279,7 @@ jobs:
             supabase/migrations/20261021090000_notification_trigger_controls.sql \
             supabase/migrations/20261021100000_rewards_referral.sql \
             supabase/migrations/20261021110000_whatsapp_scheduled_dispatch.sql \
+            supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql \
             supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql
           do
             filename="$(basename "$migration")"
