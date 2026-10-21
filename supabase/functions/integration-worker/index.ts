@@ -283,6 +283,30 @@ Deno.serve(async (req) => {
           const reason = typeof job.payload_json?.reason === 'string' ? job.payload_json.reason : 'CONFIRMED'
           const eventKey = typeof job.payload_json?.event_key === 'string' ? job.payload_json.event_key : 'APPOINTMENT_APPROVED'
           const scheduleKey = typeof job.payload_json?.schedule_key === 'string' ? job.payload_json.schedule_key : ''
+          // Mensagem de WhatsApp com prazo: só o whatsapp-send, sem e-mail.
+          if (job.job_type === 'APPOINTMENT_SCHEDULED_MESSAGE' && job.payload_json?.channel === 'WHATSAPP') {
+            const result = await invokeFunction<{ stale?: boolean; current_version?: number }>('whatsapp-send', secret, {
+              appointment_id: job.entity_id,
+              entity_version: job.entity_version,
+              event_key: eventKey,
+              schedule_key: scheduleKey,
+              template_id: typeof job.payload_json?.template_id === 'string' ? job.payload_json.template_id : '',
+            })
+            if (result.stale) {
+              await discardStaleJob(client, job, workerId, result.current_version, 'APPOINTMENT_SCHEDULED_WHATSAPP_STALE_VERSION_MISSING')
+              discardedStale += 1
+              continue
+            }
+            await client.rpc('finish_integration_job', {
+              p_job_id: job.id,
+              p_worker_id: workerId,
+              p_succeeded: true,
+              p_error: null,
+              p_retry_after_seconds: null,
+            })
+            succeeded += 1
+            continue
+          }
           // WhatsApp da reserva: tentativa à parte e sem efeito no e-mail. O whatsapp-send
           // tem as próprias travas (chave de ambiente + nenhum modelo de WhatsApp ativo)
           // e não duplica envio quando o trabalho é repetido.
