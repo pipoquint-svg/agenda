@@ -40,6 +40,7 @@ on:
       - 'supabase/migrations/20261021070000_whatsapp_customer_dispatch.sql'
       - 'supabase/migrations/20261021100000_rewards_referral.sql'
       - 'supabase/tests/database/179_rewards_referral.test.sql'
+      - 'supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql'
       - 'supabase/tests/database/177_rewards_message_templates.test.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
@@ -172,7 +173,8 @@ jobs:
             supabase/migrations/20261021090000_notification_trigger_controls.sql \
             supabase/migrations/20261021100000_rewards_referral.sql \
             supabase/migrations/20261021110000_whatsapp_scheduled_dispatch.sql \
-            supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql
+            supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql \
+            supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -277,7 +279,8 @@ jobs:
             supabase/migrations/20261021090000_notification_trigger_controls.sql \
             supabase/migrations/20261021100000_rewards_referral.sql \
             supabase/migrations/20261021110000_whatsapp_scheduled_dispatch.sql \
-            supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql
+            supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql \
+            supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then

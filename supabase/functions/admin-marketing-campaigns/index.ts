@@ -50,6 +50,54 @@ function discount(value: unknown, type: string) {
   ) throw new Error("MARKETING_CAMPAIGN_DISCOUNT_INVALID");
   return result;
 }
+function offerFrom(body: Record<string, unknown>) {
+  const discountType = text(body.discount_type)
+    .toUpperCase();
+  if (!["PERCENT", "FIXED"].includes(discountType)) {
+    throw new Error("MARKETING_CAMPAIGN_DISCOUNT_TYPE_INVALID");
+  }
+  const serviceIds = body.service_ids;
+  if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
+    throw new Error("MARKETING_CAMPAIGN_TARGET_SERVICES_REQUIRED");
+  }
+  const trigger = triggerOffer(body);
+  const offer = {
+    trigger_kind: trigger.trigger_kind,
+    discount_type: discountType,
+    discount_value: discount(
+      body.discount_value,
+      discountType,
+    ),
+    discount_scope: "SERVICE_ONLY",
+    validity_basis: text(body.validity_basis)
+      .toUpperCase(),
+    validity_days: positiveInteger(
+      body.validity_days,
+      "MARKETING_CAMPAIGN_VALIDITY_INVALID",
+    ),
+    max_uses: 1,
+    max_uses_per_customer: 1,
+    applies_to_extras: false,
+    applies_to_hour_packages: false,
+    stacking_policy: "EXCLUSIVE",
+    recurring_after_discounted_rental: recurrenceOption(
+      body.recurring_after_discounted_rental,
+    ),
+    eligibility_rules: {
+      service_ids: serviceIds.map((id) =>
+        uuid(id, "MARKETING_CAMPAIGN_TARGET_SERVICE_INVALID")
+      ),
+    },
+    trigger_rules: trigger.trigger_rules,
+    message_rules: {},
+  };
+  if (
+    !["BOOKING_CONFIRMATION", "RENTAL_START"].includes(
+      String(offer.validity_basis),
+    )
+  ) throw new Error("MARKETING_CAMPAIGN_VALIDITY_BASIS_INVALID");
+  return offer;
+}
 async function tenantForAdmin(authUserId: string) {
   const client = adminClient();
   const { data, error } = await client.from("tenant_members").select(
@@ -116,51 +164,7 @@ Deno.serve(async (req) => {
       "MARKETING_CAMPAIGN_REQUEST_ID_INVALID",
     );
     if (action === "CREATE") {
-      const discountType = text((body as Record<string, unknown>).discount_type)
-        .toUpperCase();
-      if (!["PERCENT", "FIXED"].includes(discountType)) {
-        throw new Error("MARKETING_CAMPAIGN_DISCOUNT_TYPE_INVALID");
-      }
-      const serviceIds = (body as Record<string, unknown>).service_ids;
-      if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
-        throw new Error("MARKETING_CAMPAIGN_TARGET_SERVICES_REQUIRED");
-      }
-      const trigger = triggerOffer(body as Record<string, unknown>);
-      const offer = {
-        trigger_kind: trigger.trigger_kind,
-        discount_type: discountType,
-        discount_value: discount(
-          (body as Record<string, unknown>).discount_value,
-          discountType,
-        ),
-        discount_scope: "SERVICE_ONLY",
-        validity_basis: text((body as Record<string, unknown>).validity_basis)
-          .toUpperCase(),
-        validity_days: positiveInteger(
-          (body as Record<string, unknown>).validity_days,
-          "MARKETING_CAMPAIGN_VALIDITY_INVALID",
-        ),
-        max_uses: 1,
-        max_uses_per_customer: 1,
-        applies_to_extras: false,
-        applies_to_hour_packages: false,
-        stacking_policy: "EXCLUSIVE",
-        recurring_after_discounted_rental: recurrenceOption(
-          (body as Record<string, unknown>).recurring_after_discounted_rental,
-        ),
-        eligibility_rules: {
-          service_ids: serviceIds.map((id) =>
-            uuid(id, "MARKETING_CAMPAIGN_TARGET_SERVICE_INVALID")
-          ),
-        },
-        trigger_rules: trigger.trigger_rules,
-        message_rules: {},
-      };
-      if (
-        !["BOOKING_CONFIRMATION", "RENTAL_START"].includes(
-          String(offer.validity_basis),
-        )
-      ) throw new Error("MARKETING_CAMPAIGN_VALIDITY_BASIS_INVALID");
+      const offer = offerFrom(body as Record<string, unknown>);
       const { data, error } = await client.rpc(
         "service_admin_create_marketing_campaign",
         {
@@ -208,6 +212,44 @@ Deno.serve(async (req) => {
             )
             : null,
           p_reason: text((body as Record<string, unknown>).reason) || null,
+          p_admin_id: admin.adminId,
+          p_request_id: requestId,
+        },
+      );
+      if (error) throw new Error(error.message);
+      return json(data);
+    }
+    if (action === "UPDATE") {
+      const fields = body as Record<string, unknown>;
+      const { data, error } = await client.rpc(
+        "service_admin_update_marketing_campaign",
+        {
+          p_tenant_id: tenantId,
+          p_campaign_id: uuid(
+            fields.campaign_id,
+            "MARKETING_CAMPAIGN_ID_INVALID",
+          ),
+          p_internal_name: text(fields.internal_name),
+          p_public_name: text(fields.public_name) || null,
+          p_description: text(fields.description) || null,
+          // Without update_offer only the names change; no new version is created.
+          p_offer: fields.update_offer === true ? offerFrom(fields) : null,
+          p_admin_id: admin.adminId,
+          p_request_id: requestId,
+        },
+      );
+      if (error) throw new Error(error.message);
+      return json(data);
+    }
+    if (action === "DELETE") {
+      const { data, error } = await client.rpc(
+        "service_admin_delete_marketing_campaign",
+        {
+          p_tenant_id: tenantId,
+          p_campaign_id: uuid(
+            (body as Record<string, unknown>).campaign_id,
+            "MARKETING_CAMPAIGN_ID_INVALID",
+          ),
           p_admin_id: admin.adminId,
           p_request_id: requestId,
         },
