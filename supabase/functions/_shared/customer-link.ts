@@ -9,7 +9,11 @@ export const CUSTOMER_LINK_VARIABLES = [
   'pre_reservation.payment_url',
   'balance.payment_url',
   'payment.resume_url',
+  'booking.url',
 ] as const
+
+/** Public booking page a Rewards message points to (same site as the other customer links). */
+export const BOOKING_URL = 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores'
 
 export type CustomerLinkVariable = typeof CUSTOMER_LINK_VARIABLES[number]
 
@@ -32,6 +36,8 @@ export function customerLinkSample(variable: CustomerLinkVariable): string {
     }
     case 'payment.resume_url':
       return `${paymentResumeBaseUrl()}/retomar-pagamento.html#token=${SAMPLE_TOKEN}`
+    case 'booking.url':
+      return BOOKING_URL
   }
 }
 

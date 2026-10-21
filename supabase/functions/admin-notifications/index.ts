@@ -46,6 +46,20 @@ const variables = [
   'pre_reservation.expires_at', 'pre_reservation.payment_url',
   'refund.amount', 'refund.error_code',
 ]
+// Rewards messages (one set per campaign) use their own catalog. They are drafts
+// only: nothing enqueues these events while Rewards delivery (S6) is frozen.
+const rewardsEvents = [
+  'REWARDS_WINBACK', 'REWARDS_COUPON_ISSUED', 'REWARDS_COUPON_EXPIRING', 'REWARDS_REFERRAL_CODE', 'REWARDS_REFERRAL_REWARD',
+]
+const rewardsVariables = [
+  'customer.name', 'customer.last_rental_at', 'campaign.name',
+  'coupon.code', 'coupon.discount', 'coupon.expires_at', 'coupon.days_left',
+  'referral.code', 'referral.referred_name',
+  'operation.name', 'operation.site_url', 'booking.url',
+]
+const isRewardsEvent = (eventKey: string) => rewardsEvents.includes(eventKey)
+const catalogFor = (eventKey: string) => isRewardsEvent(eventKey) ? rewardsVariables : variables
+
 const financialVariables = new Set([
   'payment.total', 'payment.paid', 'payment.balance', 'payment.status', 'coupon.discount', 'balance.amount', 'refund.amount',
 ])
@@ -123,6 +137,12 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'pre_reservation.payment_url': 'https://www.blacksheepestudiocriativo.com.br/reserva/pagamento?pre_reservation=teste',
     'refund.amount': 'R$ 500,00',
     'refund.error_code': 'REFUND_TEST',
+    'customer.last_rental_at': '20/07/2026',
+    'campaign.name': 'Volte ao estúdio',
+    'coupon.days_left': '5',
+    'booking.url': 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores',
+    'referral.code': 'INDICA-TESTE',
+    'referral.referred_name': 'Fotógrafa Indicada',
   }
 }
 
@@ -201,10 +221,98 @@ async function templateDefinition(template: Record<string, unknown>, tenant: Age
     templateId: String(template.id),
     eventKey: String(template.event_key),
     body: String(template.body_template ?? ''),
-    catalog: variables,
+    catalog: catalogFor(String(template.event_key)),
     examples: testValues('cliente@exemplo.com.br', tenant.name),
     buttonLink: (variable) => customerLinkButton(variable as CustomerLinkVariable),
   })
+}
+
+async function rewardsCampaign(authUserId: string, campaignId: string) {
+  const tenant = await tenantForAdmin(authUserId)
+  if (!tenant) throw new Error('WHATSAPP_TENANT_REQUIRED')
+  const { data, error } = await adminClient().from('marketing_campaigns')
+    .select('id,internal_name,public_name,state').eq('id', campaignId).eq('tenant_id', tenant.id).maybeSingle()
+  if (error) throw new Error('REWARDS_CAMPAIGN_LOOKUP_FAILED')
+  if (!data) throw new Error('REWARDS_CAMPAIGN_NOT_FOUND')
+  return { tenant, campaign: data as Record<string, unknown> }
+}
+
+/** The campaign's three Rewards drafts (or null when not written yet), with WhatsApp fields and Meta status. */
+async function rewardsTemplatesView(authUserId: string, campaignId: string, canViewFinance: boolean) {
+  const { tenant, campaign } = await rewardsCampaign(authUserId, campaignId)
+  const client = adminClient()
+  const { data: links, error: linksError } = await client.from('marketing_campaign_message_templates')
+    .select('event_key,template_id').eq('campaign_id', campaignId)
+  if (linksError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  const templateIds = records(links).map((row) => String(row.template_id))
+  const { data: rows, error: rowsError } = templateIds.length
+    ? await client.from('notification_template_configs')
+      .select('id,event_key,channel,audience,operation_scope,title_template,body_template,is_active,variable_schema,updated_at')
+      .in('id', templateIds)
+    : { data: [], error: null }
+  if (rowsError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  const settings = await loadWhatsAppSettings(templateIds)
+  const { data: submissionRows, error: submissionError } = templateIds.length
+    ? await client.from('whatsapp_template_submissions').select(submissionColumns).eq('tenant_id', tenant.id).in('notification_template_id', templateIds)
+    : { data: [], error: null }
+  if (submissionError) throw new Error(submissionError.message)
+  const byEvent = new Map(records(rows).map((row) => [String(row.event_key), row]))
+  const submissions = new Map(((submissionRows ?? []) as SubmissionRow[]).map((row) => [row.notification_template_id, row]))
+  const visibleVariables = canViewFinance ? rewardsVariables : rewardsVariables.filter((item) => !financialVariables.has(item))
+  return {
+    campaign: { id: campaign.id, name: campaign.public_name ?? campaign.internal_name, state: campaign.state },
+    templates: rewardsEvents.map((eventKey) => {
+      const row = byEvent.get(eventKey)
+      if (!row) return { event_key: eventKey, template: null, submission: null }
+      const whatsapp = settings.get(String(row.id)) ?? null
+      const submission = submissions.get(String(row.id))
+      return {
+        event_key: eventKey,
+        template: { ...row, whatsapp },
+        submission: submission ? submissionView(submission, latest(row.updated_at ? String(row.updated_at) : null, whatsapp?.updated_at)) : null,
+      }
+    }),
+    options: {
+      events: rewardsEvents,
+      variables: visibleVariables,
+      whatsapp_examples: Object.fromEntries(Object.entries(testValues('cliente@exemplo.com.br', 'BlackSheep'))
+        .filter(([key]) => visibleVariables.includes(key))),
+    },
+  }
+}
+
+async function saveRewardsTemplate(admin: { adminId: string; authUserId: string }, record: Record<string, unknown>) {
+  const campaignId = uuid(record.campaign_id) as string
+  const eventKey = (text(record.event_key) as string).toUpperCase()
+  if (!isRewardsEvent(eventKey)) throw new Error('NOTIFICATION_EVENT_INVALID')
+  const { tenant } = await rewardsCampaign(admin.authUserId, campaignId)
+  const body = typeof record.body_template === 'string' ? record.body_template : ''
+  const requestedVariables = [...new Set(variablesIn(body))]
+  if (requestedVariables.some((item) => !rewardsVariables.includes(item))) throw new Error('WHATSAPP_TEMPLATE_VARIABLE_INVALID')
+  if (requestedVariables.some((item) => financialVariables.has(item)) && !(await hasAdminPermission(admin.adminId, 'FINANCE_MANAGE'))) {
+    throw new Error('ADMIN_FINANCE_PERMISSION_REQUIRED')
+  }
+  // Validate WhatsApp fields before saving, so a bad field never leaves a half-saved draft.
+  const whatsapp = whatsappSettings(record.whatsapp ?? { category: 'MARKETING' }, rewardsVariables)
+  const client = adminClient()
+  const { data, error } = await client.rpc('service_admin_upsert_rewards_message_template', {
+    p_tenant_id: tenant.id,
+    p_campaign_id: campaignId,
+    p_event_key: eventKey,
+    p_title_template: text(record.title_template),
+    p_body_template: body,
+    p_variable_schema: requestedVariables,
+    p_actor_admin_id: admin.adminId,
+  })
+  if (error) throw new Error(error.message)
+  const { error: settingsError } = await client.from('notification_whatsapp_settings').upsert({
+    template_id: data,
+    ...whatsapp,
+    updated_by_admin_id: admin.adminId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'template_id' })
+  if (settingsError) throw new Error('WHATSAPP_SETTINGS_SAVE_FAILED')
+  return { id: data, campaign_id: campaignId, event_key: eventKey }
 }
 
 Deno.serve(async (req) => {
@@ -246,6 +354,10 @@ Deno.serve(async (req) => {
         })
       }
 
+      if (url.searchParams.get('view') === 'rewards') {
+        return json(await rewardsTemplatesView(admin.authUserId, uuid(url.searchParams.get('campaign_id')) as string, canViewFinance))
+      }
+
       const templateId = url.searchParams.get('template_id')
       if (templateId) {
         const { data, error } = await client.rpc('service_admin_notification_template_versions', { p_template_id: uuid(templateId) })
@@ -265,6 +377,8 @@ Deno.serve(async (req) => {
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
+      // Rewards drafts belong to their campaign's editor, not to the rental list.
+      templates.data = records(templates.data).filter((item) => !isRewardsEvent(String(item.event_key)))
       // WhatsApp approval status per template, for the admin's tenant only.
       let whatsappSubmissions: ReturnType<typeof submissionView>[] = []
       if (tenant) {
@@ -449,6 +563,10 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (req.method === 'POST' && action === 'SAVE_REWARDS_TEMPLATE') {
+      return json(await saveRewardsTemplate(admin, record), 200)
+    }
+
     const eventKey = (text(record.event_key) as string).toUpperCase()
     const channel = (text(record.channel) as string).toUpperCase()
     const audience = (text(record.audience) as string).toUpperCase()
@@ -456,6 +574,13 @@ Deno.serve(async (req) => {
     const htmlTemplate = typeof record.html_template === 'string' ? record.html_template.trim() || null : null
     if (!events.includes(eventKey)) throw new Error('NOTIFICATION_EVENT_INVALID')
     if (!channels.includes(channel)) throw new Error('NOTIFICATION_CHANNEL_INVALID')
+    const existingId = uuid(record.template_id, true)
+    if (existingId) {
+      const { data: existing, error: existingError } = await client.from('notification_template_configs')
+        .select('event_key').eq('id', existingId).maybeSingle()
+      if (existingError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+      if (existing && isRewardsEvent(String(existing.event_key))) throw new Error('NOTIFICATION_TEMPLATE_IS_REWARDS')
+    }
     if (channel === 'WHATSAPP' && record.is_active === true) throw new Error('WHATSAPP_TEMPLATE_DRAFT_ONLY')
     if (!audiences.includes(audience)) throw new Error('NOTIFICATION_AUDIENCE_INVALID')
     if (operationScope !== null && !['SABRINA', 'BLACKSHEEP'].includes(operationScope)) throw new Error('NOTIFICATION_OPERATION_SCOPE_INVALID')
@@ -506,6 +631,8 @@ Deno.serve(async (req) => {
     const code = error instanceof Error ? error.message.split(':')[0] : 'NOTIFICATION_ADMIN_FAILED'
     const status = code.startsWith('ADMIN_AUTH_') || code === 'ADMIN_ACCESS_DENIED'
       ? 401
+      : code === 'REWARDS_CAMPAIGN_NOT_FOUND'
+        ? 404
       : code === 'ADMIN_PERMISSION_DENIED' || code === 'ADMIN_FINANCE_PERMISSION_REQUIRED'
         ? 403
         : code.includes('PROVIDER_') || code.startsWith('EMAIL_')

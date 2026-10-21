@@ -45,6 +45,11 @@ Deno.test('rejects drafts Meta would refuse', async () => {
 Deno.test('classifies birthday and manual messages as marketing', () => {
   assertEquals(whatsappCategory('BIRTHDAY'), 'MARKETING')
   assertEquals(whatsappCategory('MANUAL'), 'MARKETING')
+  assertEquals(whatsappCategory('REWARDS_WINBACK'), 'MARKETING')
+  assertEquals(whatsappCategory('REWARDS_COUPON_ISSUED'), 'MARKETING')
+  assertEquals(whatsappCategory('REWARDS_COUPON_EXPIRING'), 'MARKETING')
+  assertEquals(whatsappCategory('REWARDS_REFERRAL_CODE'), 'MARKETING')
+  assertEquals(whatsappCategory('REWARDS_REFERRAL_REWARD'), 'MARKETING')
   assertEquals(whatsappCategory('APPOINTMENT_REMINDER'), 'UTILITY')
 })
 
