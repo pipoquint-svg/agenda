@@ -302,10 +302,19 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
   const templateIds = records(links).map((row) => String(row.template_id))
   const { data: rows, error: rowsError } = templateIds.length
     ? await client.from('notification_template_configs')
-      .select('id,event_key,channel,audience,operation_scope,title_template,body_template,is_active,variable_schema,updated_at')
+      .select('id,event_key,channel,audience,operation_scope,title_template,body_template,is_active,variable_schema,updated_at,schedule_mode,schedule_offset_minutes')
       .in('id', templateIds)
     : { data: [], error: null }
   if (rowsError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  const [{ data: targetRows, error: targetsError }, { data: serviceRows, error: servicesError }] = await Promise.all([
+    templateIds.length
+      ? client.from('notification_template_services').select('template_id,service_id').in('template_id', templateIds)
+      : Promise.resolve({ data: [], error: null }),
+    client.from('services').select('id,name').eq('operation_scope', 'BLACKSHEEP').eq('is_active', true).order('name'),
+  ])
+  if (targetsError || servicesError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  const targets = new Map<string, string[]>()
+  for (const row of records(targetRows)) targets.set(String(row.template_id), [...(targets.get(String(row.template_id)) ?? []), String(row.service_id)])
   const settings = await loadWhatsAppSettings(templateIds)
   const { data: submissionRows, error: submissionError } = templateIds.length
     ? await client.from('whatsapp_template_submissions').select(submissionColumns).eq('tenant_id', tenant.id).in('notification_template_id', templateIds)
@@ -323,10 +332,11 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
       const submission = submissions.get(String(row.id))
       return {
         event_key: eventKey,
-        template: { ...row, whatsapp },
+        template: { ...row, whatsapp, service_ids: targets.get(String(row.id)) ?? [] },
         submission: submission ? submissionView(submission, latest(row.updated_at ? String(row.updated_at) : null, whatsapp?.updated_at)) : null,
       }
     }),
+    services: records(serviceRows).map((service) => ({ id: service.id, name: service.name })),
     options: {
       events: rewardsEvents,
       variables: visibleVariables,
@@ -334,6 +344,22 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
         .filter(([key]) => visibleVariables.includes(key))),
     },
   }
+}
+
+/** A "Cupom Rewards liberado" message of a campaign of the admin's tenant. */
+async function rewardsCouponTemplate(authUserId: string, templateId: string) {
+  const client = adminClient()
+  const { data: link, error: linkError } = await client.from('marketing_campaign_message_templates')
+    .select('campaign_id,event_key').eq('template_id', templateId).maybeSingle()
+  if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  if (!link) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+  if (link.event_key !== 'REWARDS_COUPON_ISSUED') throw new Error('REWARDS_TRIGGER_NOT_SUPPORTED')
+  const { tenant } = await rewardsCampaign(authUserId, String(link.campaign_id))
+  const { data: template, error } = await client.from('notification_template_configs')
+    .select('id,is_active,schedule_mode,updated_at').eq('id', templateId).maybeSingle()
+  if (error) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+  if (!template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+  return { tenantId: tenant.id, is_active: template.is_active === true, schedule_mode: template.schedule_mode, updated_at: String(template.updated_at ?? '') }
 }
 
 async function saveRewardsTemplate(admin: { adminId: string; authUserId: string }, record: Record<string, unknown>) {
@@ -432,19 +458,40 @@ Deno.serve(async (req) => {
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
-      // Rewards drafts belong to their campaign's editor, not to the rental list.
-      templates.data = records(templates.data).filter((item) => !isRewardsEvent(String(item.event_key)))
+      const allTemplates = records(templates.data)
+      // Rewards drafts are edited in their campaign's editor; the WhatsApp list only links to them.
+      templates.data = allTemplates.filter((item) => !isRewardsEvent(String(item.event_key)))
+      const rewardsRows = allTemplates.filter((item) => isRewardsEvent(String(item.event_key)) && item.channel === 'WHATSAPP')
+      let rewardsTemplates: Record<string, unknown>[] = []
+      if (tenant && rewardsRows.length) {
+        const { data: links, error: linksError } = await client.from('marketing_campaign_message_templates')
+          .select('template_id,event_key,campaign_id,marketing_campaigns(internal_name,state,tenant_id)')
+          .in('template_id', rewardsRows.map((item) => String(item.id)))
+        if (linksError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+        const rowsById = new Map(rewardsRows.map((item) => [String(item.id), item]))
+        rewardsTemplates = records(links).flatMap((link) => {
+          const campaign = link.marketing_campaigns as Record<string, unknown> | null
+          const row = rowsById.get(String(link.template_id))
+          if (!campaign || !row || campaign.tenant_id !== tenant.id || campaign.state === 'ARCHIVED') return []
+          return [{
+            template_id: link.template_id, event_key: link.event_key, campaign_id: link.campaign_id,
+            campaign_name: campaign.internal_name, campaign_state: campaign.state,
+            title_template: row.title_template, is_active: row.is_active === true,
+          }]
+        })
+      }
       // WhatsApp approval status per template, for the admin's tenant only.
       let whatsappSubmissions: ReturnType<typeof submissionView>[] = []
       if (tenant) {
         const { data: rows, error: rowsError } = await client.from('whatsapp_template_submissions')
           .select(submissionColumns).eq('tenant_id', tenant.id)
         if (rowsError) throw new Error(rowsError.message)
-        const updatedAt = new Map(records(templates.data).map((item) => [String(item.id), latest(item.updated_at ? String(item.updated_at) : null, whatsappByTemplate.get(String(item.id))?.updated_at)]))
+        const updatedAt = new Map(allTemplates.map((item) => [String(item.id), latest(item.updated_at ? String(item.updated_at) : null, whatsappByTemplate.get(String(item.id))?.updated_at)]))
         whatsappSubmissions = ((rows ?? []) as SubmissionRow[]).map((row) => submissionView(row, updatedAt.get(row.notification_template_id) ?? null))
       }
       return json({
         whatsapp_submissions: whatsappSubmissions,
+        rewards_templates: rewardsTemplates,
         templates: records(templates.data).map((item) => item.channel === 'WHATSAPP'
           ? { ...item, whatsapp: whatsappByTemplate.get(String(item.id)) ?? null }
           : item),
@@ -727,6 +774,49 @@ Deno.serve(async (req) => {
 
     if (req.method === 'POST' && action === 'SAVE_REWARDS_TEMPLATE') {
       return json(await saveRewardsTemplate(admin, record), 200)
+    }
+
+    // Rewards "Cupom Rewards liberado": when it goes out (N minutes after the reservation
+    // ends) and whether it is on. Same rules as the reservation messages.
+    if (req.method === 'POST' && (action === 'SAVE_REWARDS_TRIGGER' || action === 'SET_REWARDS_ACTIVE')) {
+      const templateId = uuid(record.template_id) as string
+      const template = await rewardsCouponTemplate(admin.authUserId, templateId)
+      if (action === 'SAVE_REWARDS_TRIGGER') {
+        // Same trigger panel as the reservation messages; the coupon only goes after the end.
+        if ((text(record.schedule_mode, true)?.toUpperCase() ?? 'AFTER_END') !== 'AFTER_END') throw new Error('REWARDS_TRIGGER_AFTER_END_ONLY')
+        const offset = integer(record.schedule_offset_minutes)
+        if (offset === null || offset < 1 || offset > 10080) throw new Error('NOTIFICATION_SCHEDULE_OFFSET_INVALID')
+        const serviceIds = uuidArray(record.service_ids ?? [])
+        const { error } = await client.rpc('service_admin_update_notification_trigger_v1', {
+          p_template_id: templateId,
+          p_schedule_mode: 'AFTER_END',
+          p_schedule_offset_minutes: offset,
+          p_service_ids: serviceIds,
+          p_actor_admin_id: admin.adminId,
+        })
+        if (error) throw new Error(error.message)
+        return json({ id: templateId, schedule_mode: 'AFTER_END', schedule_offset_minutes: offset, service_ids: serviceIds }, 200)
+      }
+      const active = record.is_active === true
+      if (active) {
+        if (template.schedule_mode !== 'AFTER_END') throw new Error('REWARDS_TRIGGER_REQUIRED')
+        const { data: submission, error: submissionError } = await client.from('whatsapp_template_submissions')
+          .select('status,submitted_at').eq('tenant_id', template.tenantId).eq('notification_template_id', templateId).maybeSingle()
+        if (submissionError) throw new Error('WHATSAPP_SUBMISSION_LOOKUP_FAILED')
+        if (submission?.status !== 'APPROVED') throw new Error('WHATSAPP_TEMPLATE_NOT_APPROVED')
+        const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+        const edited = latest(template.updated_at, settings?.updated_at)
+        if (edited && submission.submitted_at && edited > String(submission.submitted_at)) throw new Error('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
+      }
+      const { error: updateError } = await client.from('notification_template_configs')
+        .update({ is_active: active, updated_by_admin_id: admin.adminId }).eq('id', templateId)
+      if (updateError) throw new Error('NOTIFICATION_TEMPLATE_UPDATE_FAILED')
+      await client.from('audit_logs').insert({
+        admin_user_id: admin.adminId, entity_type: 'NOTIFICATION_TEMPLATE', entity_id: templateId,
+        action: active ? 'WHATSAPP_ACTIVATE' : 'WHATSAPP_DEACTIVATE',
+        before_json: { is_active: template.is_active }, after_json: { is_active: active }, origin: 'ADMIN',
+      })
+      return json({ id: templateId, is_active: active }, 200)
     }
 
     // Liga ou desliga o envio de um modelo de WhatsApp. Ligar só vale para o texto
