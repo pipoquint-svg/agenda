@@ -627,6 +627,14 @@ Deno.serve(async (req) => {
 
     if (body.confirmed !== true) throw new Error('RESCHEDULE_CONFIRMATION_REQUIRED')
     const policyActionId = uuid(body.policy_action_id)
+    // Pago pelo link: a remarcação já foi aplicada quando o pagamento foi aprovado.
+    const { data: alreadyApplied } = await client.from('appointment_policy_actions')
+      .select('id,status').eq('id', policyActionId).eq('appointment_id', appointmentId).eq('change_origin', 'CLIENT')
+      .eq('status', 'APPLIED').maybeSingle()
+    if (alreadyApplied) {
+      await minimumDelay(startedAt)
+      return json({ data: { status: 'APPLIED', policy_action_id: policyActionId, already_applied: true } })
+    }
     const { data: requirements, error: requirementsError } = await client.rpc('service_client_reschedule_requirements', {
       p_token_id: tokenId,
       p_policy_action_id: policyActionId,
