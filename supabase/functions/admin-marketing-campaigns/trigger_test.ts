@@ -19,14 +19,14 @@ Deno.test("only the supported triggers can be created", () => {
   }
 });
 
-Deno.test("the referral trigger carries the friend's discount and a monthly cap", () => {
+Deno.test("the referral trigger carries the friend's discount and an optional monthly cap", () => {
   assertEquals(
     triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "percent", referred_discount_value: 10 }),
-    { trigger_kind: "REFERRAL_FIRST_RENTAL", trigger_rules: { referred_discount_type: "PERCENT", referred_discount_value: 10, monthly_cap: 5 } },
+    { trigger_kind: "REFERRAL_FIRST_RENTAL", trigger_rules: { referred_discount_type: "PERCENT", referred_discount_value: 10, monthly_cap: null, referrer_reward: "COUPON" } },
   );
   assertEquals(
     triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "FIXED", referred_discount_value: 50.5, monthly_cap: 3 }).trigger_rules,
-    { referred_discount_type: "FIXED", referred_discount_value: 50.5, monthly_cap: 3 },
+    { referred_discount_type: "FIXED", referred_discount_value: 50.5, monthly_cap: 3, referrer_reward: "COUPON" },
   );
   for (const bad of [
     { referred_discount_type: "PERCENT", referred_discount_value: 0 },
@@ -41,4 +41,22 @@ Deno.test("the referral trigger carries the friend's discount and a monthly cap"
     Error,
     "MARKETING_CAMPAIGN_MONTHLY_CAP_INVALID",
   );
+});
+
+Deno.test("the referrer earns free studio hours: 2 hours, 180 days by default", () => {
+  assertEquals(
+    triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, referrer_reward: "hours" }).trigger_rules,
+    { referred_discount_type: "PERCENT", referred_discount_value: 15, monthly_cap: null, referrer_reward: "HOURS", referrer_reward_minutes: 120, referrer_reward_validity_days: 180 },
+  );
+  assertEquals(
+    triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, referrer_reward: "HOURS", referrer_reward_minutes: 120, referrer_reward_validity_days: 90 }).trigger_rules.referrer_reward_minutes,
+    120,
+  );
+  for (const bad of [{ referrer_reward: "POINTS" }]) {
+    assertThrows(() => triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, ...bad }), Error, "MARKETING_CAMPAIGN_REFERRER_REWARD_INVALID");
+  }
+  for (const minutes of [10, 50, 615]) {
+    assertThrows(() => triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, referrer_reward: "HOURS", referrer_reward_minutes: minutes }), Error, "MARKETING_CAMPAIGN_REFERRER_HOURS_INVALID");
+  }
+  assertThrows(() => triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, referrer_reward: "HOURS", referrer_reward_validity_days: 0 }), Error, "MARKETING_CAMPAIGN_REFERRER_HOURS_VALIDITY_INVALID");
 });

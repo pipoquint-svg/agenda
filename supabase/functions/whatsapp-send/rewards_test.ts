@@ -3,10 +3,12 @@ import {
   couponDateLabel,
   couponDaysLeft,
   couponDiscountLabel,
+  hoursLabel,
   issuanceKey,
   rewardsDeliveryKey,
   rewardsScheduleMatches,
   rewardsSkipReason,
+  triggerServes,
 } from './rewards.ts'
 
 const template = { id: 't1', schedule_mode: 'AFTER_END', schedule_offset_minutes: 30 }
@@ -47,4 +49,19 @@ Deno.test('coupon values for the message', () => {
   assertEquals(couponDaysLeft('2026-11-20T12:00:00Z', now), '30')
   assertEquals(couponDaysLeft('2026-10-21T13:00:00Z', now), '1')
   assertEquals(couponDaysLeft('2026-10-20T12:00:00Z', now), '0')
+})
+
+Deno.test('each Rewards message serves its own campaigns', () => {
+  assertEquals(triggerServes('REWARDS_COUPON_ISSUED', 'RENTAL_COMPLETED_FINANCIALLY_CLEARED'), true)
+  assertEquals(triggerServes('REWARDS_COUPON_ISSUED', 'REFERRAL_FIRST_RENTAL'), false)
+  assertEquals(triggerServes('REWARDS_REFERRAL_REWARD', 'REFERRAL_FIRST_RENTAL'), true)
+  assertEquals(triggerServes('REWARDS_REFERRAL_REWARD', 'INACTIVITY'), false)
+  assertEquals(rewardsDeliveryKey('t', 'a', 'REWARDS_REFERRAL_REWARD'), 'rewards:t:a:REWARDS_REFERRAL_REWARD:WHATSAPP:CUSTOMER')
+})
+
+Deno.test('free hours read naturally', () => {
+  assertEquals(hoursLabel(60), '1 hora')
+  assertEquals(hoursLabel(120), '2 horas')
+  assertEquals(hoursLabel(90), '1h30')
+  assertEquals(hoursLabel(45), '45 minutos')
 })

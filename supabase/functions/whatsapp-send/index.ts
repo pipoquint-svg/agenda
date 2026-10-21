@@ -24,15 +24,17 @@ import { type WhatsAppSettings, whatsappTemplateParameters } from '../admin-noti
 import { maskPhone, testRecipient } from '../admin-notifications/test-send.ts'
 import { BOOKING_URL } from '../_shared/customer-link.ts'
 import {
-  APPOINTMENT_TRIGGERS,
   couponDateLabel,
   couponDaysLeft,
   couponDiscountLabel,
+  hoursLabel,
   issuanceKey,
-  REWARDS_COUPON_EVENT,
+  REWARDS_DISPATCH_EVENTS,
+  REWARDS_REFERRAL_EVENT,
   rewardsDeliveryKey,
   rewardsScheduleMatches,
   rewardsSkipReason,
+  triggerServes,
 } from './rewards.ts'
 
 const SCOPE = 'BLACKSHEEP'
@@ -64,18 +66,20 @@ const latest = (...values: (string | null | undefined)[]) =>
   values.filter((v): v is string => !!v).sort().at(-1) ?? null
 
 /**
- * Rewards coupon message: everything that could stop the message is checked first, then
- * the coupon is issued (S4, once per campaign and reservation) and sent with it. No message,
- * no coupon. Unpaid reservations wait for the payment trigger.
+ * Rewards messages after a reservation ends: "Cupom Rewards liberado" (the reservation's
+ * customer earns a coupon) and "Sua indicação rendeu…" (the referrer earns a coupon or free
+ * hours). Everything that could stop the message is checked first, then the reward is issued
+ * once per campaign and reservation and sent with it. No message, no reward. Unpaid
+ * reservations wait for the payment trigger.
  */
-async function sendRewardsCoupon(appointmentId: string, scheduleKey: string, templateId: string) {
+async function sendRewardsMessage(eventKey: string, appointmentId: string, scheduleKey: string, templateId: string) {
   const client = adminClient()
   if (!scheduleKey || !templateId) return skip('WHATSAPP_EVENT_NOT_SUPPORTED')
   const { data: template, error: templateError } = await client.from('notification_template_configs')
     .select('id,event_key,channel,audience,is_active,schedule_mode,schedule_offset_minutes,body_template,variable_schema,updated_at')
     .eq('id', templateId).maybeSingle()
   if (templateError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
-  if (!template || template.channel !== 'WHATSAPP' || template.audience !== 'CUSTOMER' || template.event_key !== REWARDS_COUPON_EVENT) {
+  if (!template || template.channel !== 'WHATSAPP' || template.audience !== 'CUSTOMER' || template.event_key !== eventKey) {
     return skip('WHATSAPP_TEMPLATE_NOT_FOUND')
   }
   if (template.is_active !== true) return skip('WHATSAPP_TEMPLATE_NOT_ACTIVE')
@@ -91,9 +95,10 @@ async function sendRewardsCoupon(appointmentId: string, scheduleKey: string, tem
   if (campaignError) throw new Error('REWARDS_CAMPAIGN_LOOKUP_FAILED')
   if (!campaign || campaign.state !== 'ACTIVE' || !campaign.active_version_id) return skip('REWARDS_CAMPAIGN_NOT_ACTIVE')
   const { data: version, error: versionError } = await client.from('marketing_campaign_versions')
-    .select('trigger_kind').eq('id', campaign.active_version_id).maybeSingle()
+    .select('trigger_kind,trigger_rules').eq('id', campaign.active_version_id).maybeSingle()
   if (versionError) throw new Error('REWARDS_CAMPAIGN_LOOKUP_FAILED')
-  if (!APPOINTMENT_TRIGGERS.includes(String(version?.trigger_kind ?? ''))) return skip('REWARDS_TRIGGER_NOT_APPOINTMENT_BASED')
+  if (!triggerServes(eventKey, String(version?.trigger_kind ?? ''))) return skip('REWARDS_TRIGGER_NOT_SERVED')
+  const rewardsHours = eventKey === REWARDS_REFERRAL_EVENT && (version?.trigger_rules as Record<string, unknown> | null)?.referrer_reward === 'HOURS'
 
   const { data: appointment, error: appointmentError } = await client.from('appointments')
     .select('id,service_id,primary_customer_id,status,end_at').eq('id', appointmentId).maybeSingle()
@@ -101,12 +106,30 @@ async function sendRewardsCoupon(appointmentId: string, scheduleKey: string, tem
   if (!appointment) throw new Error('APPOINTMENT_NOT_FOUND')
   if (!['CONFIRMED', 'COMPLETED'].includes(String(appointment.status))) return skip('APPOINTMENT_STATUS_CHANGED')
   if (!appointment.primary_customer_id) return skip('WHATSAPP_CUSTOMER_MISSING')
-  const [{ data: service }, { data: customer }] = await Promise.all([
-    client.from('services').select('operation_scope').eq('id', appointment.service_id).maybeSingle(),
-    client.from('customers').select('id,name,phone').eq('id', appointment.primary_customer_id).maybeSingle(),
-  ])
-  if (!service || !customer) throw new Error('APPOINTMENT_CONTEXT_LOOKUP_FAILED')
+  const { data: service } = await client.from('services').select('operation_scope').eq('id', appointment.service_id).maybeSingle()
+  if (!service) throw new Error('APPOINTMENT_CONTEXT_LOOKUP_FAILED')
   if (String(service.operation_scope ?? '').toUpperCase() !== SCOPE) return skip('WHATSAPP_SCOPE_NOT_CONNECTED')
+
+  // Who receives: the reward's owner (the referrer for a referral). A retry finds the issuance.
+  const key = issuanceKey(campaignId, appointmentId)
+  const { data: issuedBefore, error: issuedError } = await client.from('marketing_campaign_issuances')
+    .select('customer_id').eq('campaign_id', campaignId).eq('idempotency_key', key).maybeSingle()
+  if (issuedError) throw new Error('REWARDS_ISSUANCE_LOOKUP_FAILED')
+  let recipientId = issuedBefore?.customer_id ? String(issuedBefore.customer_id) : ''
+  if (!recipientId) {
+    const { data: decision, error: decisionError } = await client.rpc('service_evaluate_marketing_campaign_eligibility', {
+      p_campaign_id: campaignId,
+      p_source_appointment_id: appointmentId,
+    })
+    if (decisionError) throw new Error('REWARDS_ELIGIBILITY_FAILED')
+    if (decision?.decision !== 'ELIGIBLE') return skip(rewardsSkipReason(String(decision?.reason_code ?? '')))
+    recipientId = String(decision.customer_id ?? '')
+  }
+  const [{ data: customer }, { data: sourceCustomer }] = await Promise.all([
+    client.from('customers').select('id,name,phone').eq('id', recipientId).maybeSingle(),
+    client.from('customers').select('name').eq('id', appointment.primary_customer_id).maybeSingle(),
+  ])
+  if (!customer) throw new Error('REWARDS_RECIPIENT_LOOKUP_FAILED')
   let phone: string
   try {
     phone = testRecipient(customer.phone)
@@ -131,49 +154,63 @@ async function sendRewardsCoupon(appointmentId: string, scheduleKey: string, tem
   const edited = latest(String(template.updated_at ?? ''), settingsRow?.updated_at ? String(settingsRow.updated_at) : null)
   if (edited && submission.submitted_at && edited > String(submission.submitted_at)) return skip('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
 
+  const deliveryKey = rewardsDeliveryKey(templateId, appointmentId, eventKey)
   const { data: previous } = await client.from('notification_delivery_logs').select('status,provider_message_id')
-    .eq('idempotency_key', rewardsDeliveryKey(templateId, appointmentId)).maybeSingle()
+    .eq('idempotency_key', deliveryKey).maybeSingle()
   if (previous?.status === 'SENT' || previous?.provider_message_id) return skip('NOTIFICATION_ALREADY_SENT')
 
-  // The message can go out: issue the coupon (a retry gets the same coupon back).
-  const { data: issued, error: issueError } = await client.rpc('service_issue_marketing_campaign_coupon', {
-    p_campaign_id: campaignId,
-    p_source_appointment_id: appointmentId,
-    p_idempotency_key: issuanceKey(campaignId, appointmentId),
-  })
+  // The message can go out: issue the reward (a retry gets the same one back).
+  const { data: issued, error: issueError } = await client.rpc(
+    rewardsHours ? 'service_issue_marketing_referral_hours' : 'service_issue_marketing_campaign_coupon',
+    { p_campaign_id: campaignId, p_source_appointment_id: appointmentId, p_idempotency_key: key },
+  )
   if (issueError) {
     if (issueError.message === 'MARKETING_CAMPAIGN_ISSUANCE_INELIGIBLE') return skip(rewardsSkipReason(String(issueError.details ?? '')))
-    throw new Error('REWARDS_COUPON_ISSUE_FAILED')
+    throw new Error('REWARDS_ISSUE_FAILED')
   }
-  if (String(issued?.customer_id ?? '') !== String(customer.id)) throw new Error('REWARDS_COUPON_CUSTOMER_MISMATCH')
-  const { data: coupon, error: couponError } = await client.from('coupons')
-    .select('code,discount_type,discount_value,valid_until').eq('id', issued.coupon_id).maybeSingle()
-  if (couponError || !coupon) throw new Error('REWARDS_COUPON_LOOKUP_FAILED')
+  if (String(issued?.customer_id ?? '') !== String(customer.id)) throw new Error('REWARDS_RECIPIENT_MISMATCH')
+  const rewardValues: Record<string, string> = {}
+  if (rewardsHours) {
+    const { data: balances, error: balancesError } = await client.from('hour_package_balances')
+      .select('available_minutes,valid_until,status').eq('customer_id', customer.id).eq('status', 'ACTIVE')
+    if (balancesError) throw new Error('REWARDS_HOURS_BALANCE_FAILED')
+    const available = (balances ?? []).filter((row: { valid_until: string }) => new Date(row.valid_until).getTime() > Date.now())
+      .reduce((sum: number, row: { available_minutes: number }) => sum + Number(row.available_minutes || 0), 0)
+    rewardValues['reward.hours'] = hoursLabel(issued.minutes)
+    rewardValues['reward.expires_at'] = couponDateLabel(issued.valid_until)
+    rewardValues['reward.balance'] = hoursLabel(available)
+  } else {
+    const { data: coupon, error: couponError } = await client.from('coupons')
+      .select('code,discount_type,discount_value,valid_until').eq('id', issued.coupon_id).maybeSingle()
+    if (couponError || !coupon) throw new Error('REWARDS_COUPON_LOOKUP_FAILED')
+    rewardValues['coupon.code'] = String(coupon.code)
+    rewardValues['coupon.discount'] = couponDiscountLabel(coupon.discount_type, coupon.discount_value)
+    rewardValues['coupon.expires_at'] = couponDateLabel(coupon.valid_until)
+    rewardValues['coupon.days_left'] = couponDaysLeft(coupon.valid_until)
+  }
 
   const delivery = await beginNotificationDelivery(client, {
     templateId,
-    eventKey: REWARDS_COUPON_EVENT,
+    eventKey,
     audience: 'CUSTOMER',
     appointmentId,
     customerId: String(customer.id),
     recipient: phone,
     recipientMasked: maskPhone(phone),
     channel: 'WHATSAPP',
-    idempotencyKey: rewardsDeliveryKey(templateId, appointmentId),
-    payloadSnapshot: { template_id: templateId, appointment_id: appointmentId, campaign_id: campaignId, coupon_id: issued.coupon_id, schedule_key: scheduleKey },
+    idempotencyKey: deliveryKey,
+    payloadSnapshot: { template_id: templateId, appointment_id: appointmentId, campaign_id: campaignId, coupon_id: issued.coupon_id ?? null, hour_package_id: issued.hour_package_id ?? null, schedule_key: scheduleKey },
   })
   if (delivery.alreadySent) return skip('NOTIFICATION_ALREADY_SENT')
   try {
     const catalog = [...templateVariableKeys(template.variable_schema)]
     const settings = settingsRow as unknown as WhatsAppSettings | null
     const values: Record<string, string> = {
+      ...rewardValues,
       'customer.name': String(customer.name ?? ''),
       'customer.last_rental_at': couponDateLabel(appointment.end_at),
       'campaign.name': String(campaign.public_name || campaign.internal_name || ''),
-      'coupon.code': String(coupon.code),
-      'coupon.discount': couponDiscountLabel(coupon.discount_type, coupon.discount_value),
-      'coupon.expires_at': couponDateLabel(coupon.valid_until),
-      'coupon.days_left': couponDaysLeft(coupon.valid_until),
+      'referral.referred_name': String(sourceCustomer?.name ?? ''),
       'operation.name': 'BlackSheep Estúdio Criativo',
       'operation.site_url': 'https://www.blacksheepestudiocriativo.com.br',
       'booking.url': BOOKING_URL,
@@ -192,7 +229,7 @@ async function sendRewardsCoupon(appointmentId: string, scheduleKey: string, tem
       payload: { name: submission.provider_template_name, language: 'pt_BR', to: phone, ...parameters },
     })
     await markNotificationSent(client, delivery.id, typeof sent.message_id === 'string' ? sent.message_id : null)
-    return jsonResponse({ skipped: false, event_key: REWARDS_COUPON_EVENT, recipient_masked: maskPhone(phone), template_id: templateId, coupon_id: issued.coupon_id })
+    return jsonResponse({ skipped: false, event_key: eventKey, recipient_masked: maskPhone(phone), template_id: templateId, coupon_id: issued.coupon_id ?? null, hour_package_id: issued.hour_package_id ?? null })
   } catch (error) {
     await markNotificationFailed(client, delivery.id, error)
     throw error
@@ -210,7 +247,7 @@ async function send(body: Record<string, unknown>) {
   if (!appointmentId) throw new Error('APPOINTMENT_ID_REQUIRED')
   if (!Number.isInteger(entityVersion) || entityVersion < 1) throw new Error('ENTITY_VERSION_REQUIRED')
   const scheduleKey = String(body.schedule_key ?? '').trim()
-  if (eventKey === REWARDS_COUPON_EVENT) return await sendRewardsCoupon(appointmentId, scheduleKey, String(body.template_id ?? '').trim())
+  if (REWARDS_DISPATCH_EVENTS.includes(eventKey)) return await sendRewardsMessage(eventKey, appointmentId, scheduleKey, String(body.template_id ?? '').trim())
   if (!(scheduleKey ? SCHEDULED_EVENTS : IMMEDIATE_EVENTS).includes(eventKey)) {
     return skip('WHATSAPP_EVENT_NOT_SUPPORTED')
   }

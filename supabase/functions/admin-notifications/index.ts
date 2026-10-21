@@ -11,7 +11,7 @@ import {
   type NotificationTemplate,
 } from '../_shared/notification-email.ts'
 import { type AgendaTenant, callDracmaGateway, tenantForAdmin } from '../_shared/dracma-gateway.ts'
-import { BOOKING_URL, customerLinkButton, customerLinkSuffix, type CustomerLinkVariable } from '../_shared/customer-link.ts'
+import { BOOKING_URL, customerLinkButton, customerLinkSuffix, type CustomerLinkVariable, REFERRAL_RULES_URL } from '../_shared/customer-link.ts'
 import { couponDateLabel, couponDaysLeft, couponDiscountLabel } from '../whatsapp-send/rewards.ts'
 import {
   isAgendaTemplate,
@@ -22,6 +22,7 @@ import {
 } from './template-versions.ts'
 import { maskPhone, testParameters, testRecipient } from './test-send.ts'
 import { greetingName, winbackKeys } from './winback.ts'
+import { chunks, referralBatchSize, referralCodeDeliveryKey, saoPauloDay } from './referral.ts'
 import {
   type SubmissionRow,
   submissionStatus,
@@ -67,7 +68,8 @@ const rewardsVariables = [
   'customer.name', 'customer.last_rental_at', 'campaign.name',
   'coupon.code', 'coupon.discount', 'coupon.expires_at', 'coupon.days_left',
   'referral.code', 'referral.referred_name',
-  'operation.name', 'operation.site_url', 'booking.url',
+  'reward.hours', 'reward.expires_at', 'reward.balance',
+  'operation.name', 'operation.site_url', 'booking.url', 'referral.rules_url',
 ]
 const isRewardsEvent = (eventKey: string) => rewardsEvents.includes(eventKey)
 const catalogFor = (eventKey: string) => isRewardsEvent(eventKey) ? rewardsVariables : variables
@@ -155,6 +157,10 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'booking.url': 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores',
     'referral.code': 'INDICA-TESTE',
     'referral.referred_name': 'Fotógrafa Indicada',
+    'referral.rules_url': 'https://www.blacksheepestudiocriativo.com.br/indique',
+    'reward.hours': '1 hora',
+    'reward.expires_at': '20/04/2027',
+    'reward.balance': '2 horas',
   }
 }
 
@@ -357,7 +363,7 @@ async function rewardsCouponTemplate(authUserId: string, templateId: string) {
     .select('campaign_id,event_key').eq('template_id', templateId).maybeSingle()
   if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
   if (!link) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
-  if (link.event_key !== 'REWARDS_COUPON_ISSUED') throw new Error('REWARDS_TRIGGER_NOT_SUPPORTED')
+  if (!['REWARDS_COUPON_ISSUED', 'REWARDS_REFERRAL_REWARD'].includes(String(link.event_key))) throw new Error('REWARDS_TRIGGER_NOT_SUPPORTED')
   const { tenant } = await rewardsCampaign(authUserId, String(link.campaign_id))
   const { data: template, error } = await client.from('notification_template_configs')
     .select('id,is_active,schedule_mode,updated_at').eq('id', templateId).maybeSingle()
@@ -842,6 +848,132 @@ Deno.serve(async (req) => {
       }
       console.log('admin-notifications', 'REWARDS_WINBACK_DISPATCHED', JSON.stringify({ campaign: campaignId, by: admin.adminId, ...summary, failures: summary.failures.length }))
       return json({ eligible: list.length, without_whatsapp: list.length - recipients.length, ...summary })
+    }
+
+    // Referral campaign send: every customer who already rented gets their personal referral
+    // code in the approved "Seu código de indicação" message. Sporadic: at most once per
+    // customer and day. Each call sends one batch and says how many remain, so the screen
+    // calls again until none remain. dry_run only counts.
+    if (req.method === 'POST' && action === 'DISPATCH_REWARDS_REFERRAL_CODES') {
+      const campaignId = uuid(record.campaign_id) as string
+      const dryRun = record.dry_run !== false
+      const { error: actorError } = await client.rpc('service_admin_assert_marketing_campaign_actor', { p_admin_id: admin.adminId })
+      if (actorError) throw new Error(actorError.message)
+      const { tenant, campaign } = await rewardsCampaign(admin.authUserId, campaignId)
+      if (campaign.state !== 'ACTIVE') throw new Error('REWARDS_CAMPAIGN_NOT_ACTIVE')
+      const { data: link, error: linkError } = await client.from('marketing_campaign_message_templates')
+        .select('template_id').eq('campaign_id', campaignId).eq('event_key', 'REWARDS_REFERRAL_CODE').maybeSingle()
+      if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+      if (!link) throw new Error('REWARDS_REFERRAL_CODE_MESSAGE_MISSING')
+      const templateId = String(link.template_id)
+      const { data: template, error: templateError } = await client.from('notification_template_configs')
+        .select('id,event_key,channel,body_template,variable_schema,updated_at').eq('id', templateId).maybeSingle()
+      if (templateError || !template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      const { data: submission } = await client.from('whatsapp_template_submissions')
+        .select('status,provider_template_name,submitted_at').eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle()
+      if (submission?.status !== 'APPROVED' || !submission.provider_template_name) throw new Error('WHATSAPP_TEMPLATE_NOT_APPROVED')
+      const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+      const edited = latest(String(template.updated_at ?? ''), settings?.updated_at)
+      if (edited && submission.submitted_at && edited > String(submission.submitted_at)) throw new Error('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
+
+      const { data: candidates, error: candidatesError } = await client.rpc('service_list_marketing_referral_candidates', {
+        p_campaign_id: campaignId, p_limit: 5000,
+      })
+      if (candidatesError) throw new Error('REWARDS_CANDIDATES_FAILED')
+      const list = (Array.isArray(candidates) ? candidates : []) as { customer_id: string }[]
+      const customers = new Map<string, Record<string, unknown>>()
+      for (const ids of chunks(list.map((item) => item.customer_id), 200)) {
+        const { data: rows, error } = await client.from('customers').select('id,name,phone').in('id', ids)
+        if (error) throw new Error('REWARDS_CANDIDATES_FAILED')
+        for (const row of records(rows)) customers.set(String(row.id), row)
+      }
+      const recipients = list.flatMap((item) => {
+        const customer = customers.get(item.customer_id)
+        if (!customer) return []
+        try {
+          return [{ customer_id: item.customer_id, name: String(customer.name ?? ''), phone: testRecipient(customer.phone) }]
+        } catch {
+          return []
+        }
+      })
+      const day = saoPauloDay(new Date())
+      // Any delivery logged today (sent or failed) counts as done: a send never retries in a loop.
+      const triedToday = new Set<string>()
+      for (const keys of chunks(recipients.map((item) => referralCodeDeliveryKey(templateId, item.customer_id, day)), 200)) {
+        const { data: logs, error } = await client.from('notification_delivery_logs').select('idempotency_key').in('idempotency_key', keys)
+        if (error) throw new Error('REWARDS_CANDIDATES_FAILED')
+        for (const row of records(logs)) triedToday.add(String(row.idempotency_key))
+      }
+      const pending = recipients.filter((item) => !triedToday.has(referralCodeDeliveryKey(templateId, item.customer_id, day)))
+      const counts = { eligible: list.length, without_whatsapp: list.length - recipients.length, already_sent_today: recipients.length - pending.length }
+      if (dryRun) {
+        return json({
+          ...counts,
+          pending: pending.length,
+          sample: pending.slice(0, 20).map((item) => ({ name: greetingName(item.name), phone: maskPhone(item.phone) })),
+        })
+      }
+
+      const { data: integration } = await client.from('whatsapp_tenant_integrations')
+        .select('dispatch_admin_id').eq('tenant_id', tenant.id).eq('status', 'CONNECTED')
+        .not('dispatch_admin_id', 'is', null).order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      if (!integration) throw new Error('WHATSAPP_NOT_CONNECTED')
+      const catalog = [...templateVariableKeys(template.variable_schema), ...(settings?.button_variable ? [settings.button_variable] : [])]
+      const batch = pending.slice(0, referralBatchSize(record.batch_size))
+      const summary = { sent: 0, skipped: 0, failed: 0, failures: [] as string[] }
+      for (const item of batch) {
+        const deliveryKey = referralCodeDeliveryKey(templateId, item.customer_id, day)
+        const { data: code, error: codeError } = await client.rpc('service_ensure_marketing_referral_code', {
+          p_campaign_id: campaignId, p_customer_id: item.customer_id,
+        })
+        if (codeError || !code?.code) {
+          summary.skipped += 1
+          continue
+        }
+        const delivery = await beginNotificationDelivery(client, {
+          templateId,
+          eventKey: 'REWARDS_REFERRAL_CODE',
+          audience: 'CUSTOMER',
+          customerId: item.customer_id,
+          recipient: item.phone,
+          recipientMasked: maskPhone(item.phone),
+          channel: 'WHATSAPP',
+          idempotencyKey: deliveryKey,
+          payloadSnapshot: { template_id: templateId, campaign_id: campaignId, referral_code: code.code, day },
+        })
+        if (delivery.alreadySent) continue
+        try {
+          const parameters = whatsappTemplateParameters({
+            body: String(template.body_template ?? ''),
+            catalog,
+            settings,
+            values: {
+              'customer.name': greetingName(item.name),
+              'campaign.name': String(campaign.public_name ?? campaign.internal_name ?? ''),
+              'referral.code': String(code.code),
+              'booking.url': BOOKING_URL,
+              'referral.rules_url': REFERRAL_RULES_URL,
+            },
+            buttonSuffix: (variable, url) => customerLinkSuffix(variable as CustomerLinkVariable, url),
+          })
+          const sent = await callDracmaGateway({
+            operation: 'SEND_TEMPLATE',
+            tenant,
+            adminId: String(integration.dispatch_admin_id),
+            payload: { name: submission.provider_template_name, language: 'pt_BR', to: item.phone, ...parameters },
+          })
+          await markNotificationSent(client, delivery.id, typeof sent.message_id === 'string' ? sent.message_id : null)
+          summary.sent += 1
+        } catch (sendError) {
+          await markNotificationFailed(client, delivery.id, sendError)
+          summary.failed += 1
+          summary.failures.push(`${maskPhone(item.phone)}: ${sendError instanceof Error ? sendError.message.slice(0, 60) : 'erro'}`)
+        }
+      }
+      // A customer without a code (skipped) is not logged: the screen stops when a batch sends nothing.
+      const remaining = pending.length - batch.length
+      console.log('admin-notifications', 'REWARDS_REFERRAL_CODES_DISPATCHED', JSON.stringify({ campaign: campaignId, by: admin.adminId, ...summary, failures: summary.failures.length, remaining }))
+      return json({ ...counts, ...summary, remaining })
     }
 
     // Complete Rewards test: a real single-use coupon of the campaign for the customer with
