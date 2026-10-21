@@ -729,6 +729,26 @@ Deno.serve(async (req) => {
       return json(await saveRewardsTemplate(admin, record), 200)
     }
 
+    // Só o disparo (quando e para quais serviços): não mexe no texto, em is_active
+    // nem em updated_at, então um modelo de WhatsApp aprovado continua aprovado.
+    if (req.method === 'POST' && action === 'SAVE_TRIGGER') {
+      const templateId = uuid(record.template_id) as string
+      const { data: existing, error: existingError } = await client.from('notification_template_configs')
+        .select('event_key').eq('id', templateId).maybeSingle()
+      if (existingError) throw new Error('NOTIFICATION_TEMPLATE_LOOKUP_FAILED')
+      if (!existing) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      if (isRewardsEvent(String(existing.event_key))) throw new Error('NOTIFICATION_TEMPLATE_IS_REWARDS')
+      const { error } = await client.rpc('service_admin_update_notification_trigger_v1', {
+        p_template_id: templateId,
+        p_schedule_mode: text(record.schedule_mode, true)?.toUpperCase() ?? 'IMMEDIATE',
+        p_schedule_offset_minutes: integer(record.schedule_offset_minutes),
+        p_service_ids: uuidArray(record.service_ids ?? []),
+        p_actor_admin_id: admin.adminId,
+      })
+      if (error) throw new Error(error.message)
+      return json({ id: templateId }, 200)
+    }
+
     const eventKey = (text(record.event_key) as string).toUpperCase()
     const channel = (text(record.channel) as string).toUpperCase()
     const audience = (text(record.audience) as string).toUpperCase()
