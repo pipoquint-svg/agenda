@@ -67,6 +67,7 @@ const rewardsVariables = [
   'customer.name', 'customer.last_rental_at', 'campaign.name',
   'coupon.code', 'coupon.discount', 'coupon.expires_at', 'coupon.days_left',
   'referral.code', 'referral.referred_name',
+  'reward.hours', 'reward.expires_at', 'reward.balance',
   'operation.name', 'operation.site_url', 'booking.url',
 ]
 const isRewardsEvent = (eventKey: string) => rewardsEvents.includes(eventKey)
@@ -155,6 +156,9 @@ function testValues(recipient: string, brandName: string): Record<string, string
     'booking.url': 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores',
     'referral.code': 'INDICA-TESTE',
     'referral.referred_name': 'Fotógrafa Indicada',
+    'reward.hours': '1 hora',
+    'reward.expires_at': '20/04/2027',
+    'reward.balance': '2 horas',
   }
 }
 
@@ -357,7 +361,7 @@ async function rewardsCouponTemplate(authUserId: string, templateId: string) {
     .select('campaign_id,event_key').eq('template_id', templateId).maybeSingle()
   if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
   if (!link) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
-  if (link.event_key !== 'REWARDS_COUPON_ISSUED') throw new Error('REWARDS_TRIGGER_NOT_SUPPORTED')
+  if (!['REWARDS_COUPON_ISSUED', 'REWARDS_REFERRAL_REWARD'].includes(String(link.event_key))) throw new Error('REWARDS_TRIGGER_NOT_SUPPORTED')
   const { tenant } = await rewardsCampaign(authUserId, String(link.campaign_id))
   const { data: template, error } = await client.from('notification_template_configs')
     .select('id,is_active,schedule_mode,updated_at').eq('id', templateId).maybeSingle()

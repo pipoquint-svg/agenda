@@ -31,14 +31,26 @@ export function triggerOffer(body: Record<string, unknown>) {
       Math.round(value * 100) !== value * 100) {
       throw new Error("MARKETING_CAMPAIGN_REFERRED_DISCOUNT_INVALID");
     }
-    const cap = blank(body.monthly_cap) ? 5 : Number(body.monthly_cap);
-    if (!Number.isInteger(cap) || cap < 1 || cap > 50) {
+    // Blank means no monthly limit.
+    const cap = blank(body.monthly_cap) ? null : Number(body.monthly_cap);
+    if (cap !== null && (!Number.isInteger(cap) || cap < 1 || cap > 50)) {
       throw new Error("MARKETING_CAMPAIGN_MONTHLY_CAP_INVALID");
     }
-    return {
-      trigger_kind: triggerKind,
-      trigger_rules: { referred_discount_type: type, referred_discount_value: value, monthly_cap: cap },
-    };
+    // The referrer earns the campaign coupon, or free studio hours.
+    const reward = (typeof body.referrer_reward === "string" ? body.referrer_reward.trim() : "").toUpperCase() || "COUPON";
+    if (!["COUPON", "HOURS"].includes(reward)) throw new Error("MARKETING_CAMPAIGN_REFERRER_REWARD_INVALID");
+    const rules: Record<string, unknown> = { referred_discount_type: type, referred_discount_value: value, monthly_cap: cap, referrer_reward: reward };
+    if (reward === "HOURS") {
+      const minutes = blank(body.referrer_reward_minutes) ? 60 : Number(body.referrer_reward_minutes);
+      if (!Number.isInteger(minutes) || minutes < 15 || minutes > 600 || minutes % 15 !== 0) {
+        throw new Error("MARKETING_CAMPAIGN_REFERRER_HOURS_INVALID");
+      }
+      const days = blank(body.referrer_reward_validity_days) ? 180 : Number(body.referrer_reward_validity_days);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) throw new Error("MARKETING_CAMPAIGN_REFERRER_HOURS_VALIDITY_INVALID");
+      rules.referrer_reward_minutes = minutes;
+      rules.referrer_reward_validity_days = days;
+    }
+    return { trigger_kind: triggerKind, trigger_rules: rules };
   }
   return { trigger_kind: triggerKind, trigger_rules: {} };
 }

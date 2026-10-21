@@ -37,6 +37,7 @@
 -- hold with duration, 50%/full difference payment, apply after payment) and brings three
 -- production-only service functions into the repository (*_standard hold, payment and context).
 -- Rewards complete test adds one service-only test coupon function.
+-- Rewards referral hours add one service-only issuance function.
 do $$
 declare
   v_identity text;
@@ -551,11 +552,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 518 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=518 actual=%', v_public_function_count;
+  if v_public_function_count <> 519 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=519 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 444 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=444 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 445 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=445 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;

@@ -4,8 +4,16 @@
  * not need the database.
  */
 export const REWARDS_COUPON_EVENT = 'REWARDS_COUPON_ISSUED'
+export const REWARDS_REFERRAL_EVENT = 'REWARDS_REFERRAL_REWARD'
+/** Rewards messages sent after a reservation ends. */
+export const REWARDS_DISPATCH_EVENTS = [REWARDS_COUPON_EVENT, REWARDS_REFERRAL_EVENT]
 /** Campaign triggers whose coupon comes from one reservation of the same customer. */
 export const APPOINTMENT_TRIGGERS = ['RENTAL_COMPLETED_FINANCIALLY_CLEARED', 'FREE_VISIT_COMPLETED']
+
+/** Which campaign triggers each Rewards message serves. */
+export function triggerServes(eventKey: string, triggerKind: string) {
+  return eventKey === REWARDS_REFERRAL_EVENT ? triggerKind === 'REFERRAL_FIRST_RENTAL' : APPOINTMENT_TRIGGERS.includes(triggerKind)
+}
 
 type ScheduledTemplate = { id: string; schedule_mode: string | null; schedule_offset_minutes: number | null }
 
@@ -23,8 +31,18 @@ export function rewardsScheduleMatches(scheduleKey: string, template: ScheduledT
 /** One coupon per campaign and reservation, whatever job asks for it. */
 export const issuanceKey = (campaignId: string, appointmentId: string) => `rewards-dispatch:${campaignId}:${appointmentId}`
 /** One message per message template and reservation (no version: a change never sends it twice). */
-export const rewardsDeliveryKey = (templateId: string, appointmentId: string) =>
-  `rewards:${templateId}:${appointmentId}:${REWARDS_COUPON_EVENT}:WHATSAPP:CUSTOMER`
+export const rewardsDeliveryKey = (templateId: string, appointmentId: string, eventKey = REWARDS_COUPON_EVENT) =>
+  `rewards:${templateId}:${appointmentId}:${eventKey}:WHATSAPP:CUSTOMER`
+
+/** "1 hora", "1h30", "2 horas", "45 minutos". */
+export function hoursLabel(minutes: unknown) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0))
+  const hours = Math.floor(total / 60)
+  const rest = total % 60
+  if (!hours) return `${rest} minutos`
+  if (!rest) return hours === 1 ? '1 hora' : `${hours} horas`
+  return `${hours}h${String(rest).padStart(2, '0')}`
+}
 
 /** Unpaid is not final: the payment trigger queues the message again when it is paid. */
 export function rewardsSkipReason(detail: string) {
