@@ -7,10 +7,12 @@ import {
   markNotificationFailed,
   markNotificationSent,
   renderNotificationMessage,
+  templateVariableKeys,
   type NotificationTemplate,
 } from '../_shared/notification-email.ts'
 import { type AgendaTenant, callDracmaGateway, tenantForAdmin } from '../_shared/dracma-gateway.ts'
-import { customerLinkButton, type CustomerLinkVariable } from '../_shared/customer-link.ts'
+import { BOOKING_URL, customerLinkButton, customerLinkSuffix, type CustomerLinkVariable } from '../_shared/customer-link.ts'
+import { couponDateLabel, couponDaysLeft, couponDiscountLabel } from '../whatsapp-send/rewards.ts'
 import {
   isAgendaTemplate,
   type MetaTemplateRef,
@@ -26,6 +28,7 @@ import {
   type WhatsAppSettings,
   whatsappSettings,
   whatsappTemplateDefinition,
+  whatsappTemplateParameters,
 } from './whatsapp-template.ts'
 
 const corsHeaders = {
@@ -709,6 +712,66 @@ Deno.serve(async (req) => {
       })
       console.log('admin-notifications', 'WHATSAPP_TEST_SENT', JSON.stringify({ template: definition.name, to: maskPhone(to), by: admin.adminId }))
       return json({ sent: sent.sent === true, to: maskPhone(to) })
+    }
+
+    // Complete Rewards test: a real single-use coupon of the campaign for the customer with
+    // this phone, sent in the approved message with the real values. Not a campaign issuance.
+    if (req.method === 'POST' && action === 'TEST_REWARDS_COMPLETE') {
+      const templateId = uuid(record.template_id) as string
+      const to = testRecipient(record.phone)
+      const { data: link, error: linkError } = await client.from('marketing_campaign_message_templates')
+        .select('campaign_id,event_key').eq('template_id', templateId).maybeSingle()
+      if (linkError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+      if (!link) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      if (!['REWARDS_COUPON_ISSUED', 'REWARDS_WINBACK', 'REWARDS_COUPON_EXPIRING', 'REWARDS_REFERRAL_REWARD'].includes(String(link.event_key))) {
+        throw new Error('REWARDS_TEST_NO_COUPON')
+      }
+      const { tenant, campaign } = await rewardsCampaign(admin.authUserId, String(link.campaign_id))
+      const { data: template, error: templateError } = await client.from('notification_template_configs')
+        .select('id,event_key,channel,body_template,variable_schema,updated_at').eq('id', templateId).maybeSingle()
+      if (templateError || !template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      const { data: submission } = await client.from('whatsapp_template_submissions')
+        .select('status,provider_template_name').eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle()
+      if (submission?.status !== 'APPROVED') throw new Error('WHATSAPP_TEST_NOT_APPROVED')
+      const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+      const definition = await templateDefinition(template, tenant, settings)
+      if (submission.provider_template_name && submission.provider_template_name !== definition.name) {
+        throw new Error('WHATSAPP_TEST_TEMPLATE_CHANGED')
+      }
+      const { data: coupon, error: couponError } = await client.rpc('service_admin_issue_rewards_test_coupon', {
+        p_tenant_id: tenant.id,
+        p_campaign_id: link.campaign_id,
+        p_phone: to,
+        p_admin_id: admin.adminId,
+      })
+      if (couponError) throw new Error(couponError.message)
+      // Real values for the customer and the coupon; anything else keeps the approved sample.
+      const values: Record<string, string> = {
+        ...testValues('cliente@exemplo.com.br', tenant.name),
+        'customer.name': String(coupon.customer_name ?? ''),
+        'campaign.name': String(campaign.public_name ?? campaign.internal_name ?? ''),
+        'coupon.code': String(coupon.code),
+        'coupon.discount': couponDiscountLabel(coupon.discount_type, coupon.discount_value),
+        'coupon.expires_at': couponDateLabel(coupon.valid_until),
+        'coupon.days_left': couponDaysLeft(coupon.valid_until),
+        'booking.url': BOOKING_URL,
+        ...(coupon.last_rental_at ? { 'customer.last_rental_at': couponDateLabel(coupon.last_rental_at) } : {}),
+      }
+      const parameters = whatsappTemplateParameters({
+        body: String(template.body_template ?? ''),
+        catalog: [...templateVariableKeys(template.variable_schema), ...(settings?.button_variable ? [settings.button_variable] : [])],
+        settings,
+        values,
+        buttonSuffix: (variable, url) => customerLinkSuffix(variable as CustomerLinkVariable, url),
+      })
+      const sent = await callDracmaGateway({
+        operation: 'SEND_TEST_TEMPLATE',
+        tenant,
+        adminId: admin.adminId,
+        payload: { name: definition.name, language: definition.language, to, ...parameters },
+      })
+      console.log('admin-notifications', 'REWARDS_COMPLETE_TEST_SENT', JSON.stringify({ template: definition.name, to: maskPhone(to), coupon: coupon.coupon_id, by: admin.adminId }))
+      return json({ sent: sent.sent === true, to: maskPhone(to), coupon_code: coupon.code, customer_name: coupon.customer_name })
     }
 
     if (req.method === 'POST' && action === 'TEST') {

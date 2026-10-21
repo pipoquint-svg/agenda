@@ -33,6 +33,7 @@
 -- and referral code creation.
 -- Campaign edit and delete add two service-only admin actions.
 -- Rewards coupon dispatch adds one trigger function with no EXECUTE grant.
+-- Rewards complete test adds one service-only test coupon function.
 do $$
 declare
   v_identity text;
@@ -547,11 +548,11 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public';
 
-  if v_public_function_count <> 509 then
-    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=509 actual=%', v_public_function_count;
+  if v_public_function_count <> 510 then
+    raise exception 'ITEM02C_PUBLIC_FUNCTION_COUNT_DRIFT:expected=510 actual=%', v_public_function_count;
   end if;
-  if v_service_role_execute_count <> 435 then
-    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=435 actual=%', v_service_role_execute_count;
+  if v_service_role_execute_count <> 436 then
+    raise exception 'ITEM02C_EXECUTE_COUNT_DRIFT:expected=436 actual=%', v_service_role_execute_count;
   end if;
 end
 $$;
