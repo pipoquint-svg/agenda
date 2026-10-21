@@ -306,6 +306,15 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
       .in('id', templateIds)
     : { data: [], error: null }
   if (rowsError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  const [{ data: targetRows, error: targetsError }, { data: serviceRows, error: servicesError }] = await Promise.all([
+    templateIds.length
+      ? client.from('notification_template_services').select('template_id,service_id').in('template_id', templateIds)
+      : Promise.resolve({ data: [], error: null }),
+    client.from('services').select('id,name').eq('operation_scope', 'BLACKSHEEP').eq('is_active', true).order('name'),
+  ])
+  if (targetsError || servicesError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+  const targets = new Map<string, string[]>()
+  for (const row of records(targetRows)) targets.set(String(row.template_id), [...(targets.get(String(row.template_id)) ?? []), String(row.service_id)])
   const settings = await loadWhatsAppSettings(templateIds)
   const { data: submissionRows, error: submissionError } = templateIds.length
     ? await client.from('whatsapp_template_submissions').select(submissionColumns).eq('tenant_id', tenant.id).in('notification_template_id', templateIds)
@@ -323,10 +332,11 @@ async function rewardsTemplatesView(authUserId: string, campaignId: string, canV
       const submission = submissions.get(String(row.id))
       return {
         event_key: eventKey,
-        template: { ...row, whatsapp },
+        template: { ...row, whatsapp, service_ids: targets.get(String(row.id)) ?? [] },
         submission: submission ? submissionView(submission, latest(row.updated_at ? String(row.updated_at) : null, whatsapp?.updated_at)) : null,
       }
     }),
+    services: records(serviceRows).map((service) => ({ id: service.id, name: service.name })),
     options: {
       events: rewardsEvents,
       variables: visibleVariables,
@@ -448,19 +458,40 @@ Deno.serve(async (req) => {
       if (templates.error) throw new Error(templates.error.message)
       if (services.error) throw new Error(services.error.message)
       if (categories.error) throw new Error(categories.error.message)
-      // Rewards drafts belong to their campaign's editor, not to the rental list.
-      templates.data = records(templates.data).filter((item) => !isRewardsEvent(String(item.event_key)))
+      const allTemplates = records(templates.data)
+      // Rewards drafts are edited in their campaign's editor; the WhatsApp list only links to them.
+      templates.data = allTemplates.filter((item) => !isRewardsEvent(String(item.event_key)))
+      const rewardsRows = allTemplates.filter((item) => isRewardsEvent(String(item.event_key)) && item.channel === 'WHATSAPP')
+      let rewardsTemplates: Record<string, unknown>[] = []
+      if (tenant && rewardsRows.length) {
+        const { data: links, error: linksError } = await client.from('marketing_campaign_message_templates')
+          .select('template_id,event_key,campaign_id,marketing_campaigns(internal_name,state,tenant_id)')
+          .in('template_id', rewardsRows.map((item) => String(item.id)))
+        if (linksError) throw new Error('REWARDS_TEMPLATES_LOOKUP_FAILED')
+        const rowsById = new Map(rewardsRows.map((item) => [String(item.id), item]))
+        rewardsTemplates = records(links).flatMap((link) => {
+          const campaign = link.marketing_campaigns as Record<string, unknown> | null
+          const row = rowsById.get(String(link.template_id))
+          if (!campaign || !row || campaign.tenant_id !== tenant.id || campaign.state === 'ARCHIVED') return []
+          return [{
+            template_id: link.template_id, event_key: link.event_key, campaign_id: link.campaign_id,
+            campaign_name: campaign.internal_name, campaign_state: campaign.state,
+            title_template: row.title_template, is_active: row.is_active === true,
+          }]
+        })
+      }
       // WhatsApp approval status per template, for the admin's tenant only.
       let whatsappSubmissions: ReturnType<typeof submissionView>[] = []
       if (tenant) {
         const { data: rows, error: rowsError } = await client.from('whatsapp_template_submissions')
           .select(submissionColumns).eq('tenant_id', tenant.id)
         if (rowsError) throw new Error(rowsError.message)
-        const updatedAt = new Map(records(templates.data).map((item) => [String(item.id), latest(item.updated_at ? String(item.updated_at) : null, whatsappByTemplate.get(String(item.id))?.updated_at)]))
+        const updatedAt = new Map(allTemplates.map((item) => [String(item.id), latest(item.updated_at ? String(item.updated_at) : null, whatsappByTemplate.get(String(item.id))?.updated_at)]))
         whatsappSubmissions = ((rows ?? []) as SubmissionRow[]).map((row) => submissionView(row, updatedAt.get(row.notification_template_id) ?? null))
       }
       return json({
         whatsapp_submissions: whatsappSubmissions,
+        rewards_templates: rewardsTemplates,
         templates: records(templates.data).map((item) => item.channel === 'WHATSAPP'
           ? { ...item, whatsapp: whatsappByTemplate.get(String(item.id)) ?? null }
           : item),
@@ -751,17 +782,20 @@ Deno.serve(async (req) => {
       const templateId = uuid(record.template_id) as string
       const template = await rewardsCouponTemplate(admin.authUserId, templateId)
       if (action === 'SAVE_REWARDS_TRIGGER') {
+        // Same trigger panel as the reservation messages; the coupon only goes after the end.
+        if ((text(record.schedule_mode, true)?.toUpperCase() ?? 'AFTER_END') !== 'AFTER_END') throw new Error('REWARDS_TRIGGER_AFTER_END_ONLY')
         const offset = integer(record.schedule_offset_minutes)
-        if (offset === null || offset < 1 || offset > 1440) throw new Error('NOTIFICATION_SCHEDULE_OFFSET_INVALID')
+        if (offset === null || offset < 1 || offset > 10080) throw new Error('NOTIFICATION_SCHEDULE_OFFSET_INVALID')
+        const serviceIds = uuidArray(record.service_ids ?? [])
         const { error } = await client.rpc('service_admin_update_notification_trigger_v1', {
           p_template_id: templateId,
           p_schedule_mode: 'AFTER_END',
           p_schedule_offset_minutes: offset,
-          p_service_ids: [],
+          p_service_ids: serviceIds,
           p_actor_admin_id: admin.adminId,
         })
         if (error) throw new Error(error.message)
-        return json({ id: templateId, schedule_mode: 'AFTER_END', schedule_offset_minutes: offset }, 200)
+        return json({ id: templateId, schedule_mode: 'AFTER_END', schedule_offset_minutes: offset, service_ids: serviceIds }, 200)
       }
       const active = record.is_active === true
       if (active) {
