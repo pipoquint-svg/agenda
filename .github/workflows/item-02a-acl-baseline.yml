@@ -109,7 +109,11 @@ jobs:
             > /tmp/acl-before.log 2>&1
           rc=$?
           set -e
-          cat /tmp/acl-before.log
+          # The full log (thousands of ACL_ROW_DIFF rows) is uploaded as evidence below.
+          # Printing all of it can overflow the runner console pipe ("cat: write error:
+          # Resource temporarily unavailable") and fail this step for the wrong reason.
+          grep -v '^ACL_ROW_DIFF' /tmp/acl-before.log || true
+          echo "ACL_ROW_DIFF rows: $(grep -c '^ACL_ROW_DIFF' /tmp/acl-before.log || true)"
           if [[ $rc -eq 0 ]]; then
             echo 'ACL parity unexpectedly passed before the baseline migration.' >&2
             exit 1
