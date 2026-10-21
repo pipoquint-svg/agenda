@@ -43,6 +43,7 @@ jobs:
           deno test --allow-env supabase/functions/_shared/email-provider_test.ts
           deno test supabase/functions/_shared/timing-safe-equal_test.ts
           deno test supabase/functions/admin-marketing-campaigns/recurrence_test.ts
+          deno test supabase/functions/admin-marketing-campaigns/trigger_test.ts
 
       - name: Type-check every Edge Function
         run: |
