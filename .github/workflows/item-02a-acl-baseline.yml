@@ -38,6 +38,8 @@ on:
       - 'supabase/migrations/20261021040000_whatsapp_template_versions.sql'
       - 'supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql'
       - 'supabase/migrations/20261021070000_whatsapp_customer_dispatch.sql'
+      - 'supabase/migrations/20261021100000_rewards_referral.sql'
+      - 'supabase/tests/database/179_rewards_referral.test.sql'
       - 'supabase/tests/database/177_rewards_message_templates.test.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
@@ -167,7 +169,8 @@ jobs:
             supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql \
             supabase/migrations/20261021070000_whatsapp_customer_dispatch.sql \
             supabase/migrations/20261021080000_whatsapp_dispatch_go_live.sql \
-            supabase/migrations/20261021090000_notification_trigger_controls.sql
+            supabase/migrations/20261021090000_notification_trigger_controls.sql \
+            supabase/migrations/20261021100000_rewards_referral.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -269,7 +272,8 @@ jobs:
             supabase/migrations/20261021050000_fix_whatsapp_template_names_check.sql \
             supabase/migrations/20261021070000_whatsapp_customer_dispatch.sql \
             supabase/migrations/20261021080000_whatsapp_dispatch_go_live.sql \
-            supabase/migrations/20261021090000_notification_trigger_controls.sql
+            supabase/migrations/20261021090000_notification_trigger_controls.sql \
+            supabase/migrations/20261021100000_rewards_referral.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
