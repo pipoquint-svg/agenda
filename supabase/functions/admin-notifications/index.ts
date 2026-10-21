@@ -12,6 +12,13 @@ import {
 import { type AgendaTenant, callDracmaGateway, tenantForAdmin } from '../_shared/dracma-gateway.ts'
 import { customerLinkButton, type CustomerLinkVariable } from '../_shared/customer-link.ts'
 import {
+  isAgendaTemplate,
+  type MetaTemplateRef,
+  rotateTemplateVersions,
+  type TemplateVersions,
+  type VersionDeps,
+} from './template-versions.ts'
+import {
   type SubmissionRow,
   submissionStatus,
   submissionView,
@@ -176,16 +183,6 @@ async function updateSubmission(tenantId: string, templateId: string, fields: Re
   return data as SubmissionRow
 }
 
-type MetaTemplateRef = { name: string | null; id: string | null }
-type TemplateVersions = {
-  status: string
-  provider_template_id: string | null
-  provider_template_name: string | null
-  previous_template_name: string | null
-  previous_template_id: string | null
-}
-const AGENDA_TEMPLATE = /^agenda_[a-z0-9_]{1,500}$/
-
 /** Name of a template on Meta from its id (rows sent before names were stored). */
 async function metaNameForId(tenant: AgendaTenant, adminId: string, id: string) {
   const list = await callDracmaGateway({ operation: 'LIST_TEMPLATES', tenant, adminId, payload: {} })
@@ -193,15 +190,25 @@ async function metaNameForId(tenant: AgendaTenant, adminId: string, id: string) 
   return match ? String(match.name) : null
 }
 
+/** Status of a template on Meta, or null when Meta could not be asked. */
+async function metaStatusOf(tenant: AgendaTenant, adminId: string, name: string) {
+  try {
+    const lookup = await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId, payload: { names: [name] } })
+    const status = records(lookup.templates)[0]?.status
+    return typeof status === 'string' ? status : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Deletes one of Agenda's own templates on Meta. A template already gone counts as
  * deleted; a failure returns false so the caller keeps it for a later retry.
  */
 async function deleteMetaTemplate(tenant: AgendaTenant, adminId: string, ref: MetaTemplateRef) {
-  if (!ref.name || !AGENDA_TEMPLATE.test(ref.name)) return false
+  if (!isAgendaTemplate(ref.name)) return false
   try {
-    const lookup = await callDracmaGateway({ operation: 'TEMPLATE_STATUS', tenant, adminId, payload: { names: [ref.name] } })
-    if (records(lookup.templates)[0]?.status === 'NOT_FOUND') return true
+    if ((await metaStatusOf(tenant, adminId, ref.name)) === 'NOT_FOUND') return true
     await callDracmaGateway({
       operation: 'DELETE_TEMPLATE',
       tenant,
@@ -215,38 +222,12 @@ async function deleteMetaTemplate(tenant: AgendaTenant, adminId: string, ref: Me
   }
 }
 
-/**
- * After a draft goes to Meta under a new name: an old version not yet approved is
- * deleted now; an approved one keeps working until the new one is approved.
- */
-async function rotateTemplateVersions(
-  tenant: AgendaTenant,
-  adminId: string,
-  existing: TemplateVersions | null,
-  current: { name: string; id: string | null; approved: boolean },
-): Promise<MetaTemplateRef> {
-  let previous: MetaTemplateRef = { name: existing?.previous_template_name ?? null, id: existing?.previous_template_id ?? null }
-  const oldId = existing?.provider_template_id ?? null
-  let oldName = existing?.provider_template_name ?? null
-  const replaced = existing && (oldName ? oldName !== current.name : Boolean(oldId && oldId !== current.id))
-  if (replaced) {
-    if (!oldName && oldId) oldName = await metaNameForId(tenant, adminId, oldId).catch(() => null)
-    if (oldName && oldName !== current.name && AGENDA_TEMPLATE.test(oldName)) {
-      const old = { name: oldName, id: oldId }
-      if (existing.status === 'APPROVED' && !current.approved) {
-        // An older kept version is superseded by this one.
-        if (previous.name && previous.name !== oldName) await deleteMetaTemplate(tenant, adminId, previous)
-        previous = old
-      } else if (!(await deleteMetaTemplate(tenant, adminId, old))) {
-        previous = old
-      }
-    }
+function versionDeps(tenant: AgendaTenant, adminId: string): VersionDeps {
+  return {
+    statusOf: (name) => metaStatusOf(tenant, adminId, name),
+    nameForId: (id) => metaNameForId(tenant, adminId, id),
+    remove: (ref) => deleteMetaTemplate(tenant, adminId, ref),
   }
-  if (previous.name === current.name) previous = { name: null, id: null }
-  if (current.approved && previous.name && (await deleteMetaTemplate(tenant, adminId, previous))) {
-    previous = { name: null, id: null }
-  }
-  return previous
 }
 
 function variablesIn(body: string) {
@@ -521,7 +502,7 @@ Deno.serve(async (req) => {
         const now = new Date().toISOString()
         const providerId = typeof provider.template_id === 'string' && provider.template_id ? provider.template_id : null
         // The previous version leaves Meta now, or once this one is approved.
-        const previous = await rotateTemplateVersions(tenant, admin.adminId, versions, {
+        const previous = await rotateTemplateVersions(versionDeps(tenant, admin.adminId), versions, {
           name: definition.name,
           id: providerId,
           approved: mapped.status === 'APPROVED',
@@ -619,7 +600,7 @@ Deno.serve(async (req) => {
       }
       if (action === 'DELETE_META_TEMPLATE') {
         const name = String(record.name ?? '')
-        if (!AGENDA_TEMPLATE.test(name)) throw new Error('WHATSAPP_TEMPLATE_NOT_AGENDA_OWNED')
+        if (!isAgendaTemplate(name)) throw new Error('WHATSAPP_TEMPLATE_NOT_AGENDA_OWNED')
         const used = usage.get(name)
         if (used?.role === 'CURRENT') throw new Error('WHATSAPP_TEMPLATE_IN_USE')
         const kept = records(subs).find((row) => row.previous_template_name === name)
@@ -642,7 +623,7 @@ Deno.serve(async (req) => {
           language: String(item.language ?? ''),
           rejected_reason: typeof item.rejected_reason === 'string' ? item.rejected_reason : null,
           // Created by Gestão (agenda_*) can be deleted here; others (Kommo) are read-only.
-          managed: AGENDA_TEMPLATE.test(String(item.name)),
+          managed: isAgendaTemplate(String(item.name)),
           usage: usage.get(String(item.name)) ?? null,
         })),
       })
