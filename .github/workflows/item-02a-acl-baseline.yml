@@ -174,7 +174,8 @@ jobs:
             supabase/migrations/20261021100000_rewards_referral.sql \
             supabase/migrations/20261021110000_whatsapp_scheduled_dispatch.sql \
             supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql \
-            supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql
+            supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql \
+            supabase/migrations/20261021140000_fix_whatsapp_dispatch_admin.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -280,7 +281,8 @@ jobs:
             supabase/migrations/20261021100000_rewards_referral.sql \
             supabase/migrations/20261021110000_whatsapp_scheduled_dispatch.sql \
             supabase/migrations/20261021120000_whatsapp_schedule_skip_past.sql \
-            supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql
+            supabase/migrations/20261021134500_marketing_campaign_edit_delete.sql \
+            supabase/migrations/20261021140000_fix_whatsapp_dispatch_admin.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
