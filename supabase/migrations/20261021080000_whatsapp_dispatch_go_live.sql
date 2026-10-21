@@ -1,5 +1,7 @@
 -- Libera o envio de WhatsApp para clientes (decisão do usuário em 2026-10-21).
---   * remove a trava notification_template_configs_whatsapp_locked;
+--   * remove a trava notification_template_configs_whatsapp_locked e a regra antiga
+--     notification_template_configs_whatsapp_draft_check (mesma condição, da época
+--     em que WhatsApp só podia ser rascunho);
 --   * define quem responde pelos envios automáticos no Dracma quando ainda não há
 --     ninguém: o único OWNER ativo do tenant da integração (nunca adivinha se houver
 --     mais de um);
@@ -9,6 +11,8 @@
 -- A outra trava (WHATSAPP_CUSTOMER_DISPATCH_ENABLED no ambiente) continua valendo.
 alter table public.notification_template_configs
   drop constraint if exists notification_template_configs_whatsapp_locked;
+alter table public.notification_template_configs
+  drop constraint if exists notification_template_configs_whatsapp_draft_check;
 
 update public.whatsapp_tenant_integrations i
 set dispatch_admin_id = owners.user_id
