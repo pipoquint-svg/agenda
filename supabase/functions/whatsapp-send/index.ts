@@ -26,7 +26,7 @@ import { maskPhone, testRecipient } from '../admin-notifications/test-send.ts'
 const SCOPE = 'BLACKSHEEP'
 const IMMEDIATE_EVENTS = ['APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED']
 // Só por agendamento (prazo antes/depois do início ou do término).
-const SCHEDULED_EVENTS = [...IMMEDIATE_EVENTS, 'RENTAL_BALANCE_DUE']
+const SCHEDULED_EVENTS = [...IMMEDIATE_EVENTS, 'APPOINTMENT_REMINDER', 'RENTAL_BALANCE_DUE']
 
 function requireInternal(req: Request) {
   const expected = Deno.env.get('INTEGRATION_INTERNAL_SECRET')

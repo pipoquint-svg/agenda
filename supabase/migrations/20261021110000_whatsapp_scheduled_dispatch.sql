@@ -1,7 +1,7 @@
 -- Envio agendado por WhatsApp (confirmado pelo usuário em 2026-10-21: cobrança de saldo
 -- com link de pagamento 25 minutos antes do término da reserva, para clientes reais).
---   * a cobrança de saldo (RENTAL_BALANCE_DUE) entra nos eventos que podem ter modelo de
---     WhatsApp ativo;
+--   * o lembrete de reserva (APPOINTMENT_REMINDER, 48h antes do início) e a cobrança de
+--     saldo (RENTAL_BALANCE_DUE) entram nos eventos que podem ter modelo de WhatsApp ativo;
 --   * enqueue_scheduled_notification_templates também agenda os modelos de WhatsApp da
 --     BlackSheep com prazo. O trabalho leva channel=WHATSAPP e template_id; o
 --     integration-worker manda para o whatsapp-send, que só envia se o modelo estiver
@@ -17,7 +17,7 @@ alter table public.notification_template_configs
   check (
     channel <> 'WHATSAPP'
     or is_active = false
-    or event_key in ('APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED', 'RENTAL_BALANCE_DUE')
+    or event_key in ('APPOINTMENT_APPROVED', 'APPOINTMENT_RESCHEDULED', 'APPOINTMENT_CANCELLED', 'APPOINTMENT_REMINDER', 'RENTAL_BALANCE_DUE')
   );
 
 create or replace function public.enqueue_scheduled_notification_templates(p_appointment_id uuid)
