@@ -18,6 +18,7 @@ import {
   type TemplateVersions,
   type VersionDeps,
 } from './template-versions.ts'
+import { maskPhone, testParameters, testRecipient } from './test-send.ts'
 import {
   type SubmissionRow,
   submissionStatus,
@@ -627,6 +628,36 @@ Deno.serve(async (req) => {
           usage: usage.get(String(item.name)) ?? null,
         })),
       })
+    }
+
+    if (req.method === 'POST' && action === 'TEST_WHATSAPP') {
+      // Controlled test: one approved template, unchanged since approval, to one number,
+      // with the samples Meta approved. Independent of activation (bookings stay locked).
+      const templateId = uuid(record.template_id) as string
+      const to = testRecipient(record.phone)
+      const { data: template, error: templateError } = await client
+        .from('notification_template_configs')
+        .select('id,event_key,channel,body_template,updated_at')
+        .eq('id', templateId).maybeSingle()
+      if (templateError || !template) throw new Error('NOTIFICATION_TEMPLATE_NOT_FOUND')
+      if (template.channel !== 'WHATSAPP') throw new Error('WHATSAPP_TEMPLATE_CHANNEL_INVALID')
+      const { tenant } = await whatsappContext(admin.authUserId)
+      const { data: submission } = await client.from('whatsapp_template_submissions')
+        .select('status,provider_template_name').eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle()
+      if (submission?.status !== 'APPROVED') throw new Error('WHATSAPP_TEST_NOT_APPROVED')
+      const settings = (await loadWhatsAppSettings([templateId])).get(templateId) ?? null
+      const definition = await templateDefinition(template, tenant, settings)
+      if (submission.provider_template_name && submission.provider_template_name !== definition.name) {
+        throw new Error('WHATSAPP_TEST_TEMPLATE_CHANGED')
+      }
+      const sent = await callDracmaGateway({
+        operation: 'SEND_TEST_TEMPLATE',
+        tenant,
+        adminId: admin.adminId,
+        payload: { ...testParameters(definition), to },
+      })
+      console.log('admin-notifications', 'WHATSAPP_TEST_SENT', JSON.stringify({ template: definition.name, to: maskPhone(to), by: admin.adminId }))
+      return json({ sent: sent.sent === true, to: maskPhone(to) })
     }
 
     if (req.method === 'POST' && action === 'TEST') {
