@@ -9,7 +9,7 @@ Product decisions taken by the owner while building the Rewards WhatsApp editor 
 | Coupon after each rental | Every completed and paid rental releases a coupon valid for 30 days to confirm a new booking. This also covers the second rental. | `REWARDS_COUPON_ISSUED`, `REWARDS_COUPON_EXPIRING` | Implemented (S3; realized rule and legacy fallback since 2026-10-21) |
 | Come back after 90 days | A customer with no rental for 90 days receives a 30-day coupon. | `REWARDS_WINBACK`, `REWARDS_COUPON_EXPIRING` | Implemented 2026-10-21: customer-anchored evaluator, candidate list, issuance |
 | After the free visit | Whoever completed the free studio visit receives a 30-day coupon. | The campaign's own `REWARDS_COUPON_ISSUED` text, `REWARDS_COUPON_EXPIRING` | Implemented 2026-10-21: `FREE_VISIT_COMPLETED` |
-| Referral | See below. | `REWARDS_REFERRAL_CODE`, `REWARDS_REFERRAL_REWARD` | New: personal code + attribution + reward trigger |
+| Referral | See below. | `REWARDS_REFERRAL_CODE`, `REWARDS_REFERRAL_REWARD` | Implemented 2026-10-21: `REFERRAL_FIRST_RENTAL`, personal code, checkout rule |
 
 Not now: off-season or idle-slot coupons, upgrade to half day, loyalty by accumulated hours.
 
@@ -40,3 +40,9 @@ Guards for the engine PR:
 - `service_list_marketing_campaign_candidates` lists who would receive the coupon now. It is read-only and no job calls it yet.
 
 Delivery stays frozen: nothing issues coupons or sends messages until it is explicitly released.
+
+## Referral engine (2026-10-21)
+- **The code:** `service_ensure_marketing_referral_code(campaign, customer)` creates `IND-XXXXXX`, a shareable coupon with no customer binding. It is created only for a customer who has rented, once per referral campaign. Its discount is the friend's (`trigger_rules.referred_discount_type/value`); it can be used once per customer, on the campaign services, until the campaign ends.
+- **The checkout rule:** `coupon_referral_violation` runs in both checkout guards: the online hold and the reservation made in Gestão. It refuses the referrer (same customer, phone or CPF/CNPJ; e-mails are already unique) and anyone with another rental (done, booked or being paid) in the Agenda or Amelia. The reservation using the code does not count against the friend.
+- **The reward:** the `REFERRAL_FIRST_RENTAL` campaign's own discount. It is issued through S4 from the friend's realized and paid first rental, to the referrer. One reward per referred rental, capped per month (`trigger_rules.monthly_cap`, 1-50, default 5, São Paulo calendar month).
+- Codes are recorded in `marketing_referral_codes` with an audit event `REFERRAL_CODE_CREATED`.
