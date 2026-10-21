@@ -46,6 +46,7 @@ jobs:
           deno test supabase/functions/admin-marketing-campaigns/trigger_test.ts
           deno test supabase/functions/whatsapp-send/rewards_test.ts
           deno test supabase/functions/admin-notifications/winback_test.ts
+          deno test supabase/functions/admin-notifications/referral_test.ts
 
       - name: Type-check every Edge Function
         run: |

@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(18);
+select plan(24);
 
 -- Fixtures -------------------------------------------------------------------
 insert into auth.users(id, email, created_at, updated_at)
@@ -37,7 +37,7 @@ insert into public.appointments(
   ('18200000-0000-4000-8000-0000000000c2', 'R182-G-FIRST', '18200000-0000-4000-8000-000000000010', '18200000-0000-4000-8000-000000000020', '18200000-0000-4000-8000-0000000000c1',
    'CONFIRMED', 'PAID', now() - interval '3 days', now() - interval '3 days' + interval '1 hour', 60, 1, 'R182 rental', 85, now() - interval '8 days');
 
--- Referral campaign: the friend gets 15%, the referrer earns 1 free hour, no monthly limit.
+-- Referral campaign: the friend gets 15%, the referrer earns 2 free hours, no monthly limit.
 create temporary table r182(campaign_id uuid, version_id uuid) on commit drop;
 do $$
 declare v_created jsonb;
@@ -50,7 +50,7 @@ begin
       'applies_to_extras', false, 'applies_to_hour_packages', false, 'stacking_policy', 'EXCLUSIVE', 'recurring_after_discounted_rental', true,
       'eligibility_rules', jsonb_build_object('service_ids', jsonb_build_array('18200000-0000-4000-8000-000000000010')),
       'trigger_rules', jsonb_build_object('referred_discount_type', 'PERCENT', 'referred_discount_value', 15, 'monthly_cap', null,
-        'referrer_reward', 'HOURS', 'referrer_reward_minutes', 60, 'referrer_reward_validity_days', 180)
+        'referrer_reward', 'HOURS', 'referrer_reward_minutes', 120, 'referrer_reward_validity_days', 180)
     ),
     '18200000-0000-4000-8000-000000000002', gen_random_uuid()
   );
@@ -77,11 +77,11 @@ select ok(
 
 select set_config('agenda.r182.f', public.service_issue_marketing_referral_hours(pg_temp.campaign(), '18200000-0000-4000-8000-0000000000b2', 'r182-reward-f')::text, true);
 select is((current_setting('agenda.r182.f')::jsonb->>'customer_id')::uuid, '18200000-0000-4000-8000-0000000000a1'::uuid, 'the referrer earns the hours');
-select is((current_setting('agenda.r182.f')::jsonb->>'minutes')::integer, 60, 'one hour per referral');
+select is((current_setting('agenda.r182.f')::jsonb->>'minutes')::integer, 120, 'two hours per referral');
 select is(
   (select row(origin, purchased_value::text, total_minutes, special_surcharge_percent::text, standard_start_local_time::text, standard_end_local_time::text, status)::text
    from public.hour_packages where id = (current_setting('agenda.r182.f')::jsonb->>'hour_package_id')::uuid),
-  row('REWARDS', '0.00', 60, '0.00', '00:00:00', '23:59:59', 'ACTIVE')::text,
+  row('REWARDS', '0.00', 120, '0.00', '00:00:00', '23:59:59', 'ACTIVE')::text,
   'a free hour package: zero value, any time of day, no surcharge'
 );
 select ok(
@@ -91,15 +91,15 @@ select ok(
 );
 select is(
   (select available_minutes from public.hour_package_balances where hour_package_id = (current_setting('agenda.r182.f')::jsonb->>'hour_package_id')::uuid),
-  60::bigint, 'the hour is available to use'
+  120::bigint, 'the hours are available to use'
 );
 select is(
   (select array_agg(service_id) from public.hour_package_services where hour_package_id = (current_setting('agenda.r182.f')::jsonb->>'hour_package_id')::uuid),
   array['18200000-0000-4000-8000-000000000010'::uuid], 'it pays the campaign services'
 );
 select ok(
-  (select coupon_id is null and hour_package_id is not null from public.marketing_campaign_issuances where idempotency_key = 'r182-reward-f'),
-  'the issuance records the hour package, not a coupon'
+  (select coupon_id is null and hour_package_id is not null and reward_minutes = 120 from public.marketing_campaign_issuances where idempotency_key = 'r182-reward-f'),
+  'the issuance records the minutes added to the hour balance, not a coupon'
 );
 select is(
   (public.service_issue_marketing_referral_hours(pg_temp.campaign(), '18200000-0000-4000-8000-0000000000b2', 'r182-reward-f')->>'hour_package_id'),
@@ -115,7 +115,16 @@ select lives_ok(
 );
 select is(
   (select sum(available_minutes) from public.hour_package_balances where customer_id = '18200000-0000-4000-8000-0000000000a1'),
-  120::numeric, 'two referrals, two free hours'
+  240::numeric, 'the hours add up: two referrals, four free hours'
+);
+select is(
+  (select count(*)::integer from public.hour_packages where customer_id = '18200000-0000-4000-8000-0000000000a1' and origin = 'REWARDS'),
+  1, 'in one balance, so a single booking can use all four hours'
+);
+select is(
+  (select row(m.minutes_delta, m.reason)::text from public.hour_package_movements m
+   where m.hour_package_id = (current_setting('agenda.r182.f')::jsonb->>'hour_package_id')::uuid and m.movement_type = 'ADMIN_ADJUSTMENT'),
+  row(120, 'REWARDS_REFERRAL')::text, 'the second reward is a recorded top-up'
 );
 select throws_ok(
   $$insert into public.hour_packages(customer_id, name, total_minutes, purchased_value, valid_from, valid_until, standard_start_local_time, standard_end_local_time)
@@ -123,7 +132,7 @@ select throws_ok(
   '23514', null, 'a purchased package still needs a value'
 );
 
--- Using the free hour at checkout: a 1-hour booking next Saturday night, outside business hours.
+-- Using the free hours at checkout: a 1-hour booking next Saturday night uses part of the balance.
 insert into public.checkout_holds(id, public_token_hash, service_id, service_employee_id, selection_hash, people_count, requested_start_at, requested_end_at, expires_at, primary_customer_id, duration_minutes)
 values ('18200000-0000-4000-8000-000000000030', repeat('c', 64), '18200000-0000-4000-8000-000000000010', '18200000-0000-4000-8000-000000000020', repeat('d', 64), 1,
         (date_trunc('week', now() at time zone 'America/Sao_Paulo') + interval '12 days 21 hours') at time zone 'America/Sao_Paulo',
@@ -165,6 +174,31 @@ select is(
   (select payload_json->>'event_key' from public.integration_jobs
    where idempotency_key = 'rewards-paid:' || current_setting('agenda.r182.msg') || ':18200000-0000-4000-8000-0000000000d2'),
   'REWARDS_REFERRAL_REWARD', 'paying a referred rental after its end queues the reward message'
+);
+
+-- The referral send audience: whoever already rented; a future booking alone does not count.
+insert into public.customers(id, name, email, phone) values ('18200000-0000-4000-8000-0000000000e1', 'R182 Future only', 'r182-e@example.test', '+5548999820105');
+insert into public.appointments(
+  id, public_code, service_id, service_employee_id, primary_customer_id, status, financial_status,
+  start_at, end_at, duration_minutes, people_count, service_name_snapshot, commercial_value, confirmed_at
+) values ('18200000-0000-4000-8000-0000000000e2', 'R182-E-FUTURE', '18200000-0000-4000-8000-000000000010', '18200000-0000-4000-8000-000000000020', '18200000-0000-4000-8000-0000000000e1',
+   'CONFIRMED', 'PAID', now() + interval '3 days', now() + interval '3 days 1 hour', 60, 1, 'R182 rental', 100, now());
+select ok(
+  has_function_privilege('service_role', 'public.service_list_marketing_referral_candidates(uuid,integer)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.service_list_marketing_referral_candidates(uuid,integer)', 'EXECUTE'),
+  'the referral audience is read by the trusted backend only'
+);
+select ok(
+  public.service_list_marketing_referral_candidates(pg_temp.campaign(), 5000) @> jsonb_build_array(jsonb_build_object('customer_id', '18200000-0000-4000-8000-0000000000a1')),
+  'a customer who already rented is in the audience'
+);
+select ok(
+  not (public.service_list_marketing_referral_candidates(pg_temp.campaign(), 5000) @> jsonb_build_array(jsonb_build_object('customer_id', '18200000-0000-4000-8000-0000000000e1'))),
+  'a customer with only a future booking is not'
+);
+select throws_ok(
+  $$select public.service_list_marketing_referral_candidates(gen_random_uuid(), 10)$$,
+  'P0001', 'MARKETING_CAMPAIGN_NOT_FOUND', 'only for an existing referral campaign'
 );
 
 select * from finish();

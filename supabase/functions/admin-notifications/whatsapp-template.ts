@@ -34,6 +34,7 @@ export const WHATSAPP_BUTTON_VARIABLES = [
   'balance.payment_url',
   'payment.resume_url',
   'booking.url',
+  'referral.rules_url',
 ]
 const MAX_BUTTON_TEXT_LENGTH = 25
 

@@ -41,7 +41,7 @@ export function triggerOffer(body: Record<string, unknown>) {
     if (!["COUPON", "HOURS"].includes(reward)) throw new Error("MARKETING_CAMPAIGN_REFERRER_REWARD_INVALID");
     const rules: Record<string, unknown> = { referred_discount_type: type, referred_discount_value: value, monthly_cap: cap, referrer_reward: reward };
     if (reward === "HOURS") {
-      const minutes = blank(body.referrer_reward_minutes) ? 60 : Number(body.referrer_reward_minutes);
+      const minutes = blank(body.referrer_reward_minutes) ? 120 : Number(body.referrer_reward_minutes);
       if (!Number.isInteger(minutes) || minutes < 15 || minutes > 600 || minutes % 15 !== 0) {
         throw new Error("MARKETING_CAMPAIGN_REFERRER_HOURS_INVALID");
       }

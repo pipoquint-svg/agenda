@@ -29,3 +29,9 @@ Deno.test('the Rewards booking button opens the public booking page', () => {
   assertEquals(button.example, 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores')
   assertEquals(customerLinkSuffix('booking.url', 'https://www.blacksheepestudiocriativo.com.br/agenda-e-valores'), 'agenda-e-valores')
 })
+
+Deno.test('the referral code button opens the program rules page', () => {
+  const button = customerLinkButton('referral.rules_url')
+  assertEquals(button.url, 'https://www.blacksheepestudiocriativo.com.br/{{1}}')
+  assertEquals(customerLinkSuffix('referral.rules_url', 'https://www.blacksheepestudiocriativo.com.br/indique'), 'indique')
+})

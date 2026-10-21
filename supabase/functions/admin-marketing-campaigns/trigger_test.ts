@@ -43,10 +43,10 @@ Deno.test("the referral trigger carries the friend's discount and an optional mo
   );
 });
 
-Deno.test("the referrer can earn free studio hours", () => {
+Deno.test("the referrer earns free studio hours: 2 hours, 180 days by default", () => {
   assertEquals(
     triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, referrer_reward: "hours" }).trigger_rules,
-    { referred_discount_type: "PERCENT", referred_discount_value: 15, monthly_cap: null, referrer_reward: "HOURS", referrer_reward_minutes: 60, referrer_reward_validity_days: 180 },
+    { referred_discount_type: "PERCENT", referred_discount_value: 15, monthly_cap: null, referrer_reward: "HOURS", referrer_reward_minutes: 120, referrer_reward_validity_days: 180 },
   );
   assertEquals(
     triggerOffer({ trigger_kind: "REFERRAL_FIRST_RENTAL", referred_discount_type: "PERCENT", referred_discount_value: 15, referrer_reward: "HOURS", referrer_reward_minutes: 120, referrer_reward_validity_days: 90 }).trigger_rules.referrer_reward_minutes,

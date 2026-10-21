@@ -1,11 +1,13 @@
 -- Referral program pays in studio hours (decisions of 2026-10-21):
---   * when a referred friend's first rental is realized and paid, the referrer earns a free
---     hour package ("brinde Rewards"): 60 minutes by default, valid 180 days, any time of day,
---     no special-period surcharge, zero purchase value (no revenue is recognised);
+--   * when a referred friend's first rental is realized and paid, the referrer earns free
+--     studio time: 120 minutes by default, any time of day, no special-period surcharge, zero
+--     purchase value (no revenue is recognised);
+--   * the hours add up: each referrer has one Rewards hour balance per campaign, and every
+--     new reward adds its minutes and renews the balance for 180 days, so two referrals pay
+--     a 4-hour booking (checkout takes one package per booking);
 --   * no monthly limit when the campaign's monthly_cap is null;
---   * the issuance ledger records either a coupon or an hour package.
--- The package is a regular hour package: it pays a whole reservation at checkout, like a
--- purchased one. Nothing here sends a message.
+--   * the issuance ledger records either a coupon or the minutes added to an hour balance.
+-- Nothing here sends a message.
 
 alter table public.hour_packages
   add column if not exists origin text not null default 'PURCHASE',
@@ -38,11 +40,17 @@ alter table public.appointment_package_usage
 
 alter table public.marketing_campaign_issuances
   alter column coupon_id drop not null,
-  add column if not exists hour_package_id uuid null unique references public.hour_packages(id) on delete restrict;
+  add column if not exists hour_package_id uuid null references public.hour_packages(id) on delete restrict,
+  add column if not exists reward_minutes integer null;
+create index if not exists marketing_campaign_issuances_hour_package_idx
+  on public.marketing_campaign_issuances (hour_package_id) where hour_package_id is not null;
 alter table public.marketing_campaign_issuances
   drop constraint if exists marketing_campaign_issuance_one_reward;
 alter table public.marketing_campaign_issuances
-  add constraint marketing_campaign_issuance_one_reward check ((coupon_id is null) <> (hour_package_id is null));
+  add constraint marketing_campaign_issuance_one_reward check (
+    (coupon_id is not null and hour_package_id is null and reward_minutes is null)
+    or (coupon_id is null and hour_package_id is not null and reward_minutes > 0)
+  );
 
 create or replace function public.service_evaluate_marketing_campaign_eligibility(
   p_campaign_id uuid,
@@ -281,7 +289,7 @@ begin
     end if;
     select * into v_package from public.hour_packages where id = v_existing.hour_package_id;
     return jsonb_build_object('hour_package_id', v_package.id, 'customer_id', v_package.customer_id,
-      'minutes', v_package.total_minutes, 'valid_until', v_package.valid_until, 'replayed', true);
+      'minutes', v_existing.reward_minutes, 'valid_until', v_package.valid_until, 'replayed', true);
   end if;
 
   perform 1 from public.marketing_campaigns where id = p_campaign_id for update;
@@ -300,29 +308,54 @@ begin
     or coalesce(v_version.trigger_rules->>'referrer_reward', 'COUPON') <> 'HOURS' then
     raise exception using errcode = 'P0001', message = 'MARKETING_CAMPAIGN_REWARD_NOT_HOURS';
   end if;
-  v_minutes := coalesce(nullif(v_version.trigger_rules->>'referrer_reward_minutes', '')::integer, 60);
+  v_minutes := coalesce(nullif(v_version.trigger_rules->>'referrer_reward_minutes', '')::integer, 120);
   v_days := coalesce(nullif(v_version.trigger_rules->>'referrer_reward_validity_days', '')::integer, 180);
   if v_minutes not between 15 and 600 or v_days not between 1 and 3650 then
     raise exception using errcode = '22023', message = 'MARKETING_CAMPAIGN_TRIGGER_RULES_INVALID';
   end if;
 
-  insert into public.hour_packages(
-    customer_id, name, total_minutes, purchased_value, valid_from, valid_until, status,
-    special_surcharge_percent, standard_start_local_time, standard_end_local_time, notes,
-    created_by_admin_id, origin, marketing_campaign_id, source_appointment_id
-  ) values (
-    (v_eligibility->>'customer_id')::uuid, 'Rewards · Indicação', v_minutes, 0, now(), now() + make_interval(days => v_days), 'ACTIVE',
-    0, time '00:00', time '23:59:59', 'Brinde do programa de indicação ' || v_campaign.internal_name,
-    v_version.published_by_admin_id, 'REWARDS', p_campaign_id, p_source_appointment_id
-  ) returning * into v_package;
+  -- One Rewards balance per referrer and campaign: a new reward tops it up and renews it.
+  perform pg_advisory_xact_lock(hashtextextended('rewards-hours:' || p_campaign_id::text || ':' || (v_eligibility->>'customer_id'), 0));
+  select * into v_package from public.hour_packages
+  where origin = 'REWARDS' and marketing_campaign_id = p_campaign_id
+    and customer_id = (v_eligibility->>'customer_id')::uuid
+    and status in ('ACTIVE', 'EXHAUSTED') and valid_until > now()
+  order by created_at desc
+  limit 1
+  for update;
 
-  insert into public.hour_package_services(hour_package_id, service_id)
-  select v_package.id, s.service_id from public.marketing_campaign_version_services s where s.campaign_version_id = v_version.id;
+  if found then
+    update public.hour_packages
+    set total_minutes = total_minutes + v_minutes,
+        valid_until = greatest(valid_until, now() + make_interval(days => v_days)),
+        status = 'ACTIVE',
+        updated_at = now()
+    where id = v_package.id
+    returning * into v_package;
+    insert into public.hour_package_movements(
+      hour_package_id, appointment_id, movement_type, minutes_delta, seconds_delta, reason, created_by_admin_id
+    ) values (
+      v_package.id, null, 'ADMIN_ADJUSTMENT', v_minutes, v_minutes::bigint * 60, 'REWARDS_REFERRAL', v_version.published_by_admin_id
+    );
+  else
+    insert into public.hour_packages(
+      customer_id, name, total_minutes, purchased_value, valid_from, valid_until, status,
+      special_surcharge_percent, standard_start_local_time, standard_end_local_time, notes,
+      created_by_admin_id, origin, marketing_campaign_id, source_appointment_id
+    ) values (
+      (v_eligibility->>'customer_id')::uuid, 'Rewards · Indicação', v_minutes, 0, now(), now() + make_interval(days => v_days), 'ACTIVE',
+      0, time '00:00', time '23:59:59', 'Brinde do programa de indicação ' || v_campaign.internal_name,
+      v_version.published_by_admin_id, 'REWARDS', p_campaign_id, p_source_appointment_id
+    ) returning * into v_package;
+
+    insert into public.hour_package_services(hour_package_id, service_id)
+    select v_package.id, s.service_id from public.marketing_campaign_version_services s where s.campaign_version_id = v_version.id;
+  end if;
 
   insert into public.marketing_campaign_issuances(
-    tenant_id, campaign_id, campaign_version_id, coupon_id, hour_package_id, customer_id, source_appointment_id, idempotency_key
+    tenant_id, campaign_id, campaign_version_id, coupon_id, hour_package_id, reward_minutes, customer_id, source_appointment_id, idempotency_key
   ) values (
-    v_campaign.tenant_id, p_campaign_id, v_version.id, null, v_package.id, v_package.customer_id, p_source_appointment_id, btrim(p_idempotency_key)
+    v_campaign.tenant_id, p_campaign_id, v_version.id, null, v_package.id, v_minutes, v_package.customer_id, p_source_appointment_id, btrim(p_idempotency_key)
   );
   insert into public.marketing_campaign_audit_events(
     tenant_id, campaign_id, actor_admin_id, event_kind, after_snapshot
@@ -339,7 +372,7 @@ $function$;
 revoke all on function public.service_issue_marketing_referral_hours(uuid,uuid,text) from public, anon, authenticated;
 grant execute on function public.service_issue_marketing_referral_hours(uuid,uuid,text) to service_role;
 comment on function public.service_issue_marketing_referral_hours(uuid,uuid,text) is
-  'Service-only: from a realized and paid referred first rental, gives the referrer a free REWARDS hour package once (S4 rules, monthly cap optional).';
+  'Service-only: from a realized and paid referred first rental, adds the reward minutes to the referrer''s Rewards hour balance (created on the first reward, renewed on each), once per referred rental (S4 rules, monthly cap optional).';
 
 -- The referral reward message joins the scheduled path of the coupon message.
 alter table public.notification_template_configs
@@ -393,3 +426,49 @@ begin
   return new;
 end;
 $function$;
+
+-- Referral codes go out as sporadic campaign sends: the audience is every customer who has
+-- already rented (Agenda or linked Amelia history), newest rental first.
+create or replace function public.service_list_marketing_referral_candidates(
+  p_campaign_id uuid,
+  p_limit integer default 2000
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $function$
+declare
+  v_campaign public.marketing_campaigns%rowtype;
+  v_version public.marketing_campaign_versions%rowtype;
+begin
+  select * into v_campaign from public.marketing_campaigns where id = p_campaign_id;
+  if not found then raise exception using errcode = 'P0001', message = 'MARKETING_CAMPAIGN_NOT_FOUND'; end if;
+  select * into v_version from public.marketing_campaign_versions
+  where id = v_campaign.active_version_id and campaign_id = v_campaign.id;
+  if not found or v_version.trigger_kind <> 'REFERRAL_FIRST_RENTAL' then
+    raise exception using errcode = 'P0001', message = 'MARKETING_REFERRAL_CAMPAIGN_INVALID';
+  end if;
+
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('customer_id', x.id, 'last_rental_at', x.last_rental_at) order by x.last_rental_at desc, x.id)
+    from (
+      select c.id, public.marketing_rewards_last_rental_at(c.id) as last_rental_at
+      from public.customers c
+      where c.anonymized_at is null
+        and (
+          exists (select 1 from public.appointments a where a.primary_customer_id = c.id and not a.is_test)
+          or exists (select 1 from public.legacy_amelia_bookings l where l.matched_customer_id = c.id)
+        )
+    ) x
+    where x.last_rental_at is not null
+    limit greatest(1, least(coalesce(p_limit, 2000), 5000))
+  ), '[]'::jsonb);
+end;
+$function$;
+
+revoke all on function public.service_list_marketing_referral_candidates(uuid,integer) from public, anon, authenticated;
+grant execute on function public.service_list_marketing_referral_candidates(uuid,integer) to service_role;
+comment on function public.service_list_marketing_referral_candidates(uuid,integer) is
+  'Service-only: customers who already rented, the audience of a referral campaign send (newest rental first).';
