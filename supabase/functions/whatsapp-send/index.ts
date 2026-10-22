@@ -11,6 +11,7 @@
 import { adminClient, errorResponse, jsonResponse } from '../_shared/supabase.ts'
 import { timingSafeEqual } from '../_shared/timing-safe-equal.ts'
 import { callDracmaGateway } from '../_shared/dracma-gateway.ts'
+import { currentSubmission, type Submission } from './approval.ts'
 import { durationLabel } from '../_shared/duration-label.ts'
 import { customerLinkSuffix, type CustomerLinkVariable } from '../_shared/customer-link.ts'
 import { buildBalancePaymentUrl } from '../_shared/balance-payment-link.ts'
@@ -48,6 +49,21 @@ function requireInternal(req: Request) {
 }
 
 const skip = (reason: string, extra: Record<string, unknown> = {}) => jsonResponse({ skipped: true, reason, ...extra })
+
+/** The stored submission, refreshed with Meta when its new text is still under review. */
+// deno-lint-ignore no-explicit-any
+function refreshedSubmission(client: any, tenant: { id: string; name: string }, adminId: string, templateId: string, submission: Submission | null) {
+  return currentSubmission(
+    submission,
+    (request) => callDracmaGateway({ ...request, tenant, adminId }),
+    async (approvedAt) => {
+      const { error } = await client.from('whatsapp_template_submissions')
+        .update({ status: 'APPROVED', approved_at: approvedAt, provider_error_code: null, provider_error_message: null })
+        .eq('tenant_id', tenant.id).eq('notification_template_id', templateId).eq('status', 'PENDING_REVIEW')
+      if (error) throw new Error('WHATSAPP_SUBMISSION_UPDATE_FAILED')
+    },
+  )
+}
 
 function numeric(value: unknown) {
   const parsed = Number(value)
@@ -143,13 +159,14 @@ async function sendRewardsMessage(eventKey: string, appointmentId: string, sched
   const tenantRow = (integration as { tenants?: { id: string; name: string } } | null)?.tenants
   if (!integration || !tenantRow) return skip('WHATSAPP_NOT_CONNECTED')
   const tenant = { id: String(tenantRow.id), name: String(tenantRow.name) }
-  const [{ data: submission }, { data: settingsRow }] = await Promise.all([
+  const [{ data: storedSubmission }, { data: settingsRow }] = await Promise.all([
     client.from('whatsapp_template_submissions').select('status,provider_template_name,submitted_at')
       .eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle(),
     client.from('notification_whatsapp_settings')
       .select('category,header_text,footer_text,ttl_seconds,variable_examples,button_text,button_variable,updated_at')
       .eq('template_id', templateId).maybeSingle(),
   ])
+  const submission = await refreshedSubmission(client, tenant, String(integration.dispatch_admin_id), templateId, storedSubmission)
   if (submission?.status !== 'APPROVED' || !submission.provider_template_name) return skip('WHATSAPP_TEMPLATE_NOT_APPROVED')
   const edited = latest(String(template.updated_at ?? ''), settingsRow?.updated_at ? String(settingsRow.updated_at) : null)
   if (edited && submission.submitted_at && edited > String(submission.submitted_at)) return skip('WHATSAPP_TEMPLATE_CHANGED_SINCE_APPROVAL')
@@ -334,7 +351,7 @@ async function send(body: Record<string, unknown>) {
   if (!integration || !tenantRow) return skip('WHATSAPP_NOT_CONNECTED')
   const tenant = { id: String(tenantRow.id), name: String(tenantRow.name) }
 
-  const [{ data: submission }, { data: settingsRow }, { data: fullTemplate }] = await Promise.all([
+  const [{ data: storedSubmission }, { data: settingsRow }, { data: fullTemplate }] = await Promise.all([
     client.from('whatsapp_template_submissions').select('status,provider_template_name,submitted_at')
       .eq('tenant_id', tenant.id).eq('notification_template_id', templateId).maybeSingle(),
     client.from('notification_whatsapp_settings')
@@ -342,6 +359,7 @@ async function send(body: Record<string, unknown>) {
       .eq('template_id', templateId).maybeSingle(),
     client.from('notification_template_configs').select('body_template,variable_schema,updated_at').eq('id', templateId).maybeSingle(),
   ])
+  const submission = await refreshedSubmission(client, tenant, String(integration.dispatch_admin_id), templateId, storedSubmission)
   if (submission?.status !== 'APPROVED' || !submission.provider_template_name) return skip('WHATSAPP_TEMPLATE_NOT_APPROVED')
   // Só o texto que a Meta aprovou: editado depois do envio, espera nova aprovação.
   const edited = latest(String(fullTemplate?.updated_at ?? ''), settingsRow?.updated_at ? String(settingsRow.updated_at) : null)
