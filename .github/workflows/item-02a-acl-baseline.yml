@@ -46,6 +46,7 @@ on:
       - 'supabase/migrations/20261022000000_rewards_referral_hours.sql'
       - 'supabase/migrations/20261022100000_manual_unpaid_confirmation_notifies.sql'
       - 'supabase/migrations/20261022120000_whatsapp_edit_keeps_active.sql'
+      - 'supabase/migrations/20261023100000_extra_balance_whatsapp.sql'
       - 'supabase/tests/database/177_rewards_message_templates.test.sql'
       - 'tests/acl-parity/item02a_acl_parity.sql'
       - 'tests/acl-parity/item02c_acl_overlay.sql'
@@ -186,7 +187,8 @@ jobs:
             supabase/migrations/20261021233000_rewards_test_coupon.sql \
             supabase/migrations/20261022000000_rewards_referral_hours.sql \
             supabase/migrations/20261022100000_manual_unpaid_confirmation_notifies.sql \
-            supabase/migrations/20261022120000_whatsapp_edit_keeps_active.sql
+            supabase/migrations/20261022120000_whatsapp_edit_keeps_active.sql \
+            supabase/migrations/20261023100000_extra_balance_whatsapp.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "$migration" ]]; then
@@ -299,7 +301,8 @@ jobs:
             supabase/migrations/20261021233000_rewards_test_coupon.sql \
             supabase/migrations/20261022000000_rewards_referral_hours.sql \
             supabase/migrations/20261022100000_manual_unpaid_confirmation_notifies.sql \
-            supabase/migrations/20261022120000_whatsapp_edit_keeps_active.sql
+            supabase/migrations/20261022120000_whatsapp_edit_keeps_active.sql \
+            supabase/migrations/20261023100000_extra_balance_whatsapp.sql
           do
             filename="$(basename "$migration")"
             if [[ -f "/tmp/$filename" ]]; then
