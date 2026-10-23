@@ -68,3 +68,13 @@ export function couponDaysLeft(value: unknown, now = Date.now()) {
   if (!value || Number.isNaN(date.getTime())) return ''
   return String(Math.max(0, Math.ceil((date.getTime() - now) / 86_400_000)))
 }
+
+/**
+ * Whether a message really shows a customer link: its body uses the variable or its button
+ * opens it. The template's variable list names every variable it may use, not the ones it does.
+ */
+export function messageUsesVariable(body: string, buttonVariable: string | null | undefined, variable: string) {
+  if (buttonVariable === variable) return true
+  const escaped = variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`).test(body)
+}

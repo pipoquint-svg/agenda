@@ -5,6 +5,7 @@ import {
   couponDiscountLabel,
   hoursLabel,
   issuanceKey,
+  messageUsesVariable,
   rewardsDeliveryKey,
   rewardsScheduleMatches,
   rewardsSkipReason,
@@ -64,4 +65,12 @@ Deno.test('free hours read naturally', () => {
   assertEquals(hoursLabel(120), '2 horas')
   assertEquals(hoursLabel(90), '1h30')
   assertEquals(hoursLabel(45), '45 minutos')
+})
+
+Deno.test('a customer link counts only when the message shows it', () => {
+  const body = 'Olá {{customer.name}}! Seu saldo é {{ payment.balance }}.'
+  assertEquals(messageUsesVariable(body, 'balance.payment_url', 'appointment.manage_url'), false)
+  assertEquals(messageUsesVariable(body + ' {{appointment.manage_url}}', null, 'appointment.manage_url'), true)
+  assertEquals(messageUsesVariable(body, 'appointment.manage_url', 'appointment.manage_url'), true)
+  assertEquals(messageUsesVariable(body, null, 'payment.balance'), true)
 })

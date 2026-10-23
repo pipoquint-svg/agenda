@@ -30,6 +30,7 @@ import {
   couponDiscountLabel,
   hoursLabel,
   issuanceKey,
+  messageUsesVariable,
   REWARDS_DISPATCH_EVENTS,
   REWARDS_REFERRAL_EVENT,
   rewardsDeliveryKey,
@@ -390,7 +391,9 @@ async function send(body: Record<string, unknown>) {
     ])
     let manageUrl = ''
     let tokenId: string | null = null
-    const usesManage = catalog.includes('appointment.manage_url') || settings?.button_variable === 'appointment.manage_url'
+    // Only when the message shows it: the link expires when the reservation starts, so a
+    // balance message during the session must not depend on it.
+    const usesManage = messageUsesVariable(String(fullTemplate?.body_template ?? ''), settings?.button_variable, 'appointment.manage_url')
     if (usesManage && appointment.status === 'CONFIRMED') {
       const { data: token, error: tokenError } = await client.rpc('service_issue_appointment_action_token', {
         p_appointment_id: appointmentId,
